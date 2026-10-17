@@ -2232,7 +2232,12 @@ void R_FreeLump(gamelump_t* lump)
     }
 }
 
+#if defined(__PS3__)
+#include "../sys/ps3_step.h"
+#define _R( id ) do { PS3_TRACEF("WORLD_LOAD _R(" #id ") line=%d", __LINE__); ri.UI_LoadResource( "*" #id ); } while (0)
+#else
 #define _R( id ) ri.UI_LoadResource( "*" #id )
+#endif
 
 /*
 =================

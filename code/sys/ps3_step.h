@@ -20,7 +20,10 @@ void PS3_BootTraceFastf(const char *fmt, ...) __attribute__((format(printf, 1, 2
 #define PS3_STEP(msg) PS3_BootTracef("STEP: " msg " (line %d)", __LINE__)
 /* PS3_STEPF("fmt", args...): printf-style and cheap (no fsync): for loops. */
 #define PS3_STEPF(...) PS3_BootTraceFastf("STEP: " __VA_ARGS__)
+/* PS3_TRACEF("fmt", args...): printf-style, synced (survives a crash). Init paths only. */
+#define PS3_TRACEF(...) PS3_BootTracef(__VA_ARGS__)
 #else
+#define PS3_TRACEF(...) ((void)0)
 #define PS3_STEP(msg) ((void)0)
 #define PS3_STEPF(...) ((void)0)
 #endif

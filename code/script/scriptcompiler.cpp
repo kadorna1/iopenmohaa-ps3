@@ -2178,7 +2178,8 @@ bool GetCompiledScript(GameScript *scr, const void *sourceBuffer, size_t sourceL
     const bool archiveLoaded = arc.NoErrors() && scr->successCompile && scr->m_ProgBuffer && scr->m_ProgLength;
     arc.Close();
     if (!archiveLoaded || !arc.NoErrors()) {
-        PS3_BootTraceFastf("SCRIPT_CACHE corrupt path=%s file=%s", cachePath, scr->Filename().c_str());
+        PS3_BootTraceFastf("SCRIPT_CACHE corrupt path=%s file=%s noErrors=%d successCompile=%d progBuffer=%d progLength=%u", cachePath,
+            scr->Filename().c_str(), (int)arc.NoErrors(), (int)scr->successCompile, scr->m_ProgBuffer != NULL, (unsigned int)scr->m_ProgLength);
         scr->Close();
         scr->successCompile = false;
         return false;

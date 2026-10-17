@@ -941,9 +941,13 @@ void CL_InitCGame( void ) {
 		Com_sprintf(cl.mapname, sizeof(cl.mapname), "maps/%s_sml.bsp", mapname);
 	}
 
+	PS3_TRACEF("CGINIT enter map=%s hunkFree=%d", cl.mapname, Hunk_MemoryRemaining());
 	S_BeginRegistration();
+	PS3_TRACEF("CGINIT after S_BeginRegistration");
 	CL_ShutdownCGame();
+	PS3_TRACEF("CGINIT after CL_ShutdownCGame hunkFree=%d", Hunk_MemoryRemaining());
 	CL_InitCGameDLL( &cgi, &cge );
+	PS3_TRACEF("CGINIT after CL_InitCGameDLL cge=%p", (void *)cge);
 	clc.state = CA_LOADING;
 
 	if( !com_sv_running->integer && !cls.vid_restart )
@@ -954,6 +958,7 @@ void CL_InitCGame( void ) {
 		CL_InitClientSavedData();
 	}
 
+	PS3_TRACEF("CGINIT before CG_Init snapValid=%d hunkFree=%d", (int)cl.snap.valid, Hunk_MemoryRemaining());
 	if (cl.snap.valid) {
 		// init for this gamestate
 		// use the lastExecutedServerCommand instead of the serverCommandSequence
@@ -966,8 +971,11 @@ void CL_InitCGame( void ) {
 		cge->CG_Init(&cgi, clc.serverMessageSequence, clc.serverCommandSequence, clc.clientNum);
 	}
 
+	PS3_TRACEF("CGINIT after CG_Init hunkFree=%d", Hunk_MemoryRemaining());
 	ClearNewConfigFlag();
+	PS3_TRACEF("CGINIT before TIKI_FinishLoad");
 	TIKI_FinishLoad();
+	PS3_TRACEF("CGINIT after TIKI_FinishLoad");
 
 	// reset any CVAR_CHEAT cvars registered by cgame
 	if( !clc.demoplaying && !cl_connectedToCheatServer )
@@ -977,7 +985,9 @@ void CL_InitCGame( void ) {
 	// will cause the server to send us the first snapshot
 	clc.state = CA_PRIMED;
 
+	PS3_TRACEF("CGINIT before CL_EndRegistration");
 	CL_EndRegistration();
+	PS3_TRACEF("CGINIT after CL_EndRegistration hunkFree=%d", Hunk_MemoryRemaining());
 
 	t2 = Sys_Milliseconds();
 

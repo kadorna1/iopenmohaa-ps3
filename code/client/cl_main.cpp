@@ -3825,7 +3825,7 @@ void CL_Init( void ) {
 		CL_ApplyOriginalConfigTweaks();
 	}
 
-	Com_Printf( "----- Client Initialization Complete ----- %i ms\n", start - end );
+	Com_Printf( "----- Client Initialization Complete ----- %i ms\n", end - start );
 }
 
 

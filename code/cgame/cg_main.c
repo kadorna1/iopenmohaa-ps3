@@ -27,6 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cg_parsemsg.h"
 #include "cg_archive.h"
 #include "cg_radar.h"
+#include "../sys/ps3_step.h"
 
 #ifdef _WIN32
 #    include <windows.h>
@@ -709,6 +710,7 @@ Called after every level change or subsystem restart
 */
 void CG_Init(clientGameImport_t *imported, int serverMessageNum, int serverCommandSequence, int clientNum)
 {
+    PS3_TRACEF("CG_INIT enter");
     cgi = *imported;
 
     cg_protocol = cgi.Cvar_Get("com_protocol", "", 0)->integer;
@@ -729,16 +731,22 @@ void CG_Init(clientGameImport_t *imported, int serverMessageNum, int serverComma
     cgs.processedSnapshotNum  = serverMessageNum;
     cgs.serverCommandSequence = serverCommandSequence;
 
+    PS3_TRACEF("CG_INIT before CG_RegisterCvars");
     CG_RegisterCvars();
+    PS3_TRACEF("CG_INIT before L_InitEvents");
 
     L_InitEvents();
+    PS3_TRACEF("CG_INIT after L_InitEvents");
 
     // init swapping for endian conversion
     Swap_Init();
 
+    PS3_TRACEF("CG_INIT before CG_InitializeCommandManager");
     CG_InitializeCommandManager();
 
+    PS3_TRACEF("CG_INIT before CG_GameStateReceived");
     CG_GameStateReceived();
+    PS3_TRACEF("CG_INIT after CG_GameStateReceived");
 
     CG_InitConsoleCommands();
 
@@ -766,8 +774,10 @@ void CG_Init(clientGameImport_t *imported, int serverMessageNum, int serverComma
     cgi.UI_HideScoreBoard();
 
     // HUD setup
+    PS3_TRACEF("CG_INIT before CG_RefreshHudDrawElements");
     CG_RefreshHudDrawElements();
     cgi.Cmd_Execute(EXEC_NOW, "ui_hud 1\n");
+    PS3_TRACEF("CG_INIT done");
 }
 
 /*
