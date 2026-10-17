@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 // sv_client.c -- server code for dealing with clients
 
+#include "../sys/ps3_step.h"
 #include "server.h"
 #include "../gamespy/sv_gamespy.h"
 #include "../qcommon/bg_compat.h"
@@ -363,6 +364,7 @@ A "connect" OOB command has been received
 */
 
 void SV_DirectConnect( netadr_t from ) {
+	PS3_TRACEF("NET SV_DirectConnect enter");
 	char		userinfo[MAX_INFO_STRING];
 	int			i;
 	client_t	*cl, *newcl;
@@ -822,6 +824,7 @@ the wrong gamestate.
 ================
 */
 static void SV_SendClientGameState( client_t *client ) {
+	PS3_TRACEF("NET SV_SendClientGameState enter");
 	int			start;
 	entityState_t	*base, nullstate;
 	msg_t		msg;
@@ -904,6 +907,7 @@ SV_ClientEnterWorld
 ==================
 */
 void SV_ClientEnterWorld( client_t *client, usercmd_t *cmd ) {
+	PS3_TRACEF("NET SV_ClientEnterWorld enter");
 	int		clientNum;
 	gentity_t *ent;
 

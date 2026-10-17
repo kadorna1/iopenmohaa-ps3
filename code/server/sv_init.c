@@ -1042,6 +1042,7 @@ void SV_SpawnServer( const char *server, qboolean loadgame, qboolean restart, qb
 	iEnd = Sys_Milliseconds();
 #if defined(__PS3__)
     PS3_BootTracef("MAPTRANS complete map=%s milliseconds=%d", mapname, iEnd - iStart);
+    PS3_RearmFrameTrace(150);
 #endif
 	Com_Printf( "------ Server Initialization Complete ------ %5.2f seconds\n", ( float )( iEnd - iStart ) / 1000.0f );
 

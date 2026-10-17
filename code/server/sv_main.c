@@ -20,6 +20,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 
+#include "../sys/ps3_step.h"
 #include "server.h"
 #include "../gamespy/sv_gamespy.h"
 #include "../gamespy/sv_gqueryreporting.h"
@@ -749,6 +750,7 @@ connectionless packets.
 =================
 */
 void SV_ConnectionlessPacket( netadr_t from, msg_t *msg ) {
+	PS3_TRACEF("NET SV_ConnectionlessPacket enter");
 	char	*s;
 	char	*c;
 

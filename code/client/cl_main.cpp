@@ -847,6 +847,7 @@ memory on the hunk from cgame, ui, and renderer
 =====================
 */
 void CL_MapLoading( qboolean flush, const char *pszMapName ) {
+	PS3_TRACEF("NET CL_MapLoading enter flush=%d map=%s", (int)flush, pszMapName ? pszMapName : "(null)");
 	if ( !com_cl_running->integer ) {
 		return;
 	}
@@ -1815,6 +1816,7 @@ Called when all downloading has been completed
 =================
 */
 void CL_DownloadsComplete( void ) {
+	PS3_TRACEF("NET CL_DownloadsComplete enter state=%d", (int)clc.state);
 
 #ifdef USE_CURL
 	// if we downloaded with cURL
@@ -1990,6 +1992,7 @@ and determine if we need to download them
 =================
 */
 void CL_InitDownloads(void) {
+	PS3_TRACEF("NET CL_InitDownloads enter");
   char missingfiles[1024];
 
   if ( !(cl_allowDownload->integer & DLF_ENABLE) )
@@ -2029,6 +2032,7 @@ Resend a connect message if the last one has timed out
 =================
 */
 void CL_CheckForResend( void ) {
+	PS3_FTRACE("CL_CheckForResend state=%d", (int)clc.state);
 	int		port, i;
 	char	info[MAX_INFO_STRING];
 	char	data[MAX_INFO_STRING];
@@ -2328,6 +2332,7 @@ Responses to broadcasts, etc
 =================
 */
 void CL_ConnectionlessPacket( netadr_t from, msg_t *msg ) {
+	PS3_TRACEF("NET CL_ConnectionlessPacket enter state=%d", (int)clc.state);
 	char	*s;
 	char	*c;
 	const char	*reason;
@@ -2483,6 +2488,7 @@ A packet has arrived from the main event loop
 =================
 */
 void CL_PacketEvent( netadr_t from, msg_t *msg ) {
+	PS3_FTRACE("CL_PacketEvent state=%d", (int)clc.state);
 	int		headerBytes;
 
 	clc.lastPacketTime = cls.realtime;
@@ -2686,8 +2692,7 @@ CL_Frame
 ==================
 */
 #if defined(__PS3__)
-static int ps3_clframe_trace = 0;
-#define PS3_CLF(msg) do { if (ps3_clframe_trace < 3) PS3_BootTracef("CL_Frame %d: " msg, ps3_clframe_trace); } while (0)
+#define PS3_CLF(msg) do { if (ps3_clframe_trace < ps3_clframe_trace_limit) PS3_BootTracef("CL_Frame %d: " msg, ps3_clframe_trace); } while (0)
 #else
 #define PS3_CLF(msg) ((void)0)
 #endif
@@ -2952,6 +2957,7 @@ This is the only place that any of these functions are called from
 ============================
 */
 void CL_StartHunkUsers( qboolean rendererOnly ) {
+	PS3_FTRACE("CL_StartHunkUsers rendererOnly=%d state=%d cgameStarted=%d", (int)rendererOnly, (int)clc.state, (int)cls.cgameStarted);
 	if( !com_cl_running ) {
 		return;
 	}

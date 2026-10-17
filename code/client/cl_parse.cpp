@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 // cl_parse.c  -- parse a message received from the server
 
+#include "../sys/ps3_step.h"
 #include "client.h"
 #include "cl_ui.h"
 #include "../qcommon/bg_compat.h"
@@ -532,6 +533,7 @@ CL_ParseGamestate
 ==================
 */
 void CL_ParseGamestate( msg_t *msg ) {
+	PS3_TRACEF("NET CL_ParseGamestate enter");
 	int				i, csNum;
 	entityState_t	*es;
 	int				newnum;

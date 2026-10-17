@@ -15,6 +15,14 @@ extern "C" {
 void PS3_BootTracef(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void PS3_BootTraceFastf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void PS3_TraceMemory(const char *tag);
+/* Frame-trace window: boot traces the first 3 frames; PS3_RearmFrameTrace(n)
+ * re-opens the window for the next n frames (used when a map finishes loading,
+ * so the connect/gamestate/cgame handshake frames are traced too). */
+extern int ps3_frame_trace;
+extern int ps3_frame_trace_limit;
+extern int ps3_clframe_trace;
+extern int ps3_clframe_trace_limit;
+void PS3_RearmFrameTrace(int frames);
 #ifdef __cplusplus
 }
 #endif
@@ -25,8 +33,11 @@ void PS3_TraceMemory(const char *tag);
 #define PS3_TRACEF(...) PS3_BootTracef(__VA_ARGS__)
 /* PS3_TRACEMEM("tag"): log lv2 user-memory total/available and the newlib heap in use. */
 #define PS3_TRACEMEM(tag) PS3_TraceMemory(tag)
+/* PS3_FTRACE("fmt", ...): synced, but only while the frame-trace window is open. */
+#define PS3_FTRACE(...) do { if (ps3_frame_trace < ps3_frame_trace_limit) PS3_BootTracef("NET " __VA_ARGS__); } while (0)
 #else
 #define PS3_TRACEMEM(tag) ((void)0)
+#define PS3_FTRACE(...) ((void)0)
 #define PS3_TRACEF(...) ((void)0)
 #define PS3_STEP(msg) ((void)0)
 #define PS3_STEPF(...) ((void)0)
