@@ -1,0 +1,169 @@
+name: PS3 / PSL1GHT Build
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PS3DEV_ARCHIVE_URL: https://github.com/ps3dev/ps3dev/releases/download/nightly-2026-10-12/ps3dev-linux-X64.tar.gz
+  PS3DEV_ARCHIVE_SHA256: 76b1b3bc9ac260a4ece86da520225da7f2f4e334174e37b850093ff925eeb900
+  OPENMOHAA_PS3_APPID: OMOHAA020
+
+jobs:
+  build-ps3:
+    name: Build OpenMoHAA for PS3 (PSL1GHT)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install host build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake bison flex build-essential cmake ninja-build \
+            file imagemagick libelf-dev libgmp-dev libmpfr-dev libmpc-dev \
+            libncurses-dev libssl-dev libtool libtool-bin pkg-config \
+            python3 python3-pil python3-setuptools subversion texinfo wget \
+            zlib1g-dev zip
+
+      - name: Download and verify prebuilt PS3DEV / PSL1GHT nightly
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/ps3dev-linux-X64.tar.gz"
+          extract_dir="$RUNNER_TEMP/ps3dev-extracted"
+          mkdir -p "$extract_dir"
+
+          curl --fail --location --retry 4 --retry-all-errors --connect-timeout 30 \
+            "$PS3DEV_ARCHIVE_URL" -o "$archive"
+          echo "$PS3DEV_ARCHIVE_SHA256  $archive" | sha256sum --check -
+          tar -xzf "$archive" -C "$extract_dir"
+
+          compiler="$(find "$extract_dir" -path '*/ppu/bin/ppu-gcc' -print -quit)"
+          if [[ -z "$compiler" ]]; then
+            echo "::error::Nightly archive did not contain ppu/bin/ppu-gcc"
+            tar -tzf "$archive" | head -n 80 || true
+            exit 1
+          fi
+
+          sdk_root="${compiler%/ppu/bin/ppu-gcc}"
+          [[ -x "$sdk_root/ppu/bin/ppu-gcc" ]]
+          [[ -x "$sdk_root/ppu/bin/ppu-g++" ]]
+          [[ -x "$sdk_root/ppu/bin/ppu-strip" ]]
+          export PATH="$sdk_root/bin:$sdk_root/host/bin:$sdk_root/ppu/bin:$sdk_root/spu/bin:$PATH"
+
+          for tool in fself sprxlinker; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+              candidate="$(find "$sdk_root" -type f -name "$tool" -print -quit)"
+              if [[ -z "$candidate" ]]; then
+                echo "::error::Required PSL1GHT tool not found: $tool"
+                exit 1
+              fi
+              export PATH="$(dirname "$candidate"):$PATH"
+              echo "$(dirname "$candidate")" >> "$GITHUB_PATH"
+            fi
+          done
+
+          echo "PS3DEV=$sdk_root" >> "$GITHUB_ENV"
+          echo "PSL1GHT=$sdk_root" >> "$GITHUB_ENV"
+          for dir in "$sdk_root/bin" "$sdk_root/host/bin" "$sdk_root/ppu/bin" \
+                     "$sdk_root/spu/bin" "$sdk_root/portlibs/ppu/bin"; do
+            if [[ -d "$dir" ]]; then
+              echo "$dir" >> "$GITHUB_PATH"
+            fi
+          done
+
+          {
+            echo "SDK archive: $PS3DEV_ARCHIVE_URL"
+            echo "SHA-256: $PS3DEV_ARCHIVE_SHA256"
+            echo "PS3DEV root: $sdk_root"
+            echo
+            "$sdk_root/ppu/bin/ppu-gcc" --version
+            echo
+            for tool in fself sprxlinker; do command -v "$tool"; done
+          } | tee ps3-sdk-info.txt
+
+      - name: Configure PS3 cross-build
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake -S . -B build-ps3 -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/ps3-psl1ght.cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/openmohaa-ps3-install" \
+            -DOPENMOHAA_PS3_APPID="$OPENMOHAA_PS3_APPID" \
+            -DBUILD_SERVER=OFF \
+            -DBUILD_CLIENT=ON \
+            -DBUILD_RENDERER_GL2=OFF \
+            -DBUILD_GAME_LIBRARIES=OFF \
+            -DBUILD_GAME_QVMS=OFF \
+            -DUSE_RENDERER_DLOPEN=OFF \
+            -DUSE_OPENAL=OFF \
+            -DUSE_HTTP=OFF \
+            -DUSE_FREETYPE=OFF \
+            -DUSE_INTERNAL_LIBS=ON \
+            -DUSE_INTERNAL_SDL=OFF \
+            2>&1 | tee ps3-configure.log
+
+      - name: Build PS3 client and static game modules
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build-ps3 --parallel 2 2>&1 | tee ps3-build.log
+
+      - name: Link EBOOT.BIN with PSL1GHT
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build-ps3 --target ps3_self --parallel 2 2>&1 | tee ps3-self.log
+          test -s build-ps3/EBOOT.BIN
+          file build-ps3/EBOOT.BIN
+          ls -lh build-ps3/EBOOT.BIN
+          find build-ps3 \( -type f -name '*.elf' -o -type f -name 'openmohaa' \) -print | sort > ps3-build-outputs.txt
+          cat ps3-build-outputs.txt
+
+      - name: Package installable PKG files
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p dist
+          bash make_ps3_pkg.sh \
+            --build-dir build-ps3 \
+            --out-dir dist \
+            --name OpenMoHAA-PS3-OMOHAA020 \
+            2>&1 | tee ps3-package.log
+          find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print
+          test -n "$(find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print -quit)"
+
+      - name: Upload PS3 build, PKG files, and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenMoHAA-PS3-OMOHAA020-${{ github.run_number }}
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+          path: |
+            build-ps3/EBOOT.BIN
+            build-ps3/bin/openmohaa
+            build-ps3/**/*.elf
+            dist/*.pkg
+            ps3-sdk-info.txt
+            ps3-build-outputs.txt
+            ps3-configure.log
+            ps3-build.log
+            ps3-self.log
+            ps3-package.log
