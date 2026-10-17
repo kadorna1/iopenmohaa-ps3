@@ -941,11 +941,13 @@ void CL_InitCGame( void ) {
 		Com_sprintf(cl.mapname, sizeof(cl.mapname), "maps/%s_sml.bsp", mapname);
 	}
 
-	PS3_TRACEF("CGINIT enter map=%s hunkFree=%d", cl.mapname, Hunk_MemoryRemaining());
+	PS3_TRACEF("CGINIT enter map=%s", cl.mapname);
+	PS3_TRACEMEM("enter");
 	S_BeginRegistration();
 	PS3_TRACEF("CGINIT after S_BeginRegistration");
 	CL_ShutdownCGame();
-	PS3_TRACEF("CGINIT after CL_ShutdownCGame hunkFree=%d", Hunk_MemoryRemaining());
+	PS3_TRACEF("CGINIT after CL_ShutdownCGame");
+	PS3_TRACEMEM("after-shutdown");
 	CL_InitCGameDLL( &cgi, &cge );
 	PS3_TRACEF("CGINIT after CL_InitCGameDLL cge=%p", (void *)cge);
 	clc.state = CA_LOADING;
@@ -958,7 +960,8 @@ void CL_InitCGame( void ) {
 		CL_InitClientSavedData();
 	}
 
-	PS3_TRACEF("CGINIT before CG_Init snapValid=%d hunkFree=%d", (int)cl.snap.valid, Hunk_MemoryRemaining());
+	PS3_TRACEF("CGINIT before CG_Init snapValid=%d", (int)cl.snap.valid);
+	PS3_TRACEMEM("before-cg-init");
 	if (cl.snap.valid) {
 		// init for this gamestate
 		// use the lastExecutedServerCommand instead of the serverCommandSequence
@@ -971,7 +974,8 @@ void CL_InitCGame( void ) {
 		cge->CG_Init(&cgi, clc.serverMessageSequence, clc.serverCommandSequence, clc.clientNum);
 	}
 
-	PS3_TRACEF("CGINIT after CG_Init hunkFree=%d", Hunk_MemoryRemaining());
+	PS3_TRACEF("CGINIT after CG_Init");
+	PS3_TRACEMEM("after-cg-init");
 	ClearNewConfigFlag();
 	PS3_TRACEF("CGINIT before TIKI_FinishLoad");
 	TIKI_FinishLoad();
@@ -987,7 +991,8 @@ void CL_InitCGame( void ) {
 
 	PS3_TRACEF("CGINIT before CL_EndRegistration");
 	CL_EndRegistration();
-	PS3_TRACEF("CGINIT after CL_EndRegistration hunkFree=%d", Hunk_MemoryRemaining());
+	PS3_TRACEF("CGINIT after CL_EndRegistration");
+	PS3_TRACEMEM("after-end-registration");
 
 	t2 = Sys_Milliseconds();
 

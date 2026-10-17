@@ -26,6 +26,8 @@
 #include <net/socket.h>
 #include <netinet/in.h>
 
+#include <malloc.h>
+#include <ppu-lv2.h>
 #include "ps3_log.h"
 #include "ps3_screenlog.h"
 
@@ -336,4 +338,23 @@ void PS3_Logf(const char *fmt, ...)
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     ps3_log(buf);
+}
+
+
+/* Memory snapshot for crash hunting: lv2 user memory (syscall 352,
+ * sys_memory_get_user_memory_size) plus the newlib heap. */
+static s32 ps3_sys_memory_get_user_memory_size(void *info)
+{
+    lv2syscall1(352, (u64)info);
+    return_to_user_prog(s32);
+}
+
+void PS3_TraceMemory(const char *tag)
+{
+    struct { u32 total; u32 available; } info = { 0, 0 };
+    const s32 rc = ps3_sys_memory_get_user_memory_size(&info);
+    const struct mallinfo mi = mallinfo();
+    PS3_BootTracef("MEM %s lv2rc=%d total=%u available=%u heapArena=%d heapInUse=%d heapFree=%d",
+                   tag, (int)rc, (unsigned)info.total, (unsigned)info.available,
+                   (int)mi.arena, (int)mi.uordblks, (int)mi.fordblks);
 }
