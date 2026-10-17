@@ -1,0 +1,202 @@
+if(NOT BUILD_CLIENT)
+    return()
+endif()
+
+include(utils/add_git_dependency)
+include(utils/set_output_dirs)
+include(shared_sources)
+include(shared_script)
+
+include(renderer_common)
+
+set(CLIENT_SOURCES
+    ${SOURCE_DIR}/client/cl_avi.cpp
+    ${SOURCE_DIR}/client/cl_cgame.cpp
+    ${SOURCE_DIR}/client/cl_cin.cpp
+    ${SOURCE_DIR}/client/cl_consolecmds.cpp
+    ${SOURCE_DIR}/client/cl_input.cpp
+    ${SOURCE_DIR}/client/cl_instantAction.cpp
+    ${SOURCE_DIR}/client/cl_inv.cpp
+    ${SOURCE_DIR}/client/cl_invrender.cpp
+    ${SOURCE_DIR}/client/cl_keys.cpp
+    ${SOURCE_DIR}/client/cl_main.cpp
+    ${SOURCE_DIR}/client/cl_net_chan.cpp
+    ${SOURCE_DIR}/client/cl_parse.cpp
+    ${SOURCE_DIR}/client/cl_scrn.cpp
+    ${SOURCE_DIR}/client/cl_ui.cpp
+    ${SOURCE_DIR}/client/cl_uibind.cpp
+    ${SOURCE_DIR}/client/cl_uidmbox.cpp
+    ${SOURCE_DIR}/client/cl_uifilepicker.cpp
+    ${SOURCE_DIR}/client/cl_uigamespy.cpp
+    ${SOURCE_DIR}/client/cl_uigmbox.cpp
+    ${SOURCE_DIR}/client/cl_uilangame.cpp
+    ${SOURCE_DIR}/client/cl_uiloadsave.cpp
+    ${SOURCE_DIR}/client/cl_uimaprotationsetup.cpp
+    ${SOURCE_DIR}/client/cl_uimaprunner.cpp
+    ${SOURCE_DIR}/client/cl_uiminicon.cpp
+    ${SOURCE_DIR}/client/cl_uimpmappicker.cpp
+    ${SOURCE_DIR}/client/cl_uiplayermodelpicker.cpp
+    ${SOURCE_DIR}/client/cl_uiradar.cpp
+    ${SOURCE_DIR}/client/cl_uiserverlist.cpp
+    ${SOURCE_DIR}/client/cl_uisoundpicker.cpp
+    ${SOURCE_DIR}/client/cl_uistd.cpp
+    ${SOURCE_DIR}/client/cl_uiview3d.cpp
+    ${SOURCE_DIR}/client/libmumblelink.c
+    ${SOURCE_DIR}/client/snd_codec_mp3.c
+    ${SOURCE_DIR}/client/snd_codec_ogg.c
+    ${SOURCE_DIR}/client/snd_codec_opus.c
+    ${SOURCE_DIR}/client/snd_codec_wav.c
+    ${SOURCE_DIR}/client/snd_codec.c
+    ${SOURCE_DIR}/client/snd_dma_new.cpp
+    ${SOURCE_DIR}/client/snd_info.cpp
+    ${SOURCE_DIR}/client/snd_mem_new.cpp
+    ${SOURCE_DIR}/client/snd_miles_new.cpp
+    ${SOURCE_DIR}/client/usignal.cpp
+    ${CLIENT_PLATFORM_SOURCES}
+)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "PS3")
+    list(APPEND CLIENT_SOURCES
+        ${SOURCE_DIR}/client/snd_null_new.cpp
+        ${SOURCE_DIR}/client/snd_ps3_compat.cpp
+        ${SOURCE_DIR}/gamespy/ps3_serverlist.c
+        ${SOURCE_DIR}/gamespy/gcdkey/gcdkeyc.c
+        ${SOURCE_DIR}/gamespy/md5c.c)
+else()
+    list(APPEND CLIENT_SOURCES
+        ${SOURCE_DIR}/client/qal.c
+        ${SOURCE_DIR}/client/snd_openal_new.cpp
+    )
+endif()
+
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "PS3")
+    list(APPEND CLIENT_SOURCES
+        ${SOURCE_DIR}/sdl/sdl_input.c
+        ${SOURCE_DIR}/sdl/sdl_mouse.c
+    )
+endif()
+
+# Gamespy
+list(APPEND CLIENT_SOURCES
+	${SOURCE_DIR}/gamespy/cl_gamespy.c
+)
+
+file(GLOB_RECURSE UI_SOURCES "${SOURCE_DIR}/uilib/*.c" "${SOURCE_DIR}/uilib/*.cpp")
+
+add_git_dependency(${SOURCE_DIR}/client/cl_console.c)
+
+set(CLIENT_BINARY ${CLIENT_NAME})
+
+list(APPEND CLIENT_DEFINITIONS BOTLIB)
+list(APPEND CLIENT_DEFINITIONS APP_MODULE)
+
+if(BUILD_STANDALONE)
+    list(APPEND CLIENT_DEFINITIONS STANDALONE)
+endif()
+
+if(USE_RENDERER_DLOPEN)
+    list(APPEND CLIENT_DEFINITIONS USE_RENDERER_DLOPEN)
+endif()
+
+if(USE_HTTP)
+    list(APPEND CLIENT_DEFINITIONS USE_HTTP)
+endif()
+
+if(USE_VOIP)
+    list(APPEND CLIENT_DEFINITIONS USE_VOIP)
+endif()
+
+if(USE_MUMBLE)
+    list(APPEND CLIENT_DEFINITIONS USE_MUMBLE)
+    list(APPEND CLIENT_LIBRARY_SOURCES ${SOURCE_DIR}/client/libmumblelink.c)
+endif()
+
+list(APPEND CLIENT_BINARY_SOURCES
+    ${CLIENT_SOURCES}
+    ${UI_SOURCES}
+    ${COMMON_SOURCES}
+    ${SCRIPT_SYSTEM_SOURCES}
+    ${BOTLIB_SOURCES}
+    ${SYSTEM_SOURCES}
+    ${ASM_SOURCES}
+    ${CLIENT_LIBRARY_SOURCES})
+
+if(BUILD_SERVER OR CMAKE_SYSTEM_NAME STREQUAL "PS3")
+    # PS3 uses one integrated EBOOT: the client must carry the server side
+    # used for single-player/listen-server execution. BUILD_SERVER only
+    # controls the separate dedicated-server target.
+    list(APPEND CLIENT_BINARY_SOURCES ${SERVER_SOURCES})
+endif()
+
+add_executable(${CLIENT_BINARY} ${CLIENT_EXECUTABLE_OPTIONS} ${CLIENT_BINARY_SOURCES})
+
+if(CMAKE_SYSTEM_NAME STREQUAL "PS3" AND PS3_FSELF)
+    # Mirror PSL1GHT's %.self rule: strip the ELF, run sprxlinker when the
+    # SDK provides it, then feed the prepared ELF to fself.
+    set(PS3_STRIPPED_ELF "${CMAKE_CURRENT_BINARY_DIR}/${CLIENT_BINARY}.stripped.elf")
+    set(PS3_SELF_OUTPUT  "${CMAKE_CURRENT_BINARY_DIR}/EBOOT.BIN")
+
+    add_custom_command(
+        OUTPUT "${PS3_STRIPPED_ELF}"
+        COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:${CLIENT_BINARY}>" -o "${PS3_STRIPPED_ELF}"
+        DEPENDS ${CLIENT_BINARY}
+        VERBATIM)
+
+    if(PS3_SPRXLINKER)
+        add_custom_command(
+            OUTPUT "${PS3_SELF_OUTPUT}"
+            COMMAND "${PS3_SPRXLINKER}" "${PS3_STRIPPED_ELF}"
+            COMMAND "${PS3_FSELF}" "${PS3_STRIPPED_ELF}" "${PS3_SELF_OUTPUT}"
+            DEPENDS "${PS3_STRIPPED_ELF}"
+            VERBATIM)
+    else()
+        add_custom_command(
+            OUTPUT "${PS3_SELF_OUTPUT}"
+            COMMAND "${PS3_FSELF}" "${PS3_STRIPPED_ELF}" "${PS3_SELF_OUTPUT}"
+            DEPENDS "${PS3_STRIPPED_ELF}"
+            VERBATIM)
+    endif()
+
+    add_custom_target(ps3_self DEPENDS "${PS3_SELF_OUTPUT}")
+endif()
+
+target_include_directories(     ${CLIENT_BINARY} PRIVATE ${CLIENT_INCLUDE_DIRS})
+target_include_directories(     ${CLIENT_BINARY} PRIVATE ${SOURCE_DIR}/client)
+target_compile_definitions(     ${CLIENT_BINARY} PRIVATE ${CLIENT_DEFINITIONS})
+target_compile_options(         ${CLIENT_BINARY} PRIVATE ${CLIENT_COMPILE_OPTIONS})
+target_link_libraries(          ${CLIENT_BINARY} PRIVATE ${COMMON_LIBRARIES} ${CLIENT_LIBRARIES})
+target_link_options(            ${CLIENT_BINARY} PRIVATE ${CLIENT_LINK_OPTIONS})
+
+set_output_dirs(${CLIENT_BINARY})
+
+if(NOT USE_RENDERER_DLOPEN)
+    target_sources(${CLIENT_BINARY} PRIVATE
+        # These are never simultaneously populated
+        ${RENDERER_GL1_BINARY_SOURCES}
+        ${RENDERER_GL2_BINARY_SOURCES})
+
+    target_include_directories( ${CLIENT_BINARY} PRIVATE ${RENDERER_INCLUDE_DIRS})
+    target_compile_definitions( ${CLIENT_BINARY} PRIVATE ${RENDERER_DEFINITIONS})
+    target_compile_options(     ${CLIENT_BINARY} PRIVATE ${RENDERER_COMPILE_OPTIONS})
+    target_link_libraries(      ${CLIENT_BINARY} PRIVATE ${RENDERER_LIBRARIES})
+endif()
+
+foreach(LIBRARY IN LISTS CLIENT_DEPLOY_LIBRARIES)
+    add_custom_command(TARGET ${CLIENT_BINARY} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+            ${LIBRARY}
+            $<TARGET_FILE_DIR:${CLIENT_BINARY}>)
+
+    install(FILES ${LIBRARY} DESTINATION
+        # install() requires a relative path hence:
+        $<PATH:RELATIVE_PATH,$<TARGET_FILE_DIR:${CLIENT_BINARY}>,${CMAKE_BINARY_DIR}/$<CONFIG>>)
+endforeach()
+
+set_target_properties(${CLIENT_BINARY} PROPERTIES DEBUG_POSTFIX ${CMAKE_DEBUG_POSTFIX})
+
+INSTALL(TARGETS ${CLIENT_BINARY} DESTINATION ${INSTALL_BINDIR_FULL})
+
+if (MSVC)
+	target_link_options(${CLIENT_BINARY} PRIVATE "/MANIFEST:NO")
+	INSTALL(FILES $<TARGET_PDB_FILE:${CLIENT_BINARY}> DESTINATION ${INSTALL_BINDIR_FULL} OPTIONAL)
+endif()

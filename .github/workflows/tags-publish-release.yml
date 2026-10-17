@@ -1,0 +1,109 @@
+name: "Publish Release"
+
+on:
+  push:
+    tags:
+        - "v*.*.*"
+
+env:
+  RELEASE_STAGE: ${{ vars.RELEASE_STAGE || 'unstable' }}
+  RELEASE_IS_PRERELEASE: ${{ vars.RELEASE_IS_PRELEASE }}
+
+permissions:
+  contents: write
+
+jobs:
+  build-all:
+   uses: ./.github/workflows/shared-build.yml
+   with:
+      environment: "release"
+
+  # Initially create a release with 1 job
+  # so multiple files can be uploaded at the same time afterwards
+  create-release:
+    runs-on: ubuntu-24.04
+    environment: 'release'
+    needs: [build-all]
+
+    steps:
+    - name: Release
+      uses: softprops/action-gh-release@v2.3.2
+      with:
+        name: '${{github.ref_name}}-${{env.RELEASE_STAGE}}'
+        prerelease: ${{env.RELEASE_IS_PRERELEASE}}
+
+  deploy-all:
+    strategy:
+      matrix:
+        target_os: [
+          'linux-amd64',
+          'linux-i686',
+          'linux-arm64',
+          'linux-armhf',
+          'linux-powerpc',
+          'linux-ppc64',
+          'linux-ppc64el',
+          'windows-x64',
+          'windows-x64-pdb',
+          'windows-x86',
+          'windows-x86-pdb',
+          'windows-arm64',
+          'windows-arm64-pdb',
+          #'macos-x86_64',
+          #'macos-arm64',
+          'macos-multiarch-arm64-x86_64',
+        ]
+
+    runs-on: ubuntu-24.04
+    environment: 'release'
+    needs: [create-release]
+
+    env:
+      RELEASE_NAME: ${{ github.event.repository.name }}-${{github.ref_name}}-${{matrix.target_os}}
+
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: 'out-${{matrix.target_os}}'
+        path: ${{github.workspace}}/${{matrix.target_os}}
+
+    - name: Zip
+      working-directory: '${{github.workspace}}/${{matrix.target_os}}'
+      run: zip -9 -r "../${{ env.RELEASE_NAME }}.zip" ./
+
+    - name: Release
+      uses: softprops/action-gh-release@v2.3.2
+      with:
+        files: ${{github.workspace}}/${{ env.RELEASE_NAME }}.zip
+
+  deploy_installer_windows:
+    strategy:
+      matrix:
+        target_os: [
+          'windows-x64',
+          'windows-x86',
+          'windows-arm64',
+        ]
+    
+    runs-on: ubuntu-24.04
+    environment: "release"
+    needs: [create-release]
+
+    env:
+      RELEASE_NAME: ${{ github.event.repository.name }}-${{github.ref_name}}-${{matrix.target_os}}
+
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: 'out-${{matrix.target_os}}-installer'
+        path: ${{github.workspace}}/${{matrix.target_os}}
+
+    - name: Setup
+      working-directory: '${{github.workspace}}/${{matrix.target_os}}'
+      run:
+        cp Setup.msi ../${{ env.RELEASE_NAME }}.msi
+
+    - name: Release
+      uses: softprops/action-gh-release@v2.3.2
+      with:
+        files: ${{github.workspace}}/${{ env.RELEASE_NAME }}.msi
