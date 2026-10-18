@@ -20,6 +20,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 
+#include "../sys/ps3_step.h"
 #include "server.h"
 
 #ifndef DEDICATED
@@ -2663,10 +2664,14 @@ void SV_CheckSaveGame(void)
 		return;
 	}
 
+	PS3_TRACEF("SAVE SV_CheckSaveGame: save pending cl.serverTime=%d svs.time=%d", cl.serverTime, svs.time);
 	if (cl.serverTime >= svs.time) {
 		bSavegame = qfalse;
+		PS3_TRACEF("SAVE before SV_SaveGame name=%s", savegame_name[0] ? savegame_name : "(auto)");
 		SV_SaveGame(savegame_name[0] ? savegame_name : NULL, qfalse);
+		PS3_TRACEF("SAVE after SV_SaveGame, before UI_SetupFiles");
 		UI_SetupFiles();
+		PS3_TRACEF("SAVE after UI_SetupFiles");
 	}
 #endif
 }

@@ -2422,8 +2422,13 @@ void Com_Frame( void ) {
 #ifndef DEDICATED
 	if (com_dedicated->integer || CL_FinishedIntro())
 	{
+		PS3_FT("%d: before Cbuf_Execute(0)", ps3_frame_trace);
 		Cbuf_Execute(0);
+		PS3_FT("%d: after Cbuf_Execute(0), before SV_CheckSaveGame", ps3_frame_trace);
 		SV_CheckSaveGame();
+		PS3_FT("%d: after SV_CheckSaveGame", ps3_frame_trace);
+	} else {
+		PS3_FT("%d: intro not finished: skipping Cbuf_Execute", ps3_frame_trace);
 	}
 #else
 	// Fixed in OPM
@@ -2434,12 +2439,14 @@ void Com_Frame( void ) {
 
     if (com_altivec->modified)
     {
+        PS3_FT("%d: com_altivec modified -> Com_DetectAltivec", ps3_frame_trace);
         Com_DetectAltivec();
         com_altivec->modified = qfalse;
     }
 
     // mess with msec if needed
     msec = Com_ModifyMsec(msec);
+    PS3_FT("%d: after Com_ModifyMsec msec=%d", ps3_frame_trace, msec);
 
     //
     // server side

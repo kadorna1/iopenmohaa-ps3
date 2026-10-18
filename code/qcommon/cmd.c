@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 // cmd.c -- Quake script command processing module
 
+#include "../sys/ps3_step.h"
 #include "q_shared.h"
 #include "qcommon.h"
 
@@ -259,6 +260,7 @@ void Cbuf_Execute (int msec)
 
 // execute the command line
 
+		PS3_FTRACE("Cbuf exec [%.100s] wait=%d size=%d", line, cmd_wait, cmd_text.cursize);
 		Cmd_ExecuteString (line);		
 	}
 }
