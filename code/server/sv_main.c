@@ -1061,12 +1061,16 @@ void SV_Frame( int msec ) {
 		return;
 	}
 
+	PS3_FTRACE("SV_Frame enter msec=%d state=%d timeResidual=%d svs.time=%d paused=%d", msec, (int)sv.state, sv.timeResidual, svs.time, (int)paused->integer);
 	SV_NET_UpdateAllNetProfileInfo();
+	PS3_FTRACE("SV_Frame after SV_NET_UpdateAllNetProfileInfo");
 
 	// allow pause if only the local client is connected
 	if ( SV_CheckPaused() ) {
+		PS3_FTRACE("SV_Frame paused -> return");
 		return;
 	}
+	PS3_FTRACE("SV_Frame after SV_CheckPaused");
 
 	// if it isn't time for the next frame, do nothing
 	if ( sv_fps->integer < 1 ) {
@@ -1121,8 +1125,10 @@ void SV_Frame( int msec ) {
 		SV_SendServerCommand( NULL, "svlag" );
 	}
 
+	PS3_FTRACE("SV_Frame before SV_CalcPings");
 	// update ping based on the all received frames
 	SV_CalcPings();
+	PS3_FTRACE("SV_Frame after SV_CalcPings");
 
 	// run the game simulation in chunks
 	while ( sv.timeResidual >= frameMsec ) {
@@ -1134,7 +1140,9 @@ void SV_Frame( int msec ) {
 			const char *err;
 
 			// let everything in the world think and move
+			PS3_FTRACE("SV_Frame before ge->RunFrame time=%d frameMsec=%d", svs.time, frameMsec);
 			ge->RunFrame( svs.time, frameMsec );
+			PS3_FTRACE("SV_Frame after ge->RunFrame");
 
 			err = ge->errorMessage;
 			if( err )
@@ -1149,21 +1157,27 @@ void SV_Frame( int msec ) {
 		time_game = Sys_Milliseconds () - startTime;
 	}
 
+	PS3_FTRACE("SV_Frame before SV_CheckTimeouts");
 	// check timeouts
 	SV_CheckTimeouts();
+	PS3_FTRACE("SV_Frame before SV_SendClientMessages");
 
 	// send messages back to the clients
 	SV_SendClientMessages();
+	PS3_FTRACE("SV_Frame before SV_MasterHeartbeat");
 
 	// send a heartbeat to the master if needed
 	SV_MasterHeartbeat();
+	PS3_FTRACE("SV_Frame before SV_ProcessGamespyQueries");
 
 	// process all gamespy queries
 	SV_ProcessGamespyQueries();
+	PS3_FTRACE("SV_Frame before SV_HandleNonPVSSound");
 
 	// Added in OPM
 	//  Handle non-pvs sounds
 	SV_HandleNonPVSSound();
+	PS3_FTRACE("SV_Frame done");
 
 	svs.lastTime = svs.time;
 }

@@ -1431,15 +1431,19 @@ void SV_HandleNonPVSSound()
 	gentity_t *ent;
 	int i;
 
+	PS3_FTRACE("NonPVS enter num_entities=%d gentities=%p gentitySize=%d", sv.num_entities, (void *)sv.gentities, sv.gentitySize);
 	SV_CacheNonPVSSound();
+	PS3_FTRACE("NonPVS after Cache");
 
 	for (i = 0; i < sv.num_entities; i++) {
 		ent = SV_GentityNum(i);
 		ent->r.num_nonpvs_sounds = 0;
 	}
+	PS3_FTRACE("NonPVS after zero loop");
 
 	// Free up sound indices
 	SV_CleanupNonPVSSound();
+	PS3_FTRACE("NonPVS after Cleanup");
 }
 
 /*

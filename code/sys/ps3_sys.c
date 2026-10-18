@@ -349,6 +349,7 @@ void Sys_PlatformInit(void)
     PS3_LogInit();
     PS3_BootTracef("Sys_PlatformInit: PS3_LogInit returned");
     PS3_Logf("OpenMoHAA PS3 platform init (%s)", PS3_USRDIR);
+    PS3_Logf("PS3 build stamp: %s %s (trace4: SV_Frame stage traces)", __DATE__, __TIME__);
 }
 void Sys_PlatformExit(void)
 {
