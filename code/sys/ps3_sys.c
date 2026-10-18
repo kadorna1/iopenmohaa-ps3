@@ -349,7 +349,7 @@ void Sys_PlatformInit(void)
     PS3_LogInit();
     PS3_BootTracef("Sys_PlatformInit: PS3_LogInit returned");
     PS3_Logf("OpenMoHAA PS3 platform init (%s)", PS3_USRDIR);
-    PS3_Logf("PS3 build stamp: %s %s (trace5: fix sv_gamespy NULL deref in SV_MasterHeartbeat)", __DATE__, __TIME__);
+    PS3_Logf("PS3 build stamp: %s %s (trace6: bundled libjpeg header, safe JPEG error path)", __DATE__, __TIME__);
 }
 void Sys_PlatformExit(void)
 {

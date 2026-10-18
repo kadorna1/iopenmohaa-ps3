@@ -36,7 +36,16 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #  define JPEG_INTERNALS
 #endif
 
-#include <jpeglib.h>
+#if defined(USE_INTERNAL_JPEG) || defined(__PS3__)
+/* Always use the bundled libjpeg-9f header: the library code is built from
+ * thirdparty/jpeg-9f (JPEG_LIB_VERSION 90). The PS3DEV portlibs directory
+ * ships its own jpeglib.h (version 80) and comes first in the include path,
+ * so <jpeglib.h> picked that one and jpeg_CreateDecompress() failed with
+ * "library is 90, caller expects 80". */
+#  include "../thirdparty/jpeg-9f/jpeglib.h"
+#else
+#  include <jpeglib.h>
+#endif
 
 #ifndef USE_INTERNAL_JPEG
 #  if JPEG_LIB_VERSION < 80 && !defined(MEM_SRCDST_SUPPORTED)
@@ -139,10 +148,13 @@ void R_LoadJPG(const char *filename, unsigned char **pic, int *width, int *heigh
      * We need to clean up the JPEG object, close the input file, and return.
      */
     jpeg_destroy_decompress(&cinfo);
-    ri.FS_FreeFile(fbuffer.v);
 
     /* Append the filename to the error for easier debugging */
     ri.Printf(PRINT_ALL, ", loading file %s\n", filename);
+    /* FS_FreeFile(NULL) is a fatal error; never let a failed JPEG take the game down */
+    if (fbuffer.v) {
+      ri.FS_FreeFile(fbuffer.v);
+    }
     return;
   }
 
