@@ -2,6 +2,7 @@
 
 #include "ps3gl.h"
 #include <stdio.h>
+#include <string.h>
 
 /* Forward declaration from ps3gl_matrices.c */
 extern const float *ps3gl_get_mvp(void);
@@ -250,6 +251,14 @@ void ps3gl_DrawBuffer(GLenum mode) { (void)mode; }
 void ps3gl_ReadPixels(GLint x, GLint y, GLsizei w, GLsizei h,
                       GLenum format, GLenum type, void *pixels)
 {
-    (void)x; (void)y; (void)w; (void)h;
-    (void)format; (void)type; (void)pixels;
+    (void)x; (void)y;
+    /* TODO: no framebuffer readback from RSX yet. For the byte formats the
+     * screenshot code uses, hand back black pixels (4-byte aligned rows, the
+     * GL default pack alignment) instead of leaving the buffer uninitialised. */
+    if (pixels && w > 0 && h > 0 && type == GL_UNSIGNED_BYTE &&
+        (format == GL_RGB || format == GL_RGBA)) {
+        const size_t bpp = (format == GL_RGBA) ? 4u : 3u;
+        const size_t pitch = ((size_t)w * bpp + 3u) & ~(size_t)3u;
+        memset(pixels, 0, pitch * (size_t)h);
+    }
 }

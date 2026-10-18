@@ -373,6 +373,10 @@ void ps3gl_GetIntegerv(GLenum pname, GLint *params)
     case GL_MAX_TEXTURE_UNITS_ARB: *params = 2; break;
     case GL_STENCIL_BITS:          *params = 8; break;
     case GL_DEPTH_BITS:            *params = 24; break;
+    /* GL default is 4. Returning 0 made RB_ReadPixels() compute PAD(x, 0) == 0
+     * and a negative allocation size ("saveshot" froze the game). */
+    case GL_PACK_ALIGNMENT:
+    case GL_UNPACK_ALIGNMENT:      *params = 4; break;
     default:                       *params = 0; break;
     }
 }

@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 // tr_init.c -- functions that are not called every frame
 
+#include "../sys/ps3_step.h"
 #include "tr_local.h"
 
 #if defined(__PS3__)
@@ -500,12 +501,14 @@ byte *RB_ReadPixels(int x, int y, int width, int height, size_t *offset, int *pa
 	
 	linelen = width * 3;
 	padwidth = PAD(linelen, packAlign);
+	PS3_TRACEF("RB_ReadPixels %dx%d packAlign=%d padwidth=%d offset=%d alloc=%d", width, height, (int)packAlign, padwidth, (int)*offset, (int)(padwidth * height + *offset + packAlign - 1));
 	
 	// Allocate a few more bytes so that we can choose an alignment we like
 	buffer = ri.Hunk_AllocateTempMemory(padwidth * height + *offset + packAlign - 1);
 	
 	bufstart = PADP((intptr_t) buffer + *offset, packAlign);
 	qglReadPixels(x, y, width, height, GL_RGB, GL_UNSIGNED_BYTE, bufstart);
+	PS3_TRACEF("RB_ReadPixels done buffer=%p bufstart=%p", (void *)buffer, (void *)bufstart);
 	
 	*offset = bufstart - buffer;
 	*padlen = padwidth - linelen;
