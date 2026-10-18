@@ -349,7 +349,7 @@ void Sys_PlatformInit(void)
     PS3_LogInit();
     PS3_BootTracef("Sys_PlatformInit: PS3_LogInit returned");
     PS3_Logf("OpenMoHAA PS3 platform init (%s)", PS3_USRDIR);
-    PS3_Logf("PS3 build stamp: %s %s (trace7: GL1 tr_image.c uses bundled libjpeg header)", __DATE__, __TIME__);
+    PS3_Logf("PS3 build stamp: %s %s (trace8: image/surface load progress traces, empty-JPEG guard)", __DATE__, __TIME__);
 }
 void Sys_PlatformExit(void)
 {

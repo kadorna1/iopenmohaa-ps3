@@ -1960,7 +1960,14 @@ static void LoadJPG( const char *filename, unsigned char **pic, int *width, int 
    */
 
   len = ri.FS_ReadFile ( ( char * ) filename, (void **)&fbuffer);
+  PS3_TRACEF("JPG read %s len=%d buf=%p", filename, len, (void *)fbuffer);
   if (!fbuffer) {
+	return;
+  }
+  if (len <= 0) {
+	/* zero-length file: not a JPEG. Skip libjpeg entirely (it would raise
+	 * "Empty input file" through longjmp) and let the caller fall back to .tga */
+	ri.FS_FreeFile(fbuffer);
 	return;
   }
 
@@ -1981,6 +1988,7 @@ static void LoadJPG( const char *filename, unsigned char **pic, int *width, int 
 	  /* If we get here, the JPEG code has signaled an error.
 	   * We need to clean up the JPEG object, close the input file, and return.
 	   */
+	  PS3_TRACEF("JPG error path file=%s fbuffer=%p len=%d", filename, (void *)fbuffer, len);
 	  jpeg_destroy_decompress(&cinfo);
 
 	  /* Append the filename to the error for easier debugging */
@@ -2464,12 +2472,14 @@ static void R_LoadImage(const char* name, byte** pic, int* width, int* height, q
 				altname[len - 1] = 'g';
 				// try jpg first
 				LoadJPG(altname, pic, width, height);
+				PS3_TRACEF("IMGLOAD after LoadJPG %s pic=%p", altname, (void *)*pic);
 			}
 			if (!*pic) {
 				altname[len - 3] = 't';
 				altname[len - 2] = 'g';
 				altname[len - 1] = 'a';
 				LoadTGA(altname, pic, width, height);
+				PS3_TRACEF("IMGLOAD after LoadTGA %s pic=%p", altname, (void *)*pic);
 			}
 			*piMipmapsAvailable = 1;
 		}
@@ -2557,7 +2567,9 @@ image_t* R_FindImageFileOld(const char* name, qboolean mipmap, qboolean allowPic
 	//
 	numMipmaps = mipmap;
 	iMipmapsAvailable = 0;
+	PS3_TRACEF("IMGLOAD begin %s", name);
 	R_LoadImage(name, &pic, &width, &height, &hasAlpha, &glCompressMode, &numMipmaps, &iMipmapsAvailable);
+	PS3_TRACEF("IMGLOAD loaded %s pic=%p %dx%d", name, (void *)pic, width, height);
 	if (pic == NULL) {
 		return NULL;
 	}
@@ -2575,6 +2587,7 @@ image_t* R_FindImageFileOld(const char* name, qboolean mipmap, qboolean allowPic
 		glCompressMode,
 		glWrapClampModeX,
 		glWrapClampModeY);
+	PS3_TRACEF("IMGLOAD created %s", name);
 
     len = strlen(name);
     if (len > 4 && !strcmp(&name[len - 4], ".gst")) {
