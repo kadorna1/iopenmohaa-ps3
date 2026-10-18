@@ -50,7 +50,16 @@ void SV_CreateGamespyChallenge(char *challenge) { if (challenge) *challenge = '\
 void SV_GamespyAuthorize(netadr_t from, const char *response) { (void)from; (void)response; }
 void SV_GamespyHeartbeat(void) {}
 void SV_ProcessGamespyQueries(void) {}
-qboolean SV_InitGamespy(void) { return qfalse; }
+extern cvar_t *sv_gamespy;
+qboolean SV_InitGamespy(void)
+{
+    /* The upstream SV_InitGamespy() creates sv_gamespy; this stub replaces it,
+     * so create the cvar here. Without it sv_gamespy stays NULL and
+     * SV_MasterHeartbeat() dereferences it on the first server frame after a
+     * map load (crash). Master heartbeats are no-ops on PS3 either way. */
+    sv_gamespy = Cvar_Get("sv_gamespy", "0", CVAR_LATCH);
+    return qfalse;
+}
 void SV_ShutdownGamespy(void) {}
 void SV_RestartGamespy(void) {}
 void SV_RestartGamespy_f(void) {}

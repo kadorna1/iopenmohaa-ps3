@@ -279,7 +279,7 @@ but not on every player enter or exit.
 ================
 */
 void SV_MasterHeartbeat( void ) {
-	if (!sv_gamespy->integer) {
+	if (!sv_gamespy || !sv_gamespy->integer) {
 		return;
 	}
 
