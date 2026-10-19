@@ -29,6 +29,13 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #  include "../client/client.h"
 #endif
 
+#if defined(__PS3__)
+#  include "../sys/ps3_step.h"
+#  define PS3_NOINLINE __attribute__((noinline))
+#else
+#  define PS3_NOINLINE
+#endif
+
 #define	ZONEID			0x7331
 #define ZONEID_CONST	0xC057
 
@@ -47,6 +54,11 @@ typedef struct memblock_s {
 	int     id;				// should be ZONEID
 #ifdef ZONE_DEBUG
 	zonedebug_t d;
+#endif
+#if defined(__PS3__)
+	void *alloc0;	// return address of the allocator wrapper's caller
+	void *alloc1;	// hint: the allocation site passed by LightClass::operator new
+	int tag;		// which mem_blocks[] list the block lives in
 #endif
 } memblock_t;
 
@@ -92,6 +104,27 @@ const char *Z_NumberStringPointer( int iNum )
 	return ( const char * )numberstring[ iNum - '0' ].mem;
 }
 
+#if defined(__PS3__)
+void *ps3_zone_caller_hint = NULL;
+
+static void ps3_zone_report( const char *where, memblock_t *block )
+{
+	const unsigned char *user = ( const unsigned char * )block + sizeof( memblock_t );
+	const unsigned char *t = ( const unsigned char * )block + block->size - sizeof( int );
+	PS3_BootTracef( "ZONE CORRUPT [%s] tag=%d block=%p user=%p size=%u alloc0=%p alloc1=%p trailer=0x%08x "
+		"tail=%02x%02x%02x%02x.%02x%02x%02x%02x.%02x%02x%02x%02x.%02x%02x%02x%02x head=%02x%02x%02x%02x.%02x%02x%02x%02x",
+		where, block->tag, ( void * )block, ( const void * )user, ( unsigned )block->size,
+		block->alloc0, block->alloc1, *( const unsigned * )t,
+		t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9], t[10], t[11], t[12], t[13], t[14], t[15],
+		user[0], user[1], user[2], user[3], user[4], user[5], user[6], user[7] );
+}
+
+static int ps3_zone_ptr_ok( const void *p )
+{
+	return p != NULL && ( ( unsigned long )p & 3 ) == 0 && ( unsigned long )p >= 0x10000UL && ( unsigned long )p < 0xD0000000UL;
+}
+#endif
+
 /*
 ========================
 Z_Free
@@ -113,6 +146,9 @@ void Z_Free( void *ptr )
 	// check the memory trash tester
 #ifndef _DEBUG
 	if( *( int * )( ( byte * )block + block->size - sizeof( int ) ) != ZONEID ) {
+#if defined(__PS3__)
+		ps3_zone_report( "Z_Free", block );
+#endif
 		Com_Error( ERR_FATAL, "Z_Free: memory block wrote past end" );
 	}
 #endif
@@ -154,6 +190,8 @@ Z_TagMalloc
 #ifdef ZONE_DEBUG
 void *Z_TagMallocDebug( int size, int tag, const char *label, const char *file, int line ) {
 	int		allocSize;
+#elif defined(__PS3__)
+static void *Z_TagMallocCaller( int size, int tag, void *caller ) {
 #else
 void *Z_TagMalloc( int size, int tag ) {
 #endif
@@ -183,6 +221,12 @@ void *Z_TagMalloc( int size, int tag ) {
 	block = ( memblock_t * )malloc( size );
 	block->id = ZONEID;
 	block->size = size;
+#if defined(__PS3__) && !defined(ZONE_DEBUG)
+	block->tag = tag;
+	block->alloc0 = caller;
+	block->alloc1 = ps3_zone_caller_hint;
+	ps3_zone_caller_hint = NULL;
+#endif
 	block->next = &mem_blocks[ tag ];
 	block->prev = mem_blocks[ tag ].prev;
 	block->prev->next = block;
@@ -202,6 +246,12 @@ void *Z_TagMalloc( int size, int tag ) {
 
 	return ( void * )( ( byte * )block + sizeof( memblock_t ) );
 }
+
+#if defined(__PS3__) && !defined(ZONE_DEBUG)
+PS3_NOINLINE void *Z_TagMalloc( int size, int tag ) {
+	return Z_TagMallocCaller( size, tag, __builtin_return_address( 0 ) );
+}
+#endif
 
 /*
 ========================
@@ -225,6 +275,47 @@ void Z_CheckHeap( void )
 	}
 #endif
 }
+
+#if defined(__PS3__)
+int PS3_ZoneCheck( const char *where, int verbose )
+{
+	static int reported = 0;
+	int k, blocks = 0, bad = 0, broken = 0;
+	size_t bytes = 0;
+	memblock_t *block;
+
+	for( k = 0; k < TAG_NUM_TOTAL_TAGS; k++ )
+	{
+		memblock_t *head = &mem_blocks[ k ];
+		for( block = head->next; block != head; block = block->next )
+		{
+			if( !ps3_zone_ptr_ok( block ) || block->id != ZONEID
+				|| block->size < sizeof( memblock_t ) + sizeof( int ) || block->size > 0x10000000UL ) {
+				broken++;
+				if( reported < 12 ) {
+					reported++;
+					PS3_BootTracef( "ZONE BROKEN LIST [%s] tag=%d block=%p (bad link, id or size) after %d blocks", where, k, ( void * )block, blocks );
+				}
+				break;
+			}
+			blocks++;
+			bytes += block->size;
+			if( *( int * )( ( byte * )block + block->size - sizeof( int ) ) != ZONEID ) {
+				bad++;
+				if( reported < 12 ) {
+					reported++;
+					ps3_zone_report( where, block );
+				}
+			}
+		}
+	}
+
+	if( verbose || bad || broken ) {
+		PS3_BootTracef( "ZONECHECK[%s] blocks=%d bytes=%u corrupt=%d brokenLists=%d", where, blocks, ( unsigned )bytes, bad, broken );
+	}
+	return bad + broken;
+}
+#endif
 
 /*
 ========================
@@ -406,11 +497,15 @@ Allocate permanent (until the hunk is cleared) memory
 #ifdef HUNK_DEBUG
 void *Hunk_AllocDebug( int size, ha_pref preference, const char *label, const char *file, int line ) {
 #else
-void *Hunk_Alloc( int size, ha_pref preference ) {
+PS3_NOINLINE void *Hunk_Alloc( int size, ha_pref preference ) {
 #endif
 	void *ptr;
 
+#if defined(__PS3__) && !defined(ZONE_DEBUG)
+	ptr = Z_TagMallocCaller( size, TAG_STATIC, __builtin_return_address( 0 ) );
+#else
 	ptr = Z_TagMalloc( size, TAG_STATIC );
+#endif
 	memset( ptr, 0, size );
 
 	return ptr;
@@ -436,8 +531,12 @@ Multiple files can be loaded in temporary memory.
 When the files-in-use count reaches zero, all temp memory will be deleted
 =================
 */
-void *Hunk_AllocateTempMemory(int size ) {
+PS3_NOINLINE void *Hunk_AllocateTempMemory(int size ) {
+#if defined(__PS3__) && !defined(ZONE_DEBUG)
+	return Z_TagMallocCaller( size, TAG_TEMP, __builtin_return_address( 0 ) );
+#else
 	return Z_TagMalloc( size, TAG_TEMP );
+#endif
 }
 
 /*
@@ -500,7 +599,7 @@ Z_Malloc
 #ifdef ZONE_DEBUG
 void *Z_MallocDebug( int size, const char *label, const char *file, int line ) {
 #else
-void *Z_Malloc( int size ) {
+PS3_NOINLINE void *Z_Malloc( int size ) {
 #endif
 	void	*buf;
 	
@@ -508,6 +607,8 @@ void *Z_Malloc( int size ) {
 
 #ifdef ZONE_DEBUG
 	buf = Z_TagMallocDebug( size, TAG_GENERAL, label, file, line );
+#elif defined(__PS3__)
+	buf = Z_TagMallocCaller( size, TAG_GENERAL, __builtin_return_address( 0 ) );
 #else
 	buf = Z_TagMalloc( size, TAG_GENERAL );
 #endif

@@ -261,6 +261,7 @@ void G_InitGame(int levelTime, int randomSeed)
     G_Printf("==== InitGame ====\n");
     G_Printf("gamename: %s\n", GAMEVERSION);
     G_Printf("gamedate: %s\n", __DATE__);
+    PS3_ZONECHECK("GAME_INIT enter");
 
     g_protocol    = gi.Cvar_Get("com_protocol", "", 0)->integer;
     g_target_game = (target_game_e)gi.Cvar_Get("com_target_game", "0", 0)->integer;
@@ -268,17 +269,23 @@ void G_InitGame(int levelTime, int randomSeed)
     srand(randomSeed);
 
     CVAR_Init();
+    PS3_ZONECHECK("GAME_INIT after CVAR_Init");
 
     game.Vars()->ClearList();
+    PS3_ZONECHECK("GAME_INIT after game.Vars()->ClearList");
 
     // set some level globals
     level.svsStartTime = levelTime;
 
     G_InitConsoleCommands();
+    PS3_ZONECHECK("GAME_INIT after G_InitConsoleCommands");
 
     Director.Reset();
+    PS3_ZONECHECK("GAME_INIT after Director.Reset");
     Actor::Init();
+    PS3_ZONECHECK("GAME_INIT after Actor::Init");
     G_BotInit();
+    PS3_ZONECHECK("GAME_INIT after G_BotInit");
 
     sv_numtraces   = 0;
     sv_numpmtraces = 0;
@@ -300,8 +307,10 @@ void G_InitGame(int levelTime, int randomSeed)
     }
 
     L_InitEvents();
+    PS3_ZONECHECK("GAME_INIT after L_InitEvents");
 
     G_AllocGameData();
+    PS3_ZONECHECK("GAME_INIT after G_AllocGameData");
 
     if (g_target_game < TG_MOHTA) {
         // Added in OPM

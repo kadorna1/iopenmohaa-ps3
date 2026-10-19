@@ -2416,6 +2416,12 @@ void Com_Frame( void ) {
     lastTime = com_frameTime;
     com_frameTime = Com_EventLoop();
     PS3_FT("%d: after Com_EventLoop", ps3_frame_trace);
+    {
+        static unsigned ps3_zone_frames = 0;
+        if( ( ++ps3_zone_frames & 3 ) == 0 ) {
+            PS3_ZONECHECK_QUIET( "frame" );
+        }
+    }
 
     msec = com_frameTime - lastTime;
 

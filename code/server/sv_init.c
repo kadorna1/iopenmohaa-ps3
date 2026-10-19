@@ -662,6 +662,7 @@ void SV_SpawnServer( const char *server, qboolean loadgame, qboolean restart, qb
 	CL_MapLoading( differentmap, mapname );
 #if defined(__PS3__)
     PS3_BootTracef("MAPTRANS after CL_MapLoading map=%s", mapname);
+    PS3_ZONECHECK("MAPTRANS after CL_MapLoading");
 #endif
 
 	UI_LoadResource( "*132" );
@@ -677,10 +678,12 @@ void SV_SpawnServer( const char *server, qboolean loadgame, qboolean restart, qb
 		// shut down the existing game if it is running
 #if defined(__PS3__)
         PS3_BootTracef("MAPTRANS before SV_ShutdownGameProgs map=%s", mapname);
+        PS3_ZONECHECK("MAPTRANS before SV_ShutdownGameProgs");
 #endif
 		SV_ShutdownGameProgs();
 #if defined(__PS3__)
         PS3_BootTracef("MAPTRANS after SV_ShutdownGameProgs map=%s", mapname);
+        PS3_ZONECHECK("MAPTRANS after SV_ShutdownGameProgs");
 #endif
 
 		// clear the whole hunk because we're (re)loading the server
@@ -690,6 +693,7 @@ void SV_SpawnServer( const char *server, qboolean loadgame, qboolean restart, qb
 		Hunk_Clear();
 #if defined(__PS3__)
         PS3_BootTracef("MAPTRANS after Hunk_Clear map=%s", mapname);
+        PS3_ZONECHECK("MAPTRANS after Hunk_Clear");
 #endif
 
 		// init game imports
@@ -699,6 +703,7 @@ void SV_SpawnServer( const char *server, qboolean loadgame, qboolean restart, qb
 		SV_InitGameProgs();
 #if defined(__PS3__)
         PS3_BootTracef("MAPTRANS after SV_InitGameProgs map=%s ge=%p", mapname, (void *)ge);
+        PS3_ZONECHECK("MAPTRANS after SV_InitGameProgs");
 #endif
 
 		// allocate the snapshot entities on the hunk
@@ -728,6 +733,7 @@ void SV_SpawnServer( const char *server, qboolean loadgame, qboolean restart, qb
 	ge->Cleanup( keep_scripts );
 #if defined(__PS3__)
     PS3_BootTracef("MAPTRANS after ge->Cleanup map=%s", mapname);
+    PS3_ZONECHECK("MAPTRANS after ge->Cleanup");
 #endif
 	ge->SetTime( svs.startTime, svs.time );
 
@@ -750,6 +756,7 @@ void SV_SpawnServer( const char *server, qboolean loadgame, qboolean restart, qb
 		TIKI_FreeAll();
 #if defined(__PS3__)
         PS3_BootTracef("MAPTRANS after TIKI_FreeAll map=%s", mapname);
+        PS3_ZONECHECK("MAPTRANS after TIKI_FreeAll");
 #endif
 		if ( CL_UseLargeLightmap( mapname ) ) {
 			Com_sprintf( filename, sizeof( filename ), "maps/%s.bsp", mapname );
@@ -763,6 +770,7 @@ void SV_SpawnServer( const char *server, qboolean loadgame, qboolean restart, qb
 		CM_LoadMap( filename, qfalse, &checksum );
 #if defined(__PS3__)
         PS3_BootTracef("MAPTRANS after CM_LoadMap file=%s checksum=%d", filename, checksum);
+        PS3_ZONECHECK("MAPTRANS after CM_LoadMap");
 #endif
 
 		// set checksum
@@ -814,6 +822,7 @@ void SV_SpawnServer( const char *server, qboolean loadgame, qboolean restart, qb
 	ge->SetMap( sv_mapname->string );
 #if defined(__PS3__)
     PS3_BootTracef("MAPTRANS after ge->SetMap map=%s", mapname);
+    PS3_ZONECHECK("MAPTRANS after ge->SetMap");
 #endif
 
 	if( !keep_scripts ) {
@@ -823,6 +832,7 @@ void SV_SpawnServer( const char *server, qboolean loadgame, qboolean restart, qb
 		ge->Precache();
 #if defined(__PS3__)
         PS3_BootTracef("MAPTRANS after ge->Precache map=%s", mapname);
+        PS3_ZONECHECK("MAPTRANS after ge->Precache");
 #endif
 	}
 
@@ -860,6 +870,7 @@ void SV_SpawnServer( const char *server, qboolean loadgame, qboolean restart, qb
 		ge->SpawnEntities( CM_EntityString(), svs.time );
 #if defined(__PS3__)
         PS3_BootTracef("MAPTRANS after ge->SpawnEntities map=%s", mapname);
+        PS3_ZONECHECK("MAPTRANS after ge->SpawnEntities");
 #endif
 
 		UI_LoadResource( "*140" );
@@ -895,6 +906,7 @@ void SV_SpawnServer( const char *server, qboolean loadgame, qboolean restart, qb
 			ge->RunFrame( svs.time, 100 );
 #if defined(__PS3__)
             PS3_BootTracef("MAPTRANS after ge->RunFrame map=%s priming=%d", mapname, i);
+            PS3_ZONECHECK("MAPTRANS after ge->RunFrame");
 #endif
 
 			p = ge->errorMessage;
@@ -1042,6 +1054,7 @@ void SV_SpawnServer( const char *server, qboolean loadgame, qboolean restart, qb
 	iEnd = Sys_Milliseconds();
 #if defined(__PS3__)
     PS3_BootTracef("MAPTRANS complete map=%s milliseconds=%d", mapname, iEnd - iStart);
+    PS3_ZONECHECK("MAPTRANS complete");
     PS3_RearmFrameTrace(150);
 #endif
 	Com_Printf( "------ Server Initialization Complete ------ %5.2f seconds\n", ( float )( iEnd - iStart ) / 1000.0f );

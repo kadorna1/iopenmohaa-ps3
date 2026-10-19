@@ -21,6 +21,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 #include "lightclass.h"
+#if defined(__PS3__)
+#    include "../sys/ps3_step.h"
+#endif
 
 #if defined(GAME_DLL)
 
@@ -67,6 +70,10 @@ void *LightClass::operator new(size_t s)
     }
 
     s += sizeof(size_t);
+
+#    if defined(__PS3__)
+    ps3_zone_caller_hint = __builtin_return_address(0);
+#    endif
 
 #    ifdef GAME_DLL
     p = (size_t *)gi.Malloc(s);
