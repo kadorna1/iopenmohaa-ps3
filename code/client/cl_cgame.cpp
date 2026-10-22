@@ -553,7 +553,13 @@ void CL_ShutdownCGame( void ) {
 	}
 	PS3_STEP("CL_ShutdownCGame: after re.FreeModels check");
 
+#if defined(__PS3__)
+	// Same as SV_ShutdownGameProgs: the cgame module is statically linked, its
+	// globals outlive Sys_UnloadCGame() and must not be left pointing at freed memory.
+	PS3_TRACEF("CL_ShutdownCGame: keeping TAG_CGAME memory (static cgame module)");
+#else
 	Z_FreeTags( TAG_CGAME );
+#endif
 	PS3_STEP("CL_ShutdownCGame: done");
 }
 

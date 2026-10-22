@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 // sv_game.c -- interface to the game dll
 
+#include "../sys/ps3_step.h"
 #include "server.h"
 
 #include "../client/snd_public.h"
@@ -1594,8 +1595,19 @@ void SV_ShutdownGameProgs( void ) {
 	ge->Shutdown();
 	Sys_UnloadGame();
 
+#if defined(__PS3__)
+	// The PS3 game module is linked statically: Sys_UnloadGame() unloads nothing, so
+	// its globals (ScriptClass_allocator, StringDict, the event tables, ...) survive
+	// the "unload" and still point into the zone. Freeing every TAG_GAME block here
+	// left those pointers dangling, and the next InitGame died in Z_Free
+	// ("memory block wrote past end"), always on the second map load. Keep the memory:
+	// the module frees what it owns itself when it re-initialises.
+	PS3_TRACEF("SV_ShutdownGameProgs: keeping TAG_GAME memory (static game module)");
+	PS3_ZONECHECK("SV_ShutdownGameProgs kept TAG_GAME");
+#else
 	// Free all memory allocated by the game module
 	Z_FreeTags(TAG_GAME);
+#endif
 
 	ge = NULL;
 }
