@@ -349,7 +349,7 @@ void Sys_PlatformInit(void)
     PS3_LogInit();
     PS3_BootTracef("Sys_PlatformInit: PS3_LogInit returned");
     PS3_Logf("OpenMoHAA PS3 platform init (%s)", PS3_USRDIR);
-    PS3_Logf("PS3 build stamp: %s %s (trace13: keep TAG_GAME/TAG_CGAME memory across static module reloads)", __DATE__, __TIME__);
+    PS3_Logf("PS3 build stamp: %s %s (trace14: keep event tables across static module reloads)", __DATE__, __TIME__);
 }
 void Sys_PlatformExit(void)
 {

@@ -557,6 +557,18 @@ bool L_EventSystemStarted(void)
     return Listener::EventSystemStarted;
 }
 
+#if defined(__PS3__)
+// The PS3 game/cgame modules are linked statically, so "unloading" and "reloading"
+// them does not re-run their static constructors. Events register themselves in
+// those constructors (Event::Event() pushes a DataNode onto DataNodeList, which
+// Event::LoadEvents() consumes and deletes). After the first init the list is
+// empty for good, so a second L_InitEvents() found 0 nodes / 1 event command while
+// every ClassDef still held response tables with event numbers up to ~1760:
+// ClassDef::BuildResponseList() then indexed far past its arrays and trashed the
+// heap. Keep the tables built by the first init and reuse them.
+static bool ps3_events_loaded = false;
+#endif
+
 void L_InitEvents(void)
 {
     PS3_STEP("L_InitEvents: enter");
@@ -567,10 +579,20 @@ void L_InitEvents(void)
     g_eventstats = LISTENER_Cvar_Get("g_eventstats", "0", 0);
     PS3_STEP("L_InitEvents: cvars done");
 
-    Event::LoadEvents();
-    PS3_STEP("L_InitEvents: after Event::LoadEvents");
-    ClassDef::BuildEventResponses();
-    PS3_STEP("L_InitEvents: after ClassDef::BuildEventResponses");
+#if defined(__PS3__)
+    if (ps3_events_loaded) {
+        PS3_STEP("L_InitEvents: reusing event tables from the previous init");
+    } else
+#endif
+    {
+        Event::LoadEvents();
+        PS3_STEP("L_InitEvents: after Event::LoadEvents");
+        ClassDef::BuildEventResponses();
+        PS3_STEP("L_InitEvents: after ClassDef::BuildEventResponses");
+#if defined(__PS3__)
+        ps3_events_loaded = true;
+#endif
+    }
 
     LL_Reset(&Event::EventQueue, next, prev);
     PS3_STEP("L_InitEvents: after LL_Reset");
@@ -623,6 +645,11 @@ void L_ShutdownEvents(void)
 
     L_ClearEventList();
 
+#if defined(__PS3__)
+    // Keep the command/def tables: they cannot be rebuilt without re-running the
+    // module's static constructors (see ps3_events_loaded above).
+    PS3_STEP("L_ShutdownEvents: keeping event tables (static module)");
+#else
     Event::commandList.clear();
     Event::eventDefList.clear();
 #ifdef WITH_SCRIPT_ENGINE
@@ -630,6 +657,7 @@ void L_ShutdownEvents(void)
     Event::returnCommandList.clear();
     Event::getterCommandList.clear();
     Event::setterCommandList.clear();
+#endif
 #endif
 
     Listener::EventSystemStarted = false;
