@@ -395,17 +395,40 @@ static void PS3_ExceptionHandler(u64 cause, sys_ppu_thread_t tid, u64 dar)
     PS3_BootTracef("EXCEPTION report complete");
 }
 
+/* Opt-in: on the first build that registered it unconditionally, the game went
+ * straight back to the XMB right after the "trace level" line, i.e. the firmware's
+ * sys_lv2dbg calls kill the process on that console (probably a retail kernel).
+ * Create USRDIR/exception_handler.txt containing 1, 2 or 3 to try:
+ *   1 = register with flags=1 (stop the faulting threads)
+ *   2 = register with flags=0
+ *   3 = set the handler stack size first, then register with flags=1
+ * Each step is logged *before* the call, so the last line shows which call killed
+ * the process if it does. */
 static void ps3_register_exception_handler(void)
 {
+    int mode = 0;
     s32 rc;
+    FILE *f = fopen(PS3_USRDIR "/exception_handler.txt", "rb");
 
-    sysDbgSetStacksizePPUExceptionHandler(0x10000);
-    rc = sysDbgRegisterPPUExceptionHandler(PS3_ExceptionHandler, 1); /* 1 = stop the faulting threads */
-    PS3_BootTracef("Sys_PlatformInit: PPU exception handler registered (flags=1) rc=0x%x", (unsigned)rc);
-    if (rc != 0) {
-        rc = sysDbgRegisterPPUExceptionHandler(PS3_ExceptionHandler, 0);
-        PS3_BootTracef("Sys_PlatformInit: PPU exception handler registered (flags=0) rc=0x%x", (unsigned)rc);
+    if (f) {
+        int c = fgetc(f);
+        if (c >= '0' && c <= '9') {
+            mode = c - '0';
+        }
+        fclose(f);
     }
+    if (mode < 1 || mode > 3) {
+        PS3_BootTracef("Sys_PlatformInit: PPU exception handler disabled (put 1, 2 or 3 in USRDIR/exception_handler.txt to try it)");
+        return;
+    }
+    if (mode == 3) {
+        PS3_BootTracef("Sys_PlatformInit: about to call sysDbgSetStacksizePPUExceptionHandler(0x10000)");
+        rc = sysDbgSetStacksizePPUExceptionHandler(0x10000);
+        PS3_BootTracef("Sys_PlatformInit: sysDbgSetStacksizePPUExceptionHandler returned rc=0x%x", (unsigned)rc);
+    }
+    PS3_BootTracef("Sys_PlatformInit: about to call sysDbgRegisterPPUExceptionHandler(flags=%d)", mode == 2 ? 0 : 1);
+    rc = sysDbgRegisterPPUExceptionHandler(PS3_ExceptionHandler, mode == 2 ? 0 : 1);
+    PS3_BootTracef("Sys_PlatformInit: sysDbgRegisterPPUExceptionHandler returned rc=0x%x", (unsigned)rc);
 }
 
 void Sys_PlatformInit(void)
@@ -421,7 +444,7 @@ void Sys_PlatformInit(void)
     PS3_LogInit();
     PS3_BootTracef("Sys_PlatformInit: PS3_LogInit returned");
     PS3_Logf("OpenMoHAA PS3 platform init (%s)", PS3_USRDIR);
-    PS3_Logf("PS3 build stamp: %s %s (trace15: PPU exception handler, throttled tracing)", __DATE__, __TIME__);
+    PS3_Logf("PS3 build stamp: %s %s (trace16: crash crumb file, exception handler opt-in)", __DATE__, __TIME__);
     PS3_BootTracef("Sys_PlatformInit: trace level %d (create USRDIR/trace_level.txt containing 2 for full tracing)", PS3_TraceLevel());
     ps3_register_exception_handler();
 }

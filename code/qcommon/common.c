@@ -2254,7 +2254,7 @@ void PS3_RearmFrameTrace(int frames) {
 	ps3_clframe_trace_limit = frames;
 	PS3_BootTracef("FRAME trace window re-armed for %d frames", frames);
 }
-#define PS3_FT(...) do { if (ps3_frame_trace < ps3_frame_trace_limit) PS3_BootTracef("FRAME " __VA_ARGS__); } while (0)
+#define PS3_FT(...) do { if (ps3_frame_trace < ps3_frame_trace_limit || PS3_TraceLevel() < 2) PS3_BootTracef("FRAME " __VA_ARGS__); } while (0)
 #else
 #define PS3_FT(...) ((void)0)
 #endif

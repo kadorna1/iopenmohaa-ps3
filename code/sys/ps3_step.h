@@ -43,7 +43,7 @@ void PS3_RearmFrameTrace(int frames);
 #define PS3_ZONECHECK(where) PS3_ZoneCheck((where), 1)
 #define PS3_ZONECHECK_QUIET(where) PS3_ZoneCheck((where), 0)
 /* PS3_FTRACE("fmt", ...): synced, but only while the frame-trace window is open. */
-#define PS3_FTRACE(...) do { if (ps3_frame_trace < ps3_frame_trace_limit) PS3_BootTracef("NET " __VA_ARGS__); } while (0)
+#define PS3_FTRACE(...) do { if (ps3_frame_trace < ps3_frame_trace_limit || PS3_TraceLevel() < 2) PS3_BootTracef("NET " __VA_ARGS__); } while (0)
 #else
 #define PS3_TRACEMEM(tag) ((void)0)
 #define PS3_ZONECHECK(where) ((void)0)

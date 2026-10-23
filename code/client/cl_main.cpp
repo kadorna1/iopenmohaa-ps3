@@ -2692,7 +2692,7 @@ CL_Frame
 ==================
 */
 #if defined(__PS3__)
-#define PS3_CLF(msg) do { if (ps3_clframe_trace < ps3_clframe_trace_limit) PS3_BootTracef("CL_Frame %d: " msg, ps3_clframe_trace); } while (0)
+#define PS3_CLF(msg) do { if (ps3_clframe_trace < ps3_clframe_trace_limit || PS3_TraceLevel() < 2) PS3_BootTracef("CL_Frame %d: " msg, ps3_clframe_trace); } while (0)
 #else
 #define PS3_CLF(msg) ((void)0)
 #endif

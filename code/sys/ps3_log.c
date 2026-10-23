@@ -201,7 +201,7 @@ int PS3_TraceLevel(void)
 static int boot_msg_noisy(const char *m)
 {
     static const char *const prefixes[] = {
-        "RSX_", "INPUT ", "FRAME ", "IMGLOAD ", "JPG read", "JPG error", "NET ", "SURFLOAD",
+        "RSX_", "INPUT ", "FRAME ", "CL_Frame ", "IMGLOAD ", "JPG read", "JPG error", "NET ", "SURFLOAD",
         "PS3_KEY_EVENT", "TEX:", "IMG:", "PS3_UI_", "SCRIPT_CACHE", NULL
     };
     unsigned i;
@@ -211,6 +211,40 @@ static int boot_msg_noisy(const char *m)
             return 1;
     }
     return 0;
+}
+
+/* Crumb file: the last BOOT_CRUMB_RECORDS throttled lines, fixed-size text
+ * records in USRDIR/openmohaa-crumbs.txt, written through a persistent handle
+ * (a seek and a write, no open/fsync/close). The data is in the file system cache,
+ * so it survives the process being killed; sort the records by their [seq] prefix
+ * to read the final steps before a crash. */
+#define BOOT_CRUMB_RECORDS 128
+#define BOOT_CRUMB_RECLEN 128
+static s32 boot_crumb_fd = -2;
+
+static void boot_crumb(unsigned seq, const char *msg, int len)
+{
+    char rec[BOOT_CRUMB_RECLEN];
+    u64 pos = 0, wrote = 0;
+
+    if (boot_crumb_fd == -2) {
+        boot_crumb_fd = -1;
+        if (sysLv2FsOpen(PS3_USRDIR "/openmohaa-crumbs.txt", SYS_O_WRONLY | SYS_O_CREAT | SYS_O_TRUNC,
+                &boot_crumb_fd, 0644, NULL, 0) != 0) {
+            boot_crumb_fd = -1;
+        }
+    }
+    if (boot_crumb_fd < 0)
+        return;
+    while (len > 0 && (msg[len - 1] == '\n' || msg[len - 1] == '\r'))
+        --len;
+    if (len > BOOT_CRUMB_RECLEN - 1)
+        len = BOOT_CRUMB_RECLEN - 1;
+    memset(rec, ' ', sizeof(rec));
+    memcpy(rec, msg, (size_t)len);
+    rec[BOOT_CRUMB_RECLEN - 1] = '\n';
+    sysLv2FsLSeek64(boot_crumb_fd, (u64)(seq % BOOT_CRUMB_RECORDS) * BOOT_CRUMB_RECLEN, 0 /* SEEK_SET */, &pos);
+    sysLv2FsWrite(boot_crumb_fd, rec, BOOT_CRUMB_RECLEN, &wrote);
 }
 
 static void boot_trace_v(int fast, const char *fmt, va_list ap)
@@ -236,6 +270,7 @@ static void boot_trace_v(int fast, const char *fmt, va_list ap)
         memcpy(slot, message, len);
         slot[len] = '\0';
         boot_ring_pos++;
+        boot_crumb(boot_seq, message, n);
         return;
     }
 
