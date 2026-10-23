@@ -2416,12 +2416,16 @@ void Com_Frame( void ) {
     lastTime = com_frameTime;
     com_frameTime = Com_EventLoop();
     PS3_FT("%d: after Com_EventLoop", ps3_frame_trace);
+#if defined(__PS3__)
     {
+        // The heap walk touches every zone block: every 4th frame in verbose
+        // trace mode (level 2), every 128th otherwise.
         static unsigned ps3_zone_frames = 0;
-        if( ( ++ps3_zone_frames & 3 ) == 0 ) {
+        if( ( ++ps3_zone_frames & ( PS3_TraceLevel() >= 2 ? 3u : 127u ) ) == 0 ) {
             PS3_ZONECHECK_QUIET( "frame" );
         }
     }
+#endif
 
     msec = com_frameTime - lastTime;
 

@@ -1,4 +1,5 @@
 /* OpenMoHAA PS3/PSL1GHT platform layer. */
+#include <sys/dbg.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -336,6 +337,77 @@ int PS3_PlatformRunning(void)
 
 void Sys_GLimpSafeInit(void) {}
 void Sys_GLimpInit(void) {}
+/* PPU exception handler: runs on its own thread when any PPU thread faults
+ * (bad pointer, illegal instruction, alignment...). Log the faulting PC, LR, CTR,
+ * the data address and the registers, walk the stack, and dump the trace ring, so
+ * the crash site can be resolved against the build's ELF with addr2line. */
+static volatile int ps3_exc_active = 0;
+
+static int ps3_exc_addr_ok(u64 a)
+{
+    return a >= 0x10000ULL && a < 0xD0000000ULL;
+}
+
+static void PS3_ExceptionHandler(u64 cause, sys_ppu_thread_t tid, u64 dar)
+{
+    sys_dbg_ppu_thread_context_t ctx;
+    s32 rc;
+    u64 sp;
+    int i;
+
+    if (ps3_exc_active++) {
+        return;
+    }
+    PS3_BootTracef("EXCEPTION cause=0x%llx tid=0x%llx dar=0x%llx", (unsigned long long)cause,
+        (unsigned long long)tid, (unsigned long long)dar);
+    memset(&ctx, 0, sizeof(ctx));
+    rc = sysDbgReadPPUThreadContext(tid, &ctx);
+    PS3_BootTracef("EXCEPTION context rc=0x%x pc=0x%08x lr=0x%08x ctr=0x%08x cr=0x%08x xer=0x%08x",
+        (unsigned)rc, (unsigned)ctx.pc, (unsigned)ctx.lr, (unsigned)ctx.ctr, (unsigned)ctx.cr, (unsigned)ctx.xer);
+    if (rc == 0) {
+        PS3_BootTracef("EXCEPTION r0=%llx r1=%llx r2=%llx r3=%llx r4=%llx r5=%llx r6=%llx r7=%llx",
+            (unsigned long long)ctx.gpr[0], (unsigned long long)ctx.gpr[1], (unsigned long long)ctx.gpr[2],
+            (unsigned long long)ctx.gpr[3], (unsigned long long)ctx.gpr[4], (unsigned long long)ctx.gpr[5],
+            (unsigned long long)ctx.gpr[6], (unsigned long long)ctx.gpr[7]);
+        PS3_BootTracef("EXCEPTION r8=%llx r9=%llx r10=%llx r11=%llx r12=%llx r28=%llx r29=%llx r30=%llx r31=%llx",
+            (unsigned long long)ctx.gpr[8], (unsigned long long)ctx.gpr[9], (unsigned long long)ctx.gpr[10],
+            (unsigned long long)ctx.gpr[11], (unsigned long long)ctx.gpr[12], (unsigned long long)ctx.gpr[28],
+            (unsigned long long)ctx.gpr[29], (unsigned long long)ctx.gpr[30], (unsigned long long)ctx.gpr[31]);
+        /* PPC64 ELF: 0(sp) = back chain; a function's return address is saved at 16(back chain). */
+        sp = ctx.gpr[1];
+        for (i = 0; i < 24; ++i) {
+            u64 prev;
+            u64 ret;
+
+            if (!ps3_exc_addr_ok(sp) || (sp & 7)) {
+                break;
+            }
+            prev = *(const u64 *)(uintptr_t)sp;
+            if (!ps3_exc_addr_ok(prev) || (prev & 7) || prev <= sp || !ps3_exc_addr_ok(prev + 16)) {
+                break;
+            }
+            ret = *(const u64 *)(uintptr_t)(prev + 16);
+            PS3_BootTracef("EXCEPTION bt%d sp=0x%llx ret=0x%llx", i, (unsigned long long)sp, (unsigned long long)ret);
+            sp = prev;
+        }
+    }
+    PS3_DumpTraceRing("exception");
+    PS3_BootTracef("EXCEPTION report complete");
+}
+
+static void ps3_register_exception_handler(void)
+{
+    s32 rc;
+
+    sysDbgSetStacksizePPUExceptionHandler(0x10000);
+    rc = sysDbgRegisterPPUExceptionHandler(PS3_ExceptionHandler, 1); /* 1 = stop the faulting threads */
+    PS3_BootTracef("Sys_PlatformInit: PPU exception handler registered (flags=1) rc=0x%x", (unsigned)rc);
+    if (rc != 0) {
+        rc = sysDbgRegisterPPUExceptionHandler(PS3_ExceptionHandler, 0);
+        PS3_BootTracef("Sys_PlatformInit: PPU exception handler registered (flags=0) rc=0x%x", (unsigned)rc);
+    }
+}
+
 void Sys_PlatformInit(void)
 {
     PS3_BootTracef("Sys_PlatformInit: entry USRDIR=%s", PS3_USRDIR);
@@ -349,7 +421,9 @@ void Sys_PlatformInit(void)
     PS3_LogInit();
     PS3_BootTracef("Sys_PlatformInit: PS3_LogInit returned");
     PS3_Logf("OpenMoHAA PS3 platform init (%s)", PS3_USRDIR);
-    PS3_Logf("PS3 build stamp: %s %s (trace14: keep event tables across static module reloads)", __DATE__, __TIME__);
+    PS3_Logf("PS3 build stamp: %s %s (trace15: PPU exception handler, throttled tracing)", __DATE__, __TIME__);
+    PS3_BootTracef("Sys_PlatformInit: trace level %d (create USRDIR/trace_level.txt containing 2 for full tracing)", PS3_TraceLevel());
+    ps3_register_exception_handler();
 }
 void Sys_PlatformExit(void)
 {

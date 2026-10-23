@@ -42,6 +42,7 @@ list(APPEND COMMON_LIBRARIES
     sysmodule
     sysutil
     rt
+    lv2dbg
     lv2
     net
     netctl

@@ -17,6 +17,10 @@ void PS3_Logf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
  * sent over UDP once PS3_LogNetInit() has run, so it survives a console
  * freeze. Safe to call from static constructors (no malloc, no stdio). */
 void PS3_BootTracef(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+/* Trace throttling (ps3_log.c): level 1 keeps per-frame/per-image lines in a ring buffer,
+ * level 2 (USRDIR/trace_level.txt containing "2") writes everything. */
+int PS3_TraceLevel(void);
+void PS3_DumpTraceRing(const char *why);
 /* Same, without the fsync and with a single sink: cheap enough for loops. */
 void PS3_BootTraceFastf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 

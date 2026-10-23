@@ -166,18 +166,78 @@ void PS3_LogNetInit(void)
 
 static unsigned boot_seq;
 
+/* Trace throttling. Every emitted line costs a file open/write/(fsync)/close
+ * plus a second sink, tens of milliseconds for the synced ones. At ~35 lines per
+ * frame, plus thousands of per-image lines while a map loads, the tracing itself
+ * was most of the frame time (10 fps in game, 0.2 fps while loading).
+ *
+ * Level 1 (default): high-volume per-frame / per-image lines are kept in an
+ * in-memory ring buffer only; PS3_DumpTraceRing() writes it out (the PPU
+ * exception handler does). Level 2 (file USRDIR/trace_level.txt containing "2")
+ * writes everything, as before. */
+#define BOOT_RING_LINES 384
+#define BOOT_RING_LINE_LEN 176
+static char boot_ring[BOOT_RING_LINES][BOOT_RING_LINE_LEN];
+static unsigned boot_ring_pos;
+static int boot_level = -1;
+
+int PS3_TraceLevel(void)
+{
+    if (boot_level < 0) {
+        s32 fd = -1;
+        u64 got = 0;
+        char c = 0;
+
+        boot_level = 1;
+        if (sysLv2FsOpen(PS3_USRDIR "/trace_level.txt", SYS_O_RDONLY, &fd, 0, NULL, 0) == 0) {
+            if (sysLv2FsRead(fd, &c, 1, &got) == 0 && got == 1 && c >= '0' && c <= '9')
+                boot_level = c - '0';
+            sysLv2FsClose(fd);
+        }
+    }
+    return boot_level;
+}
+
+static int boot_msg_noisy(const char *m)
+{
+    static const char *const prefixes[] = {
+        "RSX_", "INPUT ", "FRAME ", "IMGLOAD ", "JPG read", "JPG error", "NET ", "SURFLOAD",
+        "PS3_KEY_EVENT", "TEX:", "IMG:", "PS3_UI_", "SCRIPT_CACHE", NULL
+    };
+    unsigned i;
+
+    for (i = 0; prefixes[i]; ++i) {
+        if (strncmp(m, prefixes[i], strlen(prefixes[i])) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 static void boot_trace_v(int fast, const char *fmt, va_list ap)
 {
     char message[PS3_LOG_LINE_MAX + 24];
-    int n;
+    int n, prefix;
 
     n = snprintf(message, sizeof(message), "[%u] ", ++boot_seq);
     if (n < 0)
         n = 0;
+    prefix = n;
     vsnprintf(message + n, PS3_LOG_LINE_MAX, fmt, ap);
     n = (int)strlen(message);
     message[n++] = '\n';
     message[n] = '\0';
+
+    if (boot_msg_noisy(message + prefix) && PS3_TraceLevel() < 2) {
+        char *slot = boot_ring[boot_ring_pos % BOOT_RING_LINES];
+        size_t len = (size_t)n;
+
+        if (len >= BOOT_RING_LINE_LEN)
+            len = BOOT_RING_LINE_LEN - 1;
+        memcpy(slot, message, len);
+        slot[len] = '\0';
+        boot_ring_pos++;
+        return;
+    }
 
     boot_emit(message, (size_t)n, fast);
     net_send(message, (size_t)n);
@@ -200,6 +260,28 @@ void PS3_BootTraceFastf(const char *fmt, ...)
     va_start(ap, fmt);
     boot_trace_v(1, fmt, ap);
     va_end(ap);
+}
+
+/* Write the in-memory ring of throttled lines to the early trace, oldest first. */
+void PS3_DumpTraceRing(const char *why)
+{
+    unsigned total = boot_ring_pos;
+    unsigned start = total > BOOT_RING_LINES ? total - BOOT_RING_LINES : 0;
+    unsigned i;
+
+    PS3_BootTraceFastf("TRACERING dump (%s): last %u throttled lines follow", why ? why : "?", total - start);
+    for (i = start; i < total; ++i) {
+        char line[BOOT_RING_LINE_LEN];
+        size_t len;
+
+        memcpy(line, boot_ring[i % BOOT_RING_LINES], sizeof(line));
+        line[sizeof(line) - 1] = '\0';
+        len = strlen(line);
+        while (len && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+            line[--len] = '\0';
+        PS3_BootTraceFastf("RING %s", line);
+    }
+    PS3_BootTraceFastf("TRACERING end");
 }
 
 /* ---- normal log -------------------------------------------------------------- */

@@ -19,6 +19,8 @@ void PS3_TraceMemory(const char *tag);
  * block, validating links and the trailing guard word, and logs any corrupt
  * block with its size, tag and allocator addresses. verbose=1 also logs a summary. */
 int PS3_ZoneCheck(const char *where, int verbose);
+int PS3_TraceLevel(void);
+void PS3_DumpTraceRing(const char *why);
 extern void *ps3_zone_caller_hint;
 /* Frame-trace window: boot traces the first 3 frames; PS3_RearmFrameTrace(n)
  * re-opens the window for the next n frames (used when a map finishes loading,
