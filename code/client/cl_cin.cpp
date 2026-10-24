@@ -31,6 +31,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  *****************************************************************************/
 
+#include "../sys/ps3_step.h"
 #include "client.h"
 #include "../uilib/ui_public.h"
 #include "snd_local.h"
@@ -1110,7 +1111,9 @@ static void RoQInterrupt(void)
         
 	if (currentHandle < 0) return;
 
+	PS3_CINF("RoQInterrupt enter played=%ld size=%ld frameSize=%u id=0x%x quads=%ld", (long)cinTable[currentHandle].RoQPlayed, (long)cinTable[currentHandle].ROQSize, (unsigned)cinTable[currentHandle].RoQFrameSize, (unsigned)cinTable[currentHandle].roq_id, (long)cinTable[currentHandle].numQuads);
 	FS_Read( cin.file, cinTable[currentHandle].RoQFrameSize+8, cinTable[currentHandle].iFile );
+	PS3_CINF("RoQInterrupt after FS_Read");
 	if ( cinTable[currentHandle].RoQPlayed >= cinTable[currentHandle].ROQSize ) { 
 		if (cinTable[currentHandle].holdAtEnd==qfalse) {
 			if (cinTable[currentHandle].looping) {
@@ -1129,6 +1132,7 @@ static void RoQInterrupt(void)
 // new frame is ready
 //
 redump:
+	PS3_CINF("RoQInterrupt decode id=0x%x frameSize=%u", (unsigned)cinTable[currentHandle].roq_id, (unsigned)cinTable[currentHandle].RoQFrameSize);
 	switch(cinTable[currentHandle].roq_id) 
 	{
 		case	ROQ_QUAD_VQ:
@@ -1185,6 +1189,7 @@ redump:
 			cinTable[currentHandle].status = FMV_EOF;
 			break;
 	}	
+	PS3_CINF("RoQInterrupt decoded id=0x%x", (unsigned)cinTable[currentHandle].roq_id);
 //
 // read in next frame data
 //
@@ -1331,6 +1336,7 @@ CIN_StopCinematic
 ==================
 */
 e_status CIN_StopCinematic(int handle) {
+	PS3_CINF("StopCinematic enter handle=%d", handle);
 	
 	if (handle < 0 || handle>= MAX_VIDEO_HANDLES || cinTable[handle].status == FMV_EOF) return FMV_EOF;
 	currentHandle = handle;
@@ -1363,6 +1369,7 @@ Fetch and decompress the pending frame
 
 e_status CIN_RunCinematic (int handle)
 {
+	PS3_CINF("RunCinematic enter handle=%d", handle);
 	int deltaTime;
 	int frameTime;
 	int soundTime;
@@ -1426,7 +1433,9 @@ e_status CIN_RunCinematic (int handle)
 	while(  (tfps != cinTable[currentHandle].numQuads)
 		&& (cinTable[currentHandle].status == FMV_PLAY) ) 
 	{
+		PS3_CINF("RunCinematic before RoQInterrupt tfps=%ld quads=%ld", (long)tfps, (long)cinTable[currentHandle].numQuads);
 		RoQInterrupt();
+		PS3_CINF("RunCinematic after RoQInterrupt status=%d", (int)cinTable[currentHandle].status);
 
 		cinTable[currentHandle].realTime = Com_Milliseconds();
 		if (cinTable[currentHandle].realTime > frameTime + 66) {
@@ -1457,6 +1466,7 @@ CIN_PlayCinematic
 ==================
 */
 int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBits ) {
+	PS3_CINF("PlayCinematic enter arg=%.60s", arg ? arg : "(null)");
 	unsigned short RoQID;
 	char	name[MAX_OSPATH];
 	int		i;
@@ -1616,6 +1626,7 @@ CIN_DrawCinematic
 ==================
 */
 void CIN_DrawCinematic (int handle) {
+	PS3_CINF("DrawCinematic enter handle=%d", handle);
 	float	x, y, w, h;
 	byte	*buf;
 

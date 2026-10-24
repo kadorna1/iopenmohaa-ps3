@@ -175,7 +175,7 @@ static unsigned boot_seq;
  * in-memory ring buffer only; PS3_DumpTraceRing() writes it out (the PPU
  * exception handler does). Level 2 (file USRDIR/trace_level.txt containing "2")
  * writes everything, as before. */
-#define BOOT_RING_LINES 384
+#define BOOT_RING_LINES 512
 #define BOOT_RING_LINE_LEN 176
 static char boot_ring[BOOT_RING_LINES][BOOT_RING_LINE_LEN];
 static unsigned boot_ring_pos;
@@ -201,7 +201,7 @@ int PS3_TraceLevel(void)
 static int boot_msg_noisy(const char *m)
 {
     static const char *const prefixes[] = {
-        "RSX_", "INPUT ", "FRAME ", "CL_Frame ", "IMGLOAD ", "JPG read", "JPG error", "NET ", "SURFLOAD",
+        "RSX_", "INPUT ", "FRAME ", "CL_Frame ", "CIN ", "IMGLOAD ", "JPG read", "JPG error", "NET ", "SURFLOAD",
         "PS3_KEY_EVENT", "TEX:", "IMG:", "PS3_UI_", "SCRIPT_CACHE", NULL
     };
     unsigned i;
@@ -218,7 +218,7 @@ static int boot_msg_noisy(const char *m)
  * (a seek and a write, no open/fsync/close). The data is in the file system cache,
  * so it survives the process being killed; sort the records by their [seq] prefix
  * to read the final steps before a crash. */
-#define BOOT_CRUMB_RECORDS 128
+#define BOOT_CRUMB_RECORDS 512
 #define BOOT_CRUMB_RECLEN 128
 static s32 boot_crumb_fd = -2;
 

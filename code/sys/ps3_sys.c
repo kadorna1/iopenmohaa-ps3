@@ -444,7 +444,7 @@ void Sys_PlatformInit(void)
     PS3_LogInit();
     PS3_BootTracef("Sys_PlatformInit: PS3_LogInit returned");
     PS3_Logf("OpenMoHAA PS3 platform init (%s)", PS3_USRDIR);
-    PS3_Logf("PS3 build stamp: %s %s (trace16: crash crumb file, exception handler opt-in)", __DATE__, __TIME__);
+    PS3_Logf("PS3 build stamp: %s %s (trace17: cinematic and NET_Sleep crumbs)", __DATE__, __TIME__);
     PS3_BootTracef("Sys_PlatformInit: trace level %d (create USRDIR/trace_level.txt containing 2 for full tracing)", PS3_TraceLevel());
     ps3_register_exception_handler();
 }

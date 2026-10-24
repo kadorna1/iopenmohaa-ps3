@@ -1763,6 +1763,9 @@ void NET_Sleep(int msec)
 	if(msec < 0)
 		msec = 0;
 
+#ifdef __PS3__
+	PS3_BootTracef("NET NET_Sleep enter msec=%d ip_socket=%d ip6_socket=%d", msec, (int)ip_socket, (int)ip6_socket);
+#endif
 	FD_ZERO(&fdr);
 
 	if(ip_socket != INVALID_SOCKET)
@@ -1792,6 +1795,7 @@ void NET_Sleep(int msec)
 	timeout.tv_usec = (msec%1000)*1000;
 
 #ifdef __PS3__
+	PS3_BootTracef("NET NET_Sleep after FD_SET highestfd=%d", (int)highestfd);
 	{
 		static int ps3_sleep_trace = 0;
 
@@ -1803,6 +1807,7 @@ void NET_Sleep(int msec)
 #endif
 	retval = select(highestfd + 1, &fdr, NULL, NULL, &timeout);
 #ifdef __PS3__
+	PS3_BootTracef("NET NET_Sleep select returned %d", retval);
 	{
 		static int ps3_sleep_trace2 = 0;
 

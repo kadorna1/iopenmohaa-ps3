@@ -2398,13 +2398,17 @@ void Com_Frame( void ) {
                 PS3_BootTracef("FRAME %d: skip NET_Sleep(0) because minMsec=%d timeVal=%d",
                                ps3_frame_trace, minMsec, timeVal);
             } else {
+                PS3_FT("%d: before NET_Sleep(0) minMsec=%d timeVal=%d", ps3_frame_trace, minMsec, timeVal);
                 NET_Sleep(0);
+                PS3_FT("%d: after NET_Sleep(0)", ps3_frame_trace);
             }
 #else
             NET_Sleep(0);
 #endif
         } else {
+            PS3_FT("%d: before NET_Sleep(%d)", ps3_frame_trace, timeVal - 1);
             NET_Sleep(timeVal - 1);
+            PS3_FT("%d: after NET_Sleep", ps3_frame_trace);
         }
     } while (Com_TimeVal(minMsec));
     }

@@ -38,6 +38,8 @@ void PS3_RearmFrameTrace(int frames);
 #define PS3_STEPF(...) PS3_BootTraceFastf("STEP: " __VA_ARGS__)
 /* PS3_TRACEF("fmt", args...): printf-style, synced (survives a crash). Init paths only. */
 #define PS3_TRACEF(...) PS3_BootTracef(__VA_ARGS__)
+/* PS3_CINF("fmt", ...): cinematic crumbs; throttled to the ring + crumb file at trace level 1. */
+#define PS3_CINF(...) PS3_BootTracef("CIN " __VA_ARGS__)
 /* PS3_TRACEMEM("tag"): log lv2 user-memory total/available and the newlib heap in use. */
 #define PS3_TRACEMEM(tag) PS3_TraceMemory(tag)
 #define PS3_ZONECHECK(where) PS3_ZoneCheck((where), 1)
@@ -46,6 +48,7 @@ void PS3_RearmFrameTrace(int frames);
 #define PS3_FTRACE(...) do { if (ps3_frame_trace < ps3_frame_trace_limit || PS3_TraceLevel() < 2) PS3_BootTracef("NET " __VA_ARGS__); } while (0)
 #else
 #define PS3_TRACEMEM(tag) ((void)0)
+#define PS3_CINF(...) ((void)0)
 #define PS3_ZONECHECK(where) ((void)0)
 #define PS3_ZONECHECK_QUIET(where) ((void)0)
 #define PS3_FTRACE(...) ((void)0)
