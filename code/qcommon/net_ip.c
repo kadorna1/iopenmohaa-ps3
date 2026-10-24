@@ -527,6 +527,50 @@ qboolean	NET_IsLocalAddress( netadr_t adr ) {
 
 //=============================================================================
 
+#if defined(__PS3__)
+/*
+ * PS3 sockets. socket() returns netSocket(...) | SOCKET_FD_MASK (0x40000000, a flag
+ * that keeps socket descriptors apart from file descriptors), e.g. 0x4000006C for
+ * socket id 108. select() works on a bitmap indexed by the plain socket id, an array
+ * of 32-bit words (_net_fd_set). Newlib's FD_SET()/FD_ISSET() do neither: they index
+ * with the flagged value (about 64 MB past the bitmap, an immediate fault: the first
+ * NET_Sleep(0) of a run killed the game during the intro) and assume a 64-bit fd_mask.
+ */
+#	ifndef SOCKET_FD_MASK
+#		define SOCKET_FD_MASK 0x40000000
+#	endif
+#	define PS3_SOCK_ID(s)		((int)(s) & ~SOCKET_FD_MASK)
+
+static void ps3_fd_set( fd_set *set, SOCKET s )
+{
+	const int id = PS3_SOCK_ID( s );
+
+	if( id >= 0 && id < 1024 ) {
+		( (unsigned int *)set )[ id >> 5 ] |= 1u << ( id & 31 );
+	}
+}
+
+static int ps3_fd_isset( const fd_set *set, SOCKET s )
+{
+	const int id = PS3_SOCK_ID( s );
+
+	if( id < 0 || id >= 1024 ) {
+		return 0;
+	}
+	return ( ( (const unsigned int *)set )[ id >> 5 ] >> ( id & 31 ) ) & 1u;
+}
+
+#	define NET_FD_SET(s, set)	ps3_fd_set( (set), (s) )
+#	define NET_FD_ISSET(s, set)	ps3_fd_isset( (set), (s) )
+#	define NET_SELECT_NFDS(s)	( (s) == INVALID_SOCKET ? 0 : PS3_SOCK_ID( s ) + 1 )
+#else
+#	define NET_FD_SET(s, set)	FD_SET( (s), (set) )
+#	define NET_FD_ISSET(s, set)	FD_ISSET( (s), (set) )
+#	define NET_SELECT_NFDS(s)	( (s) + 1 )
+#endif
+
+//=============================================================================
+
 /*
 ==================
 NET_GetPacket
@@ -541,7 +585,7 @@ qboolean NET_GetPacket(netadr_t *net_from, msg_t *net_message, fd_set *fdr)
 	socklen_t	fromlen;
 	int		err;
 	
-	if(ip_socket != INVALID_SOCKET && FD_ISSET(ip_socket, fdr))
+	if(ip_socket != INVALID_SOCKET && NET_FD_ISSET(ip_socket, fdr))
 	{
 		fromlen = sizeof(from);
 		ret = recvfrom( ip_socket, (void *)net_message->data, net_message->maxsize, 0, (struct sockaddr *) &from, &fromlen );
@@ -585,7 +629,7 @@ qboolean NET_GetPacket(netadr_t *net_from, msg_t *net_message, fd_set *fdr)
 		}
 	}
 	
-	if(ip6_socket != INVALID_SOCKET && FD_ISSET(ip6_socket, fdr))
+	if(ip6_socket != INVALID_SOCKET && NET_FD_ISSET(ip6_socket, fdr))
 	{
 		fromlen = sizeof(from);
 		ret = recvfrom(ip6_socket, (void *)net_message->data, net_message->maxsize, 0, (struct sockaddr *) &from, &fromlen);
@@ -613,7 +657,7 @@ qboolean NET_GetPacket(netadr_t *net_from, msg_t *net_message, fd_set *fdr)
 		}
 	}
 
-	if(multicast6_socket != INVALID_SOCKET && multicast6_socket != ip6_socket && FD_ISSET(multicast6_socket, fdr))
+	if(multicast6_socket != INVALID_SOCKET && multicast6_socket != ip6_socket && NET_FD_ISSET(multicast6_socket, fdr))
 	{
 		fromlen = sizeof(from);
 		ret = recvfrom(multicast6_socket, (void *)net_message->data, net_message->maxsize, 0, (struct sockaddr *) &from, &fromlen);
@@ -1770,13 +1814,13 @@ void NET_Sleep(int msec)
 
 	if(ip_socket != INVALID_SOCKET)
 	{
-		FD_SET(ip_socket, &fdr);
+		NET_FD_SET(ip_socket, &fdr);
 
 		highestfd = ip_socket;
 	}
 	if(ip6_socket != INVALID_SOCKET)
 	{
-		FD_SET(ip6_socket, &fdr);
+		NET_FD_SET(ip6_socket, &fdr);
 
 		if(highestfd == INVALID_SOCKET || ip6_socket > highestfd)
 			highestfd = ip6_socket;
@@ -1805,7 +1849,7 @@ void NET_Sleep(int msec)
 		}
 	}
 #endif
-	retval = select(highestfd + 1, &fdr, NULL, NULL, &timeout);
+	retval = select(NET_SELECT_NFDS(highestfd), &fdr, NULL, NULL, &timeout);
 #ifdef __PS3__
 	PS3_BootTracef("NET NET_Sleep select returned %d", retval);
 	{
