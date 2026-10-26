@@ -20,8 +20,8 @@
 
 extern int Key_GetCatcher(void);
 extern qboolean in_guimouse;
-extern qboolean UI_MenuActive(void);
-extern void UI_KeyEvent(int key, unsigned int time);
+extern qboolean PS3_UI_MenuActiveForInput(void);
+extern void PS3_UI_KeyEventForInput(int key, unsigned int time);
 extern void CL_GetMouseState(int *x, int *y, unsigned int *buttons);
 extern void CL_SetMousePos(int x, int y);
 extern void Key_SetBinding(int keynum, const char *binding);
@@ -358,8 +358,8 @@ static int      s_cursor_ui_active = 0;
 static u32      s_input_trace_mask = 0xffffffffu;
 static int      s_input_trace_connected = 0;
 static int      pad_down[PB_COUNT];      /* state as last reported to the engine */
-static int      pad_sent[PB_COUNT];
-static int      pad_ui_direct[PB_COUNT];   /* arrow sent straight to active menu UI */      /* key sent for the press, released with it */
+static int      pad_sent[PB_COUNT];       /* key sent for the press, released with it */
+static int      pad_ui_direct[PB_COUNT];  /* arrow sent straight to active menu UI */
 /* Match ioRTCW-PS3's PS3-to-Quake axis routing: left X/Y -> 0/1,
  * right X/Y -> YAW(4)/ROLL(3). OpenMoHAA inherits Quake's axis enum, so
  * emitting right-X as 2 feeds AXIS_UP, not yaw. */
@@ -457,13 +457,13 @@ static qboolean PS3_MenuArrowUsesDirectUI(int key, int catchers)
     if (catchers & KEYCATCH_UI)
         return qtrue;
 
-    return (UI_MenuActive() &&
+    return (PS3_UI_MenuActiveForInput() &&
             !(catchers & (KEYCATCH_CONSOLE | KEYCATCH_MESSAGE))) ? qtrue : qfalse;
 }
 
 static void PS3_DispatchMenuArrow(int key)
 {
-    UI_KeyEvent(key, (unsigned int)Sys_Milliseconds());
+    PS3_UI_KeyEventForInput(key, (unsigned int)Sys_Milliseconds());
 }
 
 static void pad_release_all(void)
