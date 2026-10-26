@@ -33,11 +33,29 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            autoconf automake bison flex build-essential cmake ninja-build \
+            autoconf automake bison flex build-essential ccache cmake ninja-build \
             file imagemagick libelf-dev libgmp-dev libmpfr-dev libmpc-dev \
             libncurses-dev libssl-dev libtool libtool-bin pkg-config \
             python3 python3-pil python3-setuptools subversion texinfo wget \
             zlib1g-dev zip
+
+      # Cache compiler outputs across ephemeral GitHub-hosted runners.
+      # The unique SHA key lets each run save an updated cache; restore-keys
+      # fall back to the latest cache for this branch, then main.
+      - name: Restore PS3 compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ps3-ccache-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ps3-ccache-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-${{ github.ref_name }}-
+            ps3-ccache-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-main-
+
+      - name: Configure ccache
+        run: |
+          ccache --set-config=compiler_check=content
+          ccache --max-size=2G
+          ccache --show-stats
 
       - name: Download and verify prebuilt PS3DEV / PSL1GHT nightly
         shell: bash
@@ -103,6 +121,8 @@ jobs:
           cmake -S . -B build-ps3 -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=cmake/ps3-psl1ght.cmake \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/openmohaa-ps3-install" \
             -DOPENMOHAA_PS3_APPID="$OPENMOHAA_PS3_APPID" \
             -DBUILD_SERVER=OFF \
@@ -123,6 +143,10 @@ jobs:
         run: |
           set -o pipefail
           cmake --build build-ps3 --parallel 2 2>&1 | tee ps3-build.log
+
+      - name: Report PS3 compiler-cache statistics
+        if: always()
+        run: ccache --show-stats | tee ps3-ccache-stats.txt
 
       - name: Link EBOOT.BIN with PSL1GHT
         shell: bash
@@ -167,3 +191,4 @@ jobs:
             ps3-build.log
             ps3-self.log
             ps3-package.log
+            ps3-ccache-stats.txt
