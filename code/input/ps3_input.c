@@ -19,6 +19,9 @@
 #include "sys/ps3_log.h"
 
 extern int Key_GetCatcher(void);
+extern qboolean in_guimouse;
+extern qboolean UI_MenuActive(void);
+extern void UI_KeyEvent(int key, unsigned int time);
 extern void CL_GetMouseState(int *x, int *y, unsigned int *buttons);
 extern void CL_SetMousePos(int x, int y);
 extern void Key_SetBinding(int keynum, const char *binding);
@@ -355,7 +358,8 @@ static int      s_cursor_ui_active = 0;
 static u32      s_input_trace_mask = 0xffffffffu;
 static int      s_input_trace_connected = 0;
 static int      pad_down[PB_COUNT];      /* state as last reported to the engine */
-static int      pad_sent[PB_COUNT];      /* key sent for the press, released with it */
+static int      pad_sent[PB_COUNT];
+static int      pad_ui_direct[PB_COUNT];   /* arrow sent straight to active menu UI */      /* key sent for the press, released with it */
 /* Match ioRTCW-PS3's PS3-to-Quake axis routing: left X/Y -> 0/1,
  * right X/Y -> YAW(4)/ROLL(3). OpenMoHAA inherits Quake's axis enum, so
  * emitting right-X as 2 feeds AXIS_UP, not yaw. */
@@ -441,15 +445,37 @@ static int pad_key_for(int b, int catchers)
     return pad_game_key[b];
 }
 
+/* OpenMoHAA's generic key path can route arrows away from the UI on PS3
+ * when a menu is active without KEYCATCH_UI being the only catcher. Send
+ * directional-pad navigation straight to the menu manager in that case. */
+static qboolean PS3_MenuArrowUsesDirectUI(int key, int catchers)
+{
+    if (key != K_UPARROW && key != K_DOWNARROW &&
+        key != K_LEFTARROW && key != K_RIGHTARROW)
+        return qfalse;
+
+    if (catchers & KEYCATCH_UI)
+        return qtrue;
+
+    return (UI_MenuActive() &&
+            !(catchers & (KEYCATCH_CONSOLE | KEYCATCH_MESSAGE))) ? qtrue : qfalse;
+}
+
+static void PS3_DispatchMenuArrow(int key)
+{
+    UI_KeyEvent(key, (unsigned int)Sys_Milliseconds());
+}
+
 static void pad_release_all(void)
 {
     int b;
 
     for (b = 0; b < PB_COUNT; b++) {
-        if (pad_down[b] && pad_sent[b])
+        if (pad_down[b] && pad_sent[b] && !pad_ui_direct[b])
             Com_QueueEvent(0, SE_KEY, pad_sent[b], qfalse, 0, NULL);
         pad_down[b] = 0;
         pad_sent[b] = 0;
+        pad_ui_direct[b] = 0;
         pad_repeat_at[b] = 0;
     }
     if (select_hold)
@@ -473,6 +499,7 @@ void PS3_Input_Init(void)
 
     memset(pad_down, 0, sizeof(pad_down));
     memset(pad_sent, 0, sizeof(pad_sent));
+    memset(pad_ui_direct, 0, sizeof(pad_ui_direct));
     memset(ps3_axis_prev, 0, sizeof(ps3_axis_prev));
     memset(ps3_axis_trace_count, 0, sizeof(ps3_axis_trace_count));
     ps3_cursor_accum_x = ps3_cursor_accum_y = 0.0f;
@@ -608,6 +635,7 @@ void PS3_Input_Frame(void)
         for (b = 0; b < PB_COUNT; b++) {
             pad_down[b] = cur[b];
             pad_sent[b] = 0;
+            pad_ui_direct[b] = 0;
             pad_repeat_at[b] = 0;
         }
         return;
@@ -657,15 +685,25 @@ void PS3_Input_Frame(void)
             /* the key is picked at press time and released as the same key,
              * so a menu closing mid-press never leaves a key stuck down */
             pad_sent[b] = pad_key_for(b, catchers);
-            if (pad_sent[b])
-                Com_QueueEvent(0, SE_KEY, pad_sent[b], qtrue, 0, NULL);
+            pad_ui_direct[b] = PS3_MenuArrowUsesDirectUI(pad_sent[b], catchers);
+            if (pad_sent[b]) {
+                if (pad_ui_direct[b]) {
+                    PS3_DispatchMenuArrow(pad_sent[b]);
+                    PS3_BootTraceFastf("INPUT direct-menu-arrow key=%d catcher=0x%x",
+                                        pad_sent[b], catchers);
+                } else {
+                    Com_QueueEvent(0, SE_KEY, pad_sent[b], qtrue, 0, NULL);
+                }
+            }
             pad_repeat_at[b] = 0;
             if (pad_sent[b] == K_UPARROW || pad_sent[b] == K_DOWNARROW ||
                 pad_sent[b] == K_LEFTARROW || pad_sent[b] == K_RIGHTARROW)
                 pad_repeat_at[b] = Sys_Milliseconds() + PAD_REPEAT_DELAY;
         } else if (pad_sent[b]) {
-            Com_QueueEvent(0, SE_KEY, pad_sent[b], qfalse, 0, NULL);
+            if (!pad_ui_direct[b])
+                Com_QueueEvent(0, SE_KEY, pad_sent[b], qfalse, 0, NULL);
             pad_sent[b] = 0;
+            pad_ui_direct[b] = 0;
             pad_repeat_at[b] = 0;
         }
         pad_down[b] = cur[b];
@@ -677,7 +715,12 @@ void PS3_Input_Frame(void)
 
         for (b = 0; b < PB_COUNT; b++) {
             if (pad_down[b] && pad_repeat_at[b] && now >= pad_repeat_at[b]) {
-                Com_QueueEvent(0, SE_KEY, pad_sent[b], qtrue, 0, NULL);
+                if (pad_ui_direct[b]) {
+                    if (PS3_MenuArrowUsesDirectUI(pad_sent[b], catchers))
+                        PS3_DispatchMenuArrow(pad_sent[b]);
+                } else {
+                    Com_QueueEvent(0, SE_KEY, pad_sent[b], qtrue, 0, NULL);
+                }
                 pad_repeat_at[b] = now + PAD_REPEAT_RATE;
             }
         }
@@ -821,8 +864,9 @@ void IN_FreeCursor(void)
 
 qboolean IN_IsCursorActive(void)
 {
-    /* PS3 has no platform cursor to grab; IN_GetMousePosition returns the
-     * engine's virtual absolute cursor instead of forcing a center position. */
-    return qfalse;
+    /* The UI renderer only draws its cursor when this is true. On PS3 the
+     * cursor is virtual (cl.mousex/cl.mousey), and in_guimouse gates whether
+     * UI mouse mode is active. Relative SE_MOUSE events update those coords. */
+    return in_guimouse ? qtrue : qfalse;
 }
 
