@@ -1082,6 +1082,7 @@ void CL_ParseServerMessage( msg_t *msg ) {
 		}
 
 		cmd = MSG_ReadByte( msg );
+		PS3_TRACEF( "NET svc cmd=%d readcount=%d cursize=%d", cmd, msg->readcount, msg->cursize );
 	//	Com_Printf( "CL_ParseServerMessage: cmd %i\n", cmd );
 		if ( cmd == svc_EOF) {
 			SHOWNET( msg, "END OF MESSAGE" );

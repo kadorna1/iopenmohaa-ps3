@@ -113,10 +113,10 @@ void S_Init(qboolean full_startup)
     s_bLastInitSound = false;
 
 #if defined(__PS3__)
-    /* Native PS3 audio is a separate port stage.  Until the PS3 driver is
-     * linked, keep the engine silent instead of attempting the desktop
-     * OpenAL loader, which cannot work on PSL1GHT. */
-    cv = Cvar_Get("s_initsound", "0", 0);
+    /* The PS3 build uses its own driver (snd_ps3audio_new.cpp, a software mixer on
+     * libaudio) instead of the desktop OpenAL loader. If it cannot start, S_Driver_Init
+     * fails and the engine stays silent; USRDIR/sound.txt containing 0 disables it. */
+    cv = Cvar_Get("s_initsound", "1", 0);
 #else
     cv = Cvar_Get("s_initsound", "1", 0);
 #endif

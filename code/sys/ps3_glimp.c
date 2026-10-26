@@ -579,23 +579,38 @@ void PS3_RSX_Init(void)
         return;
     }
 
-    /* Prefer native 1080p as requested. Some PS3/TV/HDMI combinations do
-     * not expose 1080p to the application, so fall back to 720p, then the
-     * currently configured TV mode. */
-    s32 vid_res = VIDEO_RESOLUTION_1080;
+    /* Default to 720p: 2.25x fewer pixels than 1080p, which is what the RSX and
+     * the fill-rate-bound GL1 renderer need to run well. USRDIR/video_mode.txt
+     * containing 1080 selects 1080p instead. If the preferred mode is not exposed
+     * by the TV/HDMI chain, fall back to the other one, then the current TV mode. */
+    int want1080 = 0;
+    {
+        FILE *vf = fopen(PS3_USRDIR "/video_mode.txt", "rb");
+        if (vf) {
+            char vb[8] = {0};
+            size_t got = fread(vb, 1, 4, vf);
+            fclose(vf);
+            if (got == 4 && strncmp(vb, "1080", 4) == 0) {
+                want1080 = 1;
+            }
+        }
+    }
+    s32 vid_res = want1080 ? VIDEO_RESOLUTION_1080 : VIDEO_RESOLUTION_720;
+    s32 alt_res = want1080 ? VIDEO_RESOLUTION_720 : VIDEO_RESOLUTION_1080;
     u8  vid_aspect = VIDEO_ASPECT_16_9;
 
-    if (!videoGetResolutionAvailability(VIDEO_PRIMARY, VIDEO_RESOLUTION_1080,
+    if (!videoGetResolutionAvailability(VIDEO_PRIMARY, vid_res,
                                         VIDEO_ASPECT_16_9, 0)) {
-        ps3_log("PS3_RSX_Init: 1080p unavailable, trying 720p");
-        vid_res = VIDEO_RESOLUTION_720;
-        if (!videoGetResolutionAvailability(VIDEO_PRIMARY, VIDEO_RESOLUTION_720,
+        ps3_log(want1080 ? "PS3_RSX_Init: 1080p unavailable, trying 720p"
+                         : "PS3_RSX_Init: 720p unavailable, trying 1080p");
+        vid_res = alt_res;
+        if (!videoGetResolutionAvailability(VIDEO_PRIMARY, vid_res,
                                             VIDEO_ASPECT_16_9, 0)) {
             videoState state;
             videoGetState(0, 0, &state);
             vid_res = state.displayMode.resolution;
             vid_aspect = state.displayMode.aspect;
-            ps3_log("PS3_RSX_Init: 720p unavailable, using TV default");
+            ps3_log("PS3_RSX_Init: preferred modes unavailable, using TV default");
         }
     }
 

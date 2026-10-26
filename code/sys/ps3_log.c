@@ -201,7 +201,7 @@ int PS3_TraceLevel(void)
 static int boot_msg_noisy(const char *m)
 {
     static const char *const prefixes[] = {
-        "RSX_", "INPUT ", "FRAME ", "CL_Frame ", "CIN ", "IMGLOAD ", "JPG read", "JPG error", "NET ", "SURFLOAD",
+        "RSX_", "INPUT ", "FRAME ", "CL_Frame ", "CIN ", "CG ", "IMGLOAD ", "JPG read", "JPG error", "NET ", "SURFLOAD",
         "PS3_KEY_EVENT", "TEX:", "IMG:", "PS3_UI_", "SCRIPT_CACHE", NULL
     };
     unsigned i;

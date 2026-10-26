@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // DESCRIPTION:
 // CGM buffer parser
 
+#include "../sys/ps3_step.h"
 #include "cg_local.h"
 #include "cg_parsemsg.h"
 #include "cg_specialfx.h"
@@ -514,6 +515,7 @@ static void CG_MakeBulletTracerInternal(
 
     // check to see if it starts in water
     bStartInWater = (cgi.CM_PointContents(i_vStart, 0) & CONTENTS_FLUID) != 0;
+    PS3_CGF("tracer start bullets=%d", i_iNumBullets);
 
     for (iBullet = 0; iBullet < i_iNumBullets; iBullet++) {
         bInWater = bStartInWater;
@@ -684,6 +686,7 @@ static void CG_MakeBulletTracerInternal(
         iImpSndIndexLB = 0;
 
         for (iBullet = 0; iBullet < iNumImpacts; iBullet++) {
+            PS3_CGF("tracer impact %d/%d", iBullet, iNumImpacts);
             CG_MakeBulletHole(
                 tImpacts[iBullet].endpos, tImpacts[iBullet].plane.normal, iLarge, &tImpacts[iBullet], qfalse, -1
             );
@@ -1271,6 +1274,7 @@ void CG_ParseCGMessage_ver_15()
     qboolean bMoreCGameMessages = qtrue;
     while (bMoreCGameMessages) {
         iType = cgi.MSG_ReadBits(6);
+        PS3_CGF("cgmessage type=%d", iType);
 
         switch (iType) {
         case CGM_BULLET_1:
@@ -1713,6 +1717,7 @@ void CG_ParseCGMessage_ver_6()
     qboolean bMoreCGameMessages = qtrue;
     while (bMoreCGameMessages) {
         iType = cgi.MSG_ReadBits(6);
+        PS3_CGF("cgmessage type=%d", iType);
 
         switch (iType) {
         case CGM6_BULLET_1:

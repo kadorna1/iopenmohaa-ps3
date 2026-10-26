@@ -196,7 +196,7 @@ extern s_entity_t s_entity[];
 // The current sound driver.
 // Currently OPENAL
 #if defined(__PS3__)
-#define SOUND_DRIVER PS3NULL
+#define SOUND_DRIVER PS3AUDIO
 
 #ifdef __cplusplus
 extern "C" {
@@ -214,6 +214,21 @@ void          S_PS3NULL_Update();
 const char   *S_PS3NULL_GetMusicFilename();
 int           S_PS3NULL_GetMusicLoopCount();
 unsigned int  S_PS3NULL_GetMusicOffset();
+
+// Native PS3 driver (snd_ps3audio_new.cpp): software mixer on libaudio
+qboolean      S_PS3AUDIO_Init();
+void          S_PS3AUDIO_Shutdown();
+void          S_PS3AUDIO_StartSound(const vec3_t, int, int, sfxHandle_t, float, float, float, float, qboolean);
+void          S_PS3AUDIO_AddLoopingSound(const vec3_t, const vec3_t, sfxHandle_t, float, float, float, float, int);
+void          S_PS3AUDIO_ClearLoopingSounds();
+void          S_PS3AUDIO_StopSound(int, int);
+void          S_PS3AUDIO_StopAllSounds(qboolean);
+void          S_PS3AUDIO_Respatialize(int, const vec3_t, const vec3_t[3]);
+void          S_PS3AUDIO_SetReverb(int, float);
+void          S_PS3AUDIO_Update();
+const char   *S_PS3AUDIO_GetMusicFilename();
+int           S_PS3AUDIO_GetMusicLoopCount();
+unsigned int  S_PS3AUDIO_GetMusicOffset();
 #ifdef __cplusplus
 }
 #endif

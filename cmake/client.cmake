@@ -59,6 +59,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "PS3")
     list(APPEND CLIENT_SOURCES
         ${SOURCE_DIR}/client/snd_null_new.cpp
         ${SOURCE_DIR}/client/snd_ps3_compat.cpp
+        ${SOURCE_DIR}/client/snd_ps3audio_new.cpp
         ${SOURCE_DIR}/gamespy/ps3_serverlist.c
         ${SOURCE_DIR}/gamespy/gcdkey/gcdkeyc.c
         ${SOURCE_DIR}/gamespy/md5c.c)
