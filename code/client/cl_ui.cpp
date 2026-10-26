@@ -1699,6 +1699,19 @@ void UI_KeyEvent(int key, unsigned int time)
     uWinMan.KeyEvent(key, time);
 }
 
+#if defined(__PS3__)
+/* C-linkage bridge for the PS3 input module, which is compiled as C. */
+extern "C" qboolean PS3_UI_MenuActiveForInput(void)
+{
+    return UI_MenuActive();
+}
+
+extern "C" void PS3_UI_KeyEventForInput(int key, unsigned int time)
+{
+    UI_KeyEvent(key, time);
+}
+#endif
+
 /*
 ====================
 UI_CharEvent
