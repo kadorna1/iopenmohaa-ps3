@@ -19,6 +19,8 @@
 #include "sys/ps3_log.h"
 
 extern int Key_GetCatcher(void);
+extern void CL_GetMouseState(int *x, int *y, unsigned int *buttons);
+extern void CL_SetMousePos(int x, int y);
 extern void Key_SetBinding(int keynum, const char *binding);
 extern const char *Key_GetBinding(int keynum);
 
@@ -349,6 +351,7 @@ static padData  ps3_pad_data;
 static int      ps3_active_pad_port = 0;
 static int      ps3_pressmode_port = -1;
 static int      s_input_initialized = 0;
+static int      s_cursor_ui_active = 0;
 static u32      s_input_trace_mask = 0xffffffffu;
 static int      s_input_trace_connected = 0;
 static int      pad_down[PB_COUNT];      /* state as last reported to the engine */
@@ -479,6 +482,7 @@ void PS3_Input_Init(void)
 
     s_input_trace_mask = 0xffffffffu;
     s_input_trace_connected = 0;
+    s_cursor_ui_active = 0;
     s_input_initialized = 1;
     ps3_log("[input] pad + USB keyboard + USB mouse initialized");
 }
@@ -525,6 +529,21 @@ void PS3_Input_Frame(void)
 
     KB_Frame(qfalse);
     Mouse_Frame(qfalse);
+
+    /* OpenMoHAA keeps a virtual absolute cursor in cl.mousex/cl.mousey.
+     * Initialize it once when the UI catcher becomes active; otherwise the
+     * relative DS3 stick can start at (0,0) or be snapped back by CL_UpdateMouse. */
+    {
+        int ui_active = (Key_GetCatcher() & KEYCATCH_UI) ? 1 : 0;
+        if (ui_active && !s_cursor_ui_active) {
+            int width = cls.glconfig.vidWidth;
+            int height = cls.glconfig.vidHeight;
+            if (width > 0 && height > 0)
+                CL_SetMousePos(width / 2, height / 2);
+            ps3_cursor_accum_x = ps3_cursor_accum_y = 0.0f;
+        }
+        s_cursor_ui_active = ui_active;
+    }
 
     ioPadGetInfo(&ps3_pad_info);
     PS3_SelectActivePadPort();
@@ -784,8 +803,10 @@ void IN_Restart(void)
 
 void IN_GetMousePosition(int *x, int *y)
 {
-    if (x) *x = cls.glconfig.vidWidth / 2;
-    if (y) *y = cls.glconfig.vidHeight / 2;
+    /* PS3 has no native absolute cursor position. Return OpenMoHAA's virtual
+     * cursor, which CL_MouseEvent updates from DS3/USB-mouse relative motion.
+     * Returning the screen center here reset the cursor every frame. */
+    CL_GetMouseState(x, y, NULL);
 }
 
 qboolean IN_SetCursorFromImage(const byte *pic, int width, int height, pCursorFree cursorFreeFn)
@@ -800,9 +821,8 @@ void IN_FreeCursor(void)
 
 qboolean IN_IsCursorActive(void)
 {
-    /* The PS3 implementation uses relative SE_MOUSE events instead of an
-     * SDL hardware cursor.  Returning false lets the UI use event-updated
-     * absolute coordinates. */
+    /* PS3 has no platform cursor to grab; IN_GetMousePosition returns the
+     * engine's virtual absolute cursor instead of forcing a center position. */
     return qfalse;
 }
 
