@@ -29,15 +29,25 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      # Cache downloaded .deb packages. apt indexes are refreshed each run,
+      # but already-cached dependency archives do not need to be downloaded again.
+      - name: Restore host dependency package cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/apt/archives
+          key: ps3-apt-ubuntu-24.04-${{ hashFiles('.github/ps3-host-deps.txt') }}
+          restore-keys: |
+            ps3-apt-ubuntu-24.04-
+
       - name: Install host build dependencies
+        shell: bash
         run: |
+          set -euo pipefail
+          apt_cache="$HOME/.cache/apt/archives"
+          mkdir -p "$apt_cache/partial"
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            autoconf automake bison flex build-essential ccache cmake ninja-build \
-            ffmpeg file git imagemagick libgtest-dev libsndfile1-dev libelf-dev libgmp-dev libmpfr-dev libmpc-dev \
-            libncurses-dev libssl-dev libtool libtool-bin pkg-config \
-            python3 python3-pil python3-setuptools subversion texinfo wget \
-            zlib1g-dev zip
+          mapfile -t packages < <(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' .github/ps3-host-deps.txt)
+          sudo apt-get -o "Dir::Cache::archives=$apt_cache" install -y --no-install-recommends "${packages[@]}"
 
       # Cache compiler outputs across ephemeral GitHub-hosted runners.
       # The unique SHA key lets each run save an updated cache; restore-keys
@@ -57,27 +67,48 @@ jobs:
           ccache --max-size=2G
           ccache --show-stats
 
-      - name: Download and verify prebuilt PS3DEV / PSL1GHT nightly
+      - name: Restore extracted PS3DEV / PSL1GHT toolchain
+        id: ps3dev-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ps3dev/${{ env.PS3DEV_ARCHIVE_SHA256 }}
+          key: ps3dev-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}
+
+      - name: Prepare PS3DEV / PSL1GHT toolchain
         shell: bash
         run: |
           set -euo pipefail
-          archive="$RUNNER_TEMP/ps3dev-linux-X64.tar.gz"
-          extract_dir="$RUNNER_TEMP/ps3dev-extracted"
-          mkdir -p "$extract_dir"
+          cache_root="$HOME/.cache/ps3dev/$PS3DEV_ARCHIVE_SHA256"
+          sdk_root="$cache_root/sdk"
+          mkdir -p "$cache_root"
 
-          curl --fail --location --retry 4 --retry-all-errors --connect-timeout 30 \
-            "$PS3DEV_ARCHIVE_URL" -o "$archive"
-          echo "$PS3DEV_ARCHIVE_SHA256  $archive" | sha256sum --check -
-          tar -xzf "$archive" -C "$extract_dir"
+          if [[ -x "$sdk_root/ppu/bin/ppu-gcc" ]]; then
+            echo "Using cached PS3DEV / PSL1GHT toolchain: $sdk_root"
+          else
+            archive="$RUNNER_TEMP/ps3dev-linux-X64.tar.gz"
+            extract_dir="$RUNNER_TEMP/ps3dev-extracted"
+            rm -rf "$extract_dir"
+            mkdir -p "$extract_dir"
 
-          compiler="$(find "$extract_dir" -path '*/ppu/bin/ppu-gcc' -print -quit)"
-          if [[ -z "$compiler" ]]; then
-            echo "::error::Nightly archive did not contain ppu/bin/ppu-gcc"
-            tar -tzf "$archive" | head -n 80 || true
-            exit 1
+            curl --fail --location --retry 4 --retry-all-errors --connect-timeout 30 \
+              "$PS3DEV_ARCHIVE_URL" -o "$archive"
+            echo "$PS3DEV_ARCHIVE_SHA256  $archive" | sha256sum --check -
+            tar -xzf "$archive" -C "$extract_dir"
+
+            compiler="$(find "$extract_dir" -path '*/ppu/bin/ppu-gcc' -print -quit)"
+            if [[ -z "$compiler" ]]; then
+              echo "::error::Nightly archive did not contain ppu/bin/ppu-gcc"
+              tar -tzf "$archive" | head -n 80 || true
+              exit 1
+            fi
+
+            extracted_root="${compiler%/ppu/bin/ppu-gcc}"
+            [[ -x "$extracted_root/ppu/bin/ppu-g++" ]]
+            [[ -x "$extracted_root/ppu/bin/ppu-strip" ]]
+            mv "$extracted_root" "$sdk_root"
+            rm -rf "$extract_dir"
           fi
 
-          sdk_root="${compiler%/ppu/bin/ppu-gcc}"
           [[ -x "$sdk_root/ppu/bin/ppu-gcc" ]]
           [[ -x "$sdk_root/ppu/bin/ppu-g++" ]]
           [[ -x "$sdk_root/ppu/bin/ppu-strip" ]]
@@ -108,11 +139,63 @@ jobs:
             echo "SDK archive: $PS3DEV_ARCHIVE_URL"
             echo "SHA-256: $PS3DEV_ARCHIVE_SHA256"
             echo "PS3DEV root: $sdk_root"
+            echo "Cache hit: ${{ steps.ps3dev-cache.outputs.cache-hit }}"
             echo
             "$sdk_root/ppu/bin/ppu-gcc" --version
             echo
             for tool in fself sprxlinker; do command -v "$tool"; done
           } | tee ps3-sdk-info.txt
+
+      # Restore the complete Ninja/CMake build tree so unchanged translation
+      # units stay built across the ephemeral runner.
+      - name: Restore incremental PS3 build tree
+        id: ps3-build-cache
+        uses: actions/cache@v4
+        with:
+          path: build-ps3
+          key: ps3-build-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ps3-build-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-${{ github.ref_name }}-
+            ps3-build-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-
+
+      - name: Mark only changed sources newer than cached objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="build-ps3/.ps3-build-cache-commit"
+          if [[ ! -s "$marker" ]]; then
+            echo "No prior CMake build tree restored; performing initial build."
+            exit 0
+          fi
+
+          cached_sha="$(cat "$marker")"
+          if ! git cat-file -e "${cached_sha}^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$cached_sha" || true
+          fi
+          if ! git cat-file -e "${cached_sha}^{commit}" 2>/dev/null; then
+            echo "::warning::Cached build revision is not available; source timestamps left unchanged."
+            exit 0
+          fi
+
+          changed="$(mktemp)"
+          trap 'rm -f "$changed"' EXIT
+          git diff --name-only -z "$cached_sha" "$GITHUB_SHA" -- > "$changed"
+
+          # GitHub-hosted checkout gives every source file a fresh mtime. Age
+          # unchanged tracked files before Ninja checks dependencies, then make
+          # only files changed since the cached build revision newer than objects.
+          while IFS= read -r -d '' path; do
+            [[ -e "$path" && ! -L "$path" ]] || continue
+            touch -d '@946684800' -- "$path"
+          done < <(git ls-files -z)
+
+          while IFS= read -r -d '' path; do
+            [[ -e "$path" && ! -L "$path" ]] || continue
+            touch -- "$path"
+          done < "$changed"
+
+          echo "Incremental baseline: $cached_sha"
+          echo "Changed tracked paths: $(tr -cd '\0' < "$changed" | wc -c)"
 
       - name: Configure PS3 cross-build
         shell: bash
@@ -159,6 +242,15 @@ jobs:
           find build-ps3 \( -type f -name '*.elf' -o -type f -name 'openmohaa' \) -print | sort > ps3-build-outputs.txt
           cat ps3-build-outputs.txt
 
+      # ATRAC3 encoder source and its compiled binary are cached separately.
+      - name: Restore ATRAC3 encoder cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/atracdenc
+          key: ps3-atracdenc-${{ runner.os }}-Atracdenc-0.2.3-v1
+          restore-keys: |
+            ps3-atracdenc-${{ runner.os }}-Atracdenc-0.2.3-
+
       - name: Prepare XMB background and hover sound
         shell: bash
         run: |
@@ -172,14 +264,22 @@ jobs:
 
           audio="assets/xmb/Medal_of_Honor_Allied_Assault_30s.mp3"
           if [[ -f "$audio" ]]; then
-            encoder_src="$RUNNER_TEMP/atracdenc"
-            git clone --depth 1 --branch Atracdenc-0.2.3 https://github.com/dcherednik/atracdenc.git "$encoder_src"
-            git -C "$encoder_src" submodule update --init --recursive
-            cmake -S "$encoder_src" -B "$encoder_src/build" \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DATRACDENC_PCM_IO_BACKEND=libsndfile
-            cmake --build "$encoder_src/build" --parallel 2
-            export PATH="$encoder_src/build/src:$PATH"
+            encoder_root="$HOME/.cache/atracdenc"
+            encoder_src="$encoder_root/src"
+            encoder_build="$encoder_root/build"
+            mkdir -p "$encoder_root"
+            if [[ ! -f "$encoder_src/CMakeLists.txt" ]]; then
+              rm -rf "$encoder_src"
+              git clone --depth 1 --branch Atracdenc-0.2.3 https://github.com/dcherednik/atracdenc.git "$encoder_src"
+              git -C "$encoder_src" submodule update --init --recursive
+            fi
+            if [[ ! -x "$encoder_build/src/atracdenc" ]]; then
+              cmake -S "$encoder_src" -B "$encoder_build" \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DATRACDENC_PCM_IO_BACKEND=libsndfile
+            fi
+            cmake --build "$encoder_build" --parallel 2
+            export PATH="$encoder_build/src:$PATH"
 
             # Decode and trim to exactly 30 seconds before ATRAC3 encoding.
             ffmpeg -y -v error -i "$audio" -t 30 -ar 44100 -ac 2 \
@@ -212,6 +312,12 @@ jobs:
           bash make_ps3_pkg.sh "${pkg_args[@]}" 2>&1 | tee ps3-package.log
           find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print
           test -n "$(find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print -quit)"
+
+      - name: Record revision for next incremental build
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GITHUB_SHA" > build-ps3/.ps3-build-cache-commit
 
       - name: Upload PS3 build, PKG files, and logs
         if: always()
