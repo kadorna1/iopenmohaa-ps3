@@ -31,6 +31,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cl_ui.h"
 #include "cl_uigamespy.h"
 
+#include "../sys/ps3_step.h"
+
 #include <chrono>
 
 typedef struct {
@@ -4021,60 +4023,108 @@ void UI_ServerLoaded(void)
     cvar_t *pMaxClients;
     Event  *event;
 
+    PS3_TRACEF("UI_SERVER_LOADED enter server_loading=%d loadingMenu=%p",
+               (int)server_loading, (void *)ui_pLoadingMenu);
+
+    PS3_TRACEF("UI_SERVER_LOADED before CL_UpdateSnapFlags");
     CL_UpdateSnapFlags();
+    PS3_TRACEF("UI_SERVER_LOADED after CL_UpdateSnapFlags");
+
+    PS3_TRACEF("UI_SERVER_LOADED before SV_ServerLoaded");
     SV_ServerLoaded();
+    PS3_TRACEF("UI_SERVER_LOADED after SV_ServerLoaded");
+
+    PS3_TRACEF("UI_SERVER_LOADED before S_FadeSound");
     S_FadeSound(0);
+    PS3_TRACEF("UI_SERVER_LOADED after S_FadeSound");
+
+    PS3_TRACEF("UI_SERVER_LOADED before S_ServerLoaded");
     S_ServerLoaded();
+    PS3_TRACEF("UI_SERVER_LOADED after S_ServerLoaded");
 
     if (!server_loading) {
+        PS3_TRACEF("UI_SERVER_LOADED return: server_loading=0");
         return;
     }
 
+    PS3_TRACEF("UI_SERVER_LOADED before UI_EndLoad");
     UI_EndLoad();
+    PS3_TRACEF("UI_SERVER_LOADED after UI_EndLoad");
+
     pMaxClients = Cvar_Get("sv_maxclients", "1", 0);
+    PS3_TRACEF("UI_SERVER_LOADED maxclients=%d serverRunning=%d",
+               pMaxClients ? pMaxClients->integer : -1, (int)com_sv_running->integer);
 
     if (com_sv_running->integer && pMaxClients->integer > 1) {
+        PS3_TRACEF("UI_SERVER_LOADED before SV_Heartbeat_f");
         SV_Heartbeat_f();
+        PS3_TRACEF("UI_SERVER_LOADED after SV_Heartbeat_f");
     }
 
+    PS3_TRACEF("UI_SERVER_LOADED before showCursor");
     uWinMan.showCursor(true);
+    PS3_TRACEF("UI_SERVER_LOADED after showCursor");
 
     if (!ui_pLoadingMenu) {
+        PS3_TRACEF("UI_SERVER_LOADED no loading menu; before UI_FinishLoadingScreen_f");
         UI_FinishLoadingScreen_f();
+        PS3_TRACEF("UI_SERVER_LOADED no loading menu; after UI_FinishLoadingScreen_f");
         return;
     }
 
+    PS3_TRACEF("UI_SERVER_LOADED before CurrentMenu");
     pCurrentMenu = menuManager.CurrentMenu();
+    PS3_TRACEF("UI_SERVER_LOADED current=%p loading=%p serverRunning=%d maxclients=%d",
+               (void *)pCurrentMenu, (void *)ui_pLoadingMenu,
+               (int)com_sv_running->integer, pMaxClients->integer);
 
+    PS3_TRACEF("UI_SERVER_LOADED checking loading-menu handoff");
     if (pCurrentMenu != ui_pLoadingMenu || !pCurrentMenu->GetNamedWidget("continuebutton") || !com_sv_running->integer
         || pMaxClients->integer > 1) {
+        PS3_TRACEF("UI_SERVER_LOADED condition selected finish-loading path");
         UI_FinishLoadingScreen_f();
+        PS3_TRACEF("UI_SERVER_LOADED after finish-loading path");
         return;
     }
+    PS3_TRACEF("UI_SERVER_LOADED loading-menu handoff condition passed");
 
     if (ui_sCurrentLoadingMenu == "loading_default") {
+        PS3_TRACEF("UI_SERVER_LOADED default loading menu; before finish");
         UI_FinishLoadingScreen_f();
+        PS3_TRACEF("UI_SERVER_LOADED default loading menu; after finish");
         return;
     }
 
     server_loading_waiting = qtrue;
 
+    PS3_TRACEF("UI_SERVER_LOADED before enable continuebutton");
     event = new Event(EV_Widget_Enable);
     ui_pLoadingMenu->PassEventToWidget("continuebutton", event);
+    PS3_TRACEF("UI_SERVER_LOADED after enable continuebutton");
 
+    PS3_TRACEF("UI_SERVER_LOADED before disable loadingflasher");
     event = new Event(EV_Widget_Disable);
     ui_pLoadingMenu->PassEventToWidget("loadingflasher", event);
+    PS3_TRACEF("UI_SERVER_LOADED after disable loadingflasher");
 
+    PS3_TRACEF("UI_SERVER_LOADED before disable loadingbar");
     event = new Event(EV_Widget_Disable);
     ui_pLoadingMenu->PassEventToWidget("loadingbar", event);
+    PS3_TRACEF("UI_SERVER_LOADED after disable loadingbar");
 
+    PS3_TRACEF("UI_SERVER_LOADED before disable loadingbar_border");
     event = new Event(EV_Widget_Disable);
     ui_pLoadingMenu->PassEventToWidget("loadingbar_border", event);
+    PS3_TRACEF("UI_SERVER_LOADED after disable loadingbar_border");
 
+    PS3_TRACEF("UI_SERVER_LOADED before activate continuebutton");
     event = new Event(EV_Widget_Activate);
     ui_pLoadingMenu->PassEventToWidget("continuebutton", event);
+    PS3_TRACEF("UI_SERVER_LOADED after activate continuebutton");
 
+    PS3_TRACEF("UI_SERVER_LOADED before Com_FakePause");
     Com_FakePause();
+    PS3_TRACEF("UI_SERVER_LOADED after Com_FakePause");
 }
 
 /*
