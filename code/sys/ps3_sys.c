@@ -464,7 +464,7 @@ void Sys_PlatformInit(void)
     PS3_LogInit();
     PS3_BootTracef("Sys_PlatformInit: PS3_LogInit returned");
     PS3_Logf("OpenMoHAA PS3 platform init (%s)", PS3_USRDIR);
-    PS3_Logf("PS3 build stamp: %s %s (trace20: snapshot and loading-screen handoff traces)", __DATE__, __TIME__);
+    PS3_Logf("PS3 build stamp: %s %s (trace21: generation-tagged special-effects reset)", __DATE__, __TIME__);
     PS3_BootTracef("Sys_PlatformInit: trace level %d (create USRDIR/trace_level.txt containing 2 for full tracing)", PS3_TraceLevel());
     ps3_register_exception_handler();
 }
