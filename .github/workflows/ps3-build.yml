@@ -48,6 +48,10 @@ jobs:
           sudo apt-get update
           mapfile -t packages < <(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' .github/ps3-host-deps.txt)
           sudo apt-get -o "Dir::Cache::archives=$apt_cache" install -y --no-install-recommends "${packages[@]}"
+          # apt creates root-owned lock/partial entries, which prevent the
+          # runner-owned cache action from archiving this directory.
+          sudo rm -rf "$apt_cache/partial" "$apt_cache/lock"
+          mkdir -p "$apt_cache/partial"
 
       # Cache compiler outputs across ephemeral GitHub-hosted runners.
       # The unique SHA key lets each run save an updated cache; restore-keys
@@ -56,9 +60,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
-          key: ps3-ccache-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-${{ github.ref_name }}-${{ github.sha }}
+          key: ps3-ccache-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-${{ github.head_ref || github.ref_name }}-${{ github.sha }}
           restore-keys: |
-            ps3-ccache-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-${{ github.ref_name }}-
+            ps3-ccache-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-${{ github.head_ref || github.ref_name }}-
             ps3-ccache-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-main-
 
       - name: Configure ccache
@@ -153,49 +157,69 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build-ps3
-          key: ps3-build-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-${{ github.ref_name }}-${{ github.sha }}
+          key: ps3-build-v2-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-${{ github.head_ref || github.ref_name }}-${{ github.sha }}
           restore-keys: |
-            ps3-build-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-${{ github.ref_name }}-
-            ps3-build-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-
+            ps3-build-v2-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-${{ github.head_ref || github.ref_name }}-
+            ps3-build-v2-${{ runner.os }}-${{ env.PS3DEV_ARCHIVE_SHA256 }}-
 
-      - name: Mark only changed sources newer than cached objects
+      - name: Restore source hashes and prepare incremental timestamps
         shell: bash
         run: |
           set -euo pipefail
-          marker="build-ps3/.ps3-build-cache-commit"
-          if [[ ! -s "$marker" ]]; then
-            echo "No prior CMake build tree restored; performing initial build."
-            exit 0
-          fi
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+          import time
+          from pathlib import Path
 
-          cached_sha="$(cat "$marker")"
-          if ! git cat-file -e "${cached_sha}^{commit}" 2>/dev/null; then
-            git fetch --no-tags origin "$cached_sha" || true
-          fi
-          if ! git cat-file -e "${cached_sha}^{commit}" 2>/dev/null; then
-            echo "::warning::Cached build revision is not available; source timestamps left unchanged."
-            exit 0
-          fi
+          manifest = Path("build-ps3/.ps3-source-hashes.json")
+          build_time = 946684800  # 2000-01-01 UTC, older than cached build outputs
+          old = {}
+          if manifest.is_file():
+              try:
+                  old = json.loads(manifest.read_text(encoding="utf-8"))
+              except (OSError, ValueError):
+                  old = {}
 
-          changed="$(mktemp)"
-          trap 'rm -f "$changed"' EXIT
-          git diff --name-only -z "$cached_sha" "$GITHUB_SHA" -- > "$changed"
+          raw_paths = subprocess.run(
+              ["git", "ls-files", "-z"], check=True, stdout=subprocess.PIPE
+          ).stdout.split(b"\0")
+          current = {}
+          for raw in raw_paths:
+              if not raw:
+                  continue
+              name = os.fsdecode(raw)
+              path = Path(name)
+              if path.is_file() and not path.is_symlink():
+                  digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                  current[name] = digest
 
-          # GitHub-hosted checkout gives every source file a fresh mtime. Age
-          # unchanged tracked files before Ninja checks dependencies, then make
-          # only files changed since the cached build revision newer than objects.
-          while IFS= read -r -d '' path; do
-            [[ -e "$path" && ! -L "$path" ]] || continue
-            touch -d '@946684800' -- "$path"
-          done < <(git ls-files -z)
+          if not old:
+              print("No reusable source-hash manifest; performing a full initial build.")
+              raise SystemExit(0)
 
-          while IFS= read -r -d '' path; do
-            [[ -e "$path" && ! -L "$path" ]] || continue
-            touch -- "$path"
-          done < "$changed"
+          changed = sorted(
+              name for name, digest in current.items()
+              if old.get(name) != digest
+          )
+          # Normalize every tracked input to an old mtime first. Changed files
+          # are then made newer than cached objects; Ninja's depfiles propagate
+          # header changes to only the translation units that depend on them.
+          for name in current:
+              os.utime(name, (build_time, build_time), follow_symlinks=False)
+          now = time.time()
+          for name in changed:
+              os.utime(name, (now, now), follow_symlinks=False)
 
-          echo "Incremental baseline: $cached_sha"
-          echo "Changed tracked paths: $(tr -cd '\0' < "$changed" | wc -c)"
+          removed = sorted(set(old) - set(current))
+          print(f"Incremental source baseline: {len(old)} files")
+          print(f"Changed/new tracked files: {len(changed)}")
+          print(f"Removed tracked files: {len(removed)}")
+          for name in changed[:30]:
+              print(f"  rebuild trigger: {name}")
+          PY
 
       - name: Configure PS3 cross-build
         shell: bash
@@ -313,11 +337,36 @@ jobs:
           find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print
           test -n "$(find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print -quit)"
 
-      - name: Record revision for next incremental build
+      - name: Record source hashes for next incremental build
         shell: bash
         run: |
           set -euo pipefail
-          printf '%s\n' "$GITHUB_SHA" > build-ps3/.ps3-build-cache-commit
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          paths = subprocess.run(
+              ["git", "ls-files", "-z"], check=True, stdout=subprocess.PIPE
+          ).stdout.split(b"\0")
+          manifest = {}
+          for raw in paths:
+              if not raw:
+                  continue
+              name = os.fsdecode(raw)
+              path = Path(name)
+              if path.is_file() and not path.is_symlink():
+                  manifest[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+          target = Path("build-ps3/.ps3-source-hashes.json")
+          target.write_text(
+              json.dumps(manifest, sort_keys=True, separators=(",", ":")),
+              encoding="utf-8"
+          )
+          print(f"Recorded {len(manifest)} tracked source-file hashes.")
+          PY
 
       - name: Upload PS3 build, PKG files, and logs
         if: always()
