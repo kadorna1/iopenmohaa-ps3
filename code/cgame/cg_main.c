@@ -286,7 +286,10 @@ void CG_RegisterSounds(void)
     int    numFiles;
     int    i;
 
+    PS3_TRACEF("CG_SOUND begin map=%s", cgs.mapname);
+    PS3_TRACEMEM("CG_SOUND begin");
     fileList = cgi.FS_ListFilteredFiles("ubersound/", "scr", "*.scr", qfalse, &numFiles, qtrue);
+    PS3_TRACEF("CG_SOUND scripts discovered=%d map=%s", numFiles, cgs.mapname);
     if (cg_target_game >= TG_MOHTA) {
         // Fixed in 2.0
         //  The behavior has changed, all aliases get cleared
@@ -305,10 +308,15 @@ void CG_RegisterSounds(void)
         // Added in 2.0
         //  Since this version, all files in the ubersound folder
         //  are parsed
+        PS3_TRACEF("CG_SOUND before script=%s map=%s", fileList[i], cgs.mapname);
         CG_RegisterSoundsForFile(va("ubersound/%s", fileList[i]));
+        PS3_TRACEF("CG_SOUND after script=%s map=%s", fileList[i], cgs.mapname);
+        PS3_TRACEMEM("CG_SOUND after script");
     }
 
     cgi.FS_FreeFileList(fileList);
+    PS3_TRACEF("CG_SOUND done map=%s", cgs.mapname);
+    PS3_TRACEMEM("CG_SOUND done");
 }
 
 /*
@@ -546,14 +554,24 @@ void CG_PrepRefresh(void)
 {
     int i;
 
+    PS3_TRACEF("CG_PREP enter map=%s", cgs.mapname);
+    PS3_TRACEMEM("CG_PREP enter");
     memset(&cg.refdef, 0, sizeof(cg.refdef));
 
+    PS3_TRACEF("CG_PREP before R_LoadWorldMap map=%s", cgs.mapname);
+    PS3_TRACEMEM("CG_PREP before R_LoadWorldMap");
     cgi.R_LoadWorldMap(cgs.mapname);
+    PS3_TRACEF("CG_PREP after R_LoadWorldMap map=%s", cgs.mapname);
+    PS3_TRACEMEM("CG_PREP after R_LoadWorldMap");
 
     // register the inline models
     cgs.numInlineModels = cgi.CM_NumInlineModels();
+    PS3_TRACEF("CG_PREP inline-models begin count=%d map=%s", cgs.numInlineModels, cgs.mapname);
 
     for (i = 1; i < cgs.numInlineModels; i++) {
+        if (i == 1 || (i & 15) == 0) {
+            PS3_STEPF("CG_PREP inline-model progress=%d/%d map=%s", i, cgs.numInlineModels, cgs.mapname);
+        }
         char   name[10];
         vec3_t mins, maxs;
         int    j;
@@ -567,6 +585,8 @@ void CG_PrepRefresh(void)
         }
     }
     // register media shaders
+    PS3_TRACEF("CG_PREP media registration begin map=%s", cgs.mapname);
+    PS3_TRACEMEM("CG_PREP media begin");
     cgs.media.shadowMarkShader         = cgi.R_RegisterShader("markShadow");
     cgs.media.footShadowMarkShader     = cgi.R_RegisterShader("footShadow");
     cgs.media.wakeMarkShader           = cgi.R_RegisterShader("ripple.spr");
@@ -584,11 +604,21 @@ void CG_PrepRefresh(void)
     cgs.media.objectivesBackShader     = cgi.R_RegisterShaderNoMip("textures/hud/objectives_backdrop");
     cgs.media.checkedBoxShader         = cgi.R_RegisterShaderNoMip("textures/objectives/filledbox");
     cgs.media.uncheckedBoxShader       = cgi.R_RegisterShaderNoMip("textures/objectives/emptybox");
+    PS3_TRACEF("CG_PREP media registration done map=%s", cgs.mapname);
+    PS3_TRACEMEM("CG_PREP media done");
 
     // go through all the configstrings and process them
+    PS3_TRACEF("CG_PREP configstrings begin max=%d map=%s", MAX_CONFIGSTRINGS, cgs.mapname);
     for (i = CS_SYSTEMINFO + 1; i < MAX_CONFIGSTRINGS; i++) {
+        if ((i & 15) == 0) {
+            PS3_STEPF("CG_PREP configstring index=%d/%d map=%s", i, MAX_CONFIGSTRINGS, cgs.mapname);
+        }
         CG_ProcessConfigString(i, qfalse);
     }
+    PS3_TRACEF("CG_PREP configstrings done map=%s", cgs.mapname);
+    PS3_TRACEMEM("CG_PREP configstrings done");
+    PS3_TRACEF("CG_PREP done map=%s", cgs.mapname);
+    PS3_TRACEMEM("CG_PREP done");
 }
 
 //===========================================================================
@@ -654,20 +684,37 @@ void CG_GameStateReceived(void)
     CG_ParseServerinfo();
 
     // load the new map
+    PS3_TRACEF("CG_LOAD before client CM_LoadMap map=%s", cgs.mapname);
+    PS3_TRACEMEM("CG_LOAD before client CM_LoadMap");
     cgi.CM_LoadMap(cgs.mapname, &checksum);
+    PS3_TRACEF("CG_LOAD after client CM_LoadMap map=%s checksum=%d", cgs.mapname, checksum);
+    PS3_TRACEMEM("CG_LOAD after client CM_LoadMap");
     if (cgs.useMapChecksum && checksum != cgs.mapChecksum && cgs.gametype != GT_SINGLE_PLAYER) {
         cgi.Error(ERR_DROP, "Client/Server map checksum mismatch: %x/%x", checksum, cgs.mapChecksum);
     }
 
+    PS3_TRACEF("CG_LOAD before CG_InitMarks map=%s", cgs.mapname);
     CG_InitMarks();
+    PS3_TRACEF("CG_LOAD after CG_InitMarks map=%s", cgs.mapname);
 
+    PS3_TRACEF("CG_LOAD before CG_RegisterSounds map=%s", cgs.mapname);
+    PS3_TRACEMEM("CG_LOAD before CG_RegisterSounds");
     CG_RegisterSounds();
+    PS3_TRACEF("CG_LOAD after CG_RegisterSounds map=%s", cgs.mapname);
+    PS3_TRACEMEM("CG_LOAD after CG_RegisterSounds");
 
+    PS3_TRACEF("CG_LOAD before CG_PrepRefresh map=%s", cgs.mapname);
     CG_PrepRefresh();
+    PS3_TRACEF("CG_LOAD after CG_PrepRefresh map=%s", cgs.mapname);
+    PS3_TRACEMEM("CG_LOAD after CG_PrepRefresh");
 
+    PS3_TRACEF("CG_LOAD before special effects map=%s", cgs.mapname);
     CG_InitializeSpecialEffectsManager();
+    PS3_TRACEF("CG_LOAD after special effects map=%s", cgs.mapname);
 
     CG_InitializeObjectives();
+    PS3_TRACEF("CG_LOAD complete map=%s", cgs.mapname);
+    PS3_TRACEMEM("CG_LOAD complete");
 }
 
 /*
