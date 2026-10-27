@@ -174,7 +174,8 @@ class ClientSpecialEffectsManager : public Listener
 {
     specialeffect_t m_effects[SFX_COUNT];
     qboolean        m_bEffectsLoaded;
-    int             m_iNumPendingEvents;
+    int             m_iNumPendingEvents; /* delayed EV_SFX_EffectDelay callbacks still queued */
+    int             m_iGameStateGeneration; /* invalidates callbacks retained across map loads */
 
 public:
     CLASS_PROTOTYPE(ClientSpecialEffectsManager);
