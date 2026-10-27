@@ -27,6 +27,7 @@ APPID=""
 TITLE="OpenMoHAA"
 ICON=""
 PIC1=""
+SND0=""
 EXTRA_USRDIR=""
 OUT_DIR="."
 NAME=""
@@ -54,6 +55,7 @@ Usage: make_ps3_pkg.sh [options]
   --icon FILE         ICON0.PNG source; resized to 320x176 when ImageMagick or
                       Pillow is available (default: misc/openmohaa-text.png).
   --pic1 FILE         optional PIC1.PNG (background, 1920x1080).
+  --snd0 FILE         optional PS3 XMB hover sound (RIFF ATRAC3/ATRAC3+); copied as SND0.AT3.
   --extra-usrdir DIR  copy DIR's contents into the package's USRDIR (game data).
                       Not recommended: MOHAA data is large. Copy it over FTP or
                       USB instead.
@@ -90,6 +92,7 @@ while [ $# -gt 0 ]; do
         --title)        TITLE="${2:?}"; shift 2 ;;
         --icon)         ICON="${2:?}"; shift 2 ;;
         --pic1)         PIC1="${2:?}"; shift 2 ;;
+        --snd0)         SND0="${2:?}"; shift 2 ;;
         --extra-usrdir) EXTRA_USRDIR="${2:?}"; shift 2 ;;
         --sfo-xml)      SFO_XML="${2:?}"; shift 2 ;;
         --service-id)   SERVICE_ID="${2:?}"; shift 2 ;;
@@ -325,6 +328,35 @@ fi
 if [ -n "$PIC1" ]; then
     [ -f "$PIC1" ] || die "PIC1 not found: $PIC1"
     fit_png "$PIC1" "$PKGDIR/PIC1.PNG" 1920x1080
+fi
+if [ -n "$SND0" ]; then
+    [ -f "$SND0" ] || die "SND0 not found: $SND0"
+    python3 - "$SND0" <<'PY'
+import pathlib, struct, sys
+p = pathlib.Path(sys.argv[1])
+b = p.read_bytes()
+if len(b) < 12 or b[:4] != b"RIFF" or b[8:12] != b"WAVE":
+    raise SystemExit(f"error: {p} is not a RIFF/WAVE SND0.AT3 file")
+pos, fmt_ok, data_ok = 12, False, False
+while pos + 8 <= len(b):
+    tag = b[pos:pos+4]
+    size = struct.unpack_from("<I", b, pos + 4)[0]
+    start = pos + 8
+    if start + size > len(b):
+        raise SystemExit(f"error: malformed RIFF chunk in {p}")
+    if tag == b"fmt " and size >= 16:
+        codec = struct.unpack_from("<H", b, start)[0]
+        if codec not in (0x0270, 0xFFFE):
+            raise SystemExit(f"error: {p} has unsupported audio format tag 0x{codec:04x}")
+        fmt_ok = True
+    elif tag == b"data" and size:
+        data_ok = True
+    pos = start + size + (size & 1)
+if not (fmt_ok and data_ok):
+    raise SystemExit(f"error: {p} is missing a supported ATRAC fmt/data chunk")
+PY
+    cp "$SND0" "$PKGDIR/SND0.AT3"
+    info "copied validated XMB sound to SND0.AT3"
 fi
 
 # 5. optional payload
