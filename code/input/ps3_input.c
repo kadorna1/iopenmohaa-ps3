@@ -347,7 +347,7 @@ static const int pad_game_key[PB_COUNT] = {
 #define PAD_REPEAT_DELAY   420
 #define PAD_REPEAT_RATE    160
 /* Left stick pointer speed in menu coordinate units per frame at full tilt. */
-#define POINTER_MAX_SPEED  5.0f
+#define POINTER_MAX_SPEED  12.0f
 
 static padInfo  ps3_pad_info;
 static padData  ps3_pad_data;

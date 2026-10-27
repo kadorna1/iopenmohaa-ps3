@@ -1021,15 +1021,24 @@ void CG_MakeExplosionEffect(const vec3_t vPos, int iType)
     str       sMark;
     trace_t   trace;
     qhandle_t shader;
+    int       pointContents;
 
+    PS3_CGF("explosion enter type=%d pos=%g,%g,%g",
+            iType, (double)vPos[0], (double)vPos[1], (double)vPos[2]);
     vEnd[0] = vPos[0];
     vEnd[1] = vPos[1];
     vEnd[2] = vPos[2] - 64.0;
     fRadius = 64.0;
 
-    if ((CG_PointContents(vPos, 0)) & MASK_WATER) {
+    PS3_CGF("explosion before pointcontents type=%d", iType);
+    pointContents = CG_PointContents(vPos, 0);
+    PS3_CGF("explosion after pointcontents type=%d contents=0x%x",
+            iType, pointContents);
+    if (pointContents & MASK_WATER) {
         iBaseEffect = SFX_EXP_GREN_PUDDLE;
+        PS3_CGF("explosion water effect before spawn type=%d", iType);
         sfxManager.MakeEffect_Normal(iBaseEffect, vPos, Vector(0, 0, 1));
+        PS3_CGF("explosion water effect after spawn type=%d", iType);
         return;
     }
 
@@ -1062,13 +1071,18 @@ void CG_MakeExplosionEffect(const vec3_t vPos, int iType)
         }
     }
 
+    PS3_CGF("explosion before trace type=%d", iType);
     CG_Trace(
         &trace, vPos, vec_zero, vec_zero, vEnd, ENTITYNUM_NONE, MASK_EXPLOSION, qfalse, qtrue, "CG_MakeExplosionEffect"
     );
+    PS3_CGF("explosion after trace type=%d fraction=%g startsolid=%d",
+            iType, (double)trace.fraction, (int)trace.startsolid);
 
     if (trace.fraction == 1.0 || trace.startsolid) {
         // exploded in the air
+        PS3_CGF("explosion air effect before spawn type=%d", iType);
         sfxManager.MakeEffect_Normal(iBaseEffect, vPos, Vector(0, 0, 1));
+        PS3_CGF("explosion air effect after spawn type=%d", iType);
         return;
     }
 
@@ -1211,8 +1225,11 @@ void CG_MakeExplosionEffect(const vec3_t vPos, int iType)
     sMark = "blastmark";
     if (fRadius) {
         fRadius *= 1.f + crandom() * 0.1;
+        PS3_CGF("explosion before mark shader type=%d", iType);
         shader = cgi.R_RegisterShader(sMark.c_str());
+        PS3_CGF("explosion after mark shader type=%d shader=%d", iType, shader);
 
+        PS3_CGF("explosion before impact mark type=%d", iType);
         CG_ImpactMarkSimple(
             shader,
             trace.endpos,
@@ -1228,19 +1245,25 @@ void CG_MakeExplosionEffect(const vec3_t vPos, int iType)
             qtrue,
             qfalse
         );
+        PS3_CGF("explosion after impact mark type=%d", iType);
     }
 
     VectorMA(vEnd, 1.0, trace.plane.normal, vEnd);
 
     if (iSurfEffect != -1) {
+        PS3_CGF("explosion before surface effect type=%d effect=%d", iType, iSurfEffect);
         sfxManager.MakeEffect_Normal(
             iSurfEffect, Vector(trace.endpos) + Vector(trace.plane.normal), trace.plane.normal
         );
+        PS3_CGF("explosion after surface effect type=%d", iType);
     }
 
     if (iBaseEffect != -1) {
+        PS3_CGF("explosion before base effect type=%d effect=%d", iType, iBaseEffect);
         sfxManager.MakeEffect_Normal(iBaseEffect, vEnd, trace.plane.normal);
+        PS3_CGF("explosion after base effect type=%d", iType);
     }
+    PS3_CGF("explosion done type=%d", iType);
 }
 
 void CG_MakeVehicleEffect(vec3_t i_vStart, vec3_t i_vEnd, vec3_t i_vDir)
@@ -1444,7 +1467,10 @@ void CG_ParseCGMessage_ver_15()
             vStart[0] = cgi.MSG_ReadCoord();
             vStart[1] = cgi.MSG_ReadCoord();
             vStart[2] = cgi.MSG_ReadCoord();
+            PS3_CGF("explosion message coords read type=%d pos=%g,%g,%g",
+                    iType, (double)vStart[0], (double)vStart[1], (double)vStart[2]);
             CG_MakeExplosionEffect(vStart, iType);
+            PS3_CGF("explosion message effect returned type=%d", iType);
             break;
         case CGM_MAKE_EFFECT_1:
         case CGM_MAKE_EFFECT_2:
