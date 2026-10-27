@@ -27,6 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cg_commands.h"
 #include "surfaceflags.h"
 #include "cg_specialfx.h"
+#include "../sys/ps3_step.h"
 
 extern refEntity_t *current_entity;
 extern dtiki_t     *current_tiki;
@@ -81,6 +82,45 @@ ClientSpecialEffectsManager::ClientSpecialEffectsManager()
     m_iNumPendingEvents = 0;
 }
 
+void ClientSpecialEffectsManager::ResetForGameState()
+{
+    int i, j;
+
+    PS3_CGF("SFX reset begin loaded=%d pending=%d", (int)m_bEffectsLoaded, m_iNumPendingEvents);
+
+    /* This manager is part of the statically linked CGame image on PS3, so
+     * its Listener queue survives CL_ShutdownCGame(). Delayed effects from the
+     * old map must not run against the next map's effect table. */
+    CancelEventsOfType(EV_SFX_EffectDelay);
+    commandManager.ResetPendingEvents();
+    commandManager.ClearCurrentSFX();
+
+    current_entity = NULL;
+    current_tiki = NULL;
+
+    for (i = 0; i < SFX_COUNT; ++i) {
+        int count = m_effects[i].m_iCommandCount;
+
+        /* Commands are owned by this table. Do not walk a corrupt count. */
+        if (count >= 0 && count <= MAX_SPECIAL_EFFECT_COMMANDS) {
+            for (j = 0; j < count; ++j) {
+                if (m_effects[i].m_commands[j]) {
+                    delete m_effects[i].m_commands[j];
+                }
+            }
+        }
+
+        for (j = 0; j < MAX_SPECIAL_EFFECT_COMMANDS; ++j) {
+            m_effects[i].m_commands[j] = NULL;
+        }
+        m_effects[i].m_iCommandCount = 0;
+    }
+
+    m_iNumPendingEvents = 0;
+    m_bEffectsLoaded = qfalse;
+    PS3_CGF("SFX reset done");
+}
+
 void ClientSpecialEffectsManager::LoadEffects()
 {
     int              i, j, k;
@@ -88,7 +128,9 @@ void ClientSpecialEffectsManager::LoadEffects()
     float            axis[3][3];
     specialeffect_t *pEffect;
 
+    PS3_CGF("SFX load enter loaded=%d", (int)m_bEffectsLoaded);
     if (m_bEffectsLoaded) {
+        PS3_CGF("SFX load skipped already loaded");
         return;
     }
 
@@ -409,8 +451,14 @@ void ClientSpecialEffectsManager::LoadEffects()
 
         pEffect = &m_effects[i];
         commandManager.SetCurrentSFX(pEffect);
+        if (i == SFX_EXP_GREN_BASE || i == SFX_EXP_BAZOOKA_BASE) {
+            PS3_CGF("SFX load before model effect=%d commands=%d", i, pEffect->m_iCommandCount);
+        }
         cgi.R_SpawnEffectModel(szEffectModel, vec_zero, axis);
         commandManager.ClearCurrentSFX();
+        if (i == SFX_EXP_GREN_BASE || i == SFX_EXP_BAZOOKA_BASE) {
+            PS3_CGF("SFX load after model effect=%d commands=%d", i, pEffect->m_iCommandCount);
+        }
 
         for (j = 0; j < pEffect->m_iCommandCount - 1; j++) {
             for (k = 0; k < j; k++) {
@@ -424,11 +472,17 @@ void ClientSpecialEffectsManager::LoadEffects()
     }
 
     m_bEffectsLoaded = qtrue;
+    PS3_CGF("SFX load done gren=%d bazooka=%d",
+            m_effects[SFX_EXP_GREN_BASE].m_iCommandCount,
+            m_effects[SFX_EXP_BAZOOKA_BASE].m_iCommandCount);
 }
 
 void CG_InitializeSpecialEffectsManager()
 {
+    PS3_CGF("SFX gamestate initialization");
+    sfxManager.ResetForGameState();
     sfxManager.LoadEffects();
+    PS3_CGF("SFX gamestate initialization done");
 }
 
 void CG_AddPendingEffects()
@@ -468,6 +522,16 @@ void ClientSpecialEffectsManager::ExecuteEffect(
     dtiki_t                *old_tiki;
     refEntity_t             tmpEntity;
 
+    PS3_CGF("SFX execute enter effect=%d start=%d loaded=%d", iEffect, iStartCommand, (int)m_bEffectsLoaded);
+    if (iEffect < 0 || iEffect >= SFX_COUNT) {
+        PS3_CGF("SFX execute invalid effect=%d", iEffect);
+        return;
+    }
+    if (!m_bEffectsLoaded) {
+        PS3_CGF("SFX execute table not loaded; loading");
+        LoadEffects();
+    }
+
     memset(&tmpEntity, 0, sizeof(tmpEntity));
     VectorCopy(((const float *)vPos), tmpEntity.origin);
     tmpEntity.scale         = 1.0;
@@ -476,6 +540,19 @@ void ClientSpecialEffectsManager::ExecuteEffect(
 
     pEffect       = &this->m_effects[iEffect];
     iCommandCount = pEffect->m_iCommandCount;
+    PS3_CGF("SFX execute count effect=%d count=%d", iEffect, iCommandCount);
+    if (iCommandCount < 0 || iCommandCount > MAX_SPECIAL_EFFECT_COMMANDS) {
+        PS3_CGF("SFX execute corrupt count effect=%d count=%d", iEffect, iCommandCount);
+        return;
+    }
+    if (iCommandCount == 0) {
+        PS3_CGF("SFX execute no commands effect=%d", iEffect);
+        return;
+    }
+    if (iStartCommand < 0 || iStartCommand >= iCommandCount) {
+        PS3_CGF("SFX execute invalid start effect=%d start=%d count=%d", iEffect, iStartCommand, iCommandCount);
+        return;
+    }
     if (pEffect->m_iCommandCount) {
         old_entity     = current_entity;
         old_tiki       = current_tiki;
@@ -483,9 +560,19 @@ void ClientSpecialEffectsManager::ExecuteEffect(
         current_tiki   = NULL;
         pCommand       = pEffect->m_commands[iStartCommand];
 
+        if (!pCommand) {
+            PS3_CGF("SFX execute null first command effect=%d start=%d", iEffect, iStartCommand);
+            current_entity = old_entity;
+            current_tiki = old_tiki;
+            return;
+        }
         fStartCommandTime = pCommand->fCommandTime;
         for (i = iStartCommand; i < iCommandCount; i++) {
             pCommand = pEffect->m_commands[i];
+            if (!pCommand) {
+                PS3_CGF("SFX execute null command effect=%d cmd=%d", iEffect, i);
+                continue;
+            }
             if (pCommand->fCommandTime > fStartCommandTime) {
                 Event ev1(EV_SFX_EffectDelay);
                 ev1.AddInteger(iEffect);
@@ -505,8 +592,10 @@ void ClientSpecialEffectsManager::ExecuteEffect(
             if (pCommand->pEvent) {
                 current_entity = &tmpEntity;
                 current_tiki   = tmpEntity.tiki;
+                PS3_CGF("SFX execute before event effect=%d cmd=%d", iEffect, i);
                 // give a reference to it so the event doesn't get deleted
                 commandManager.ProcessEvent(*pCommand->pEvent);
+                PS3_CGF("SFX execute after event effect=%d cmd=%d", iEffect, i);
             } else if (pCommand->emitter && pCommand->endfcn) {
                 current_entity = NULL;
                 current_tiki   = NULL;
@@ -521,13 +610,16 @@ void ClientSpecialEffectsManager::ExecuteEffect(
                 pCommand->emitter->cgd.createTime = cg.time;
                 commandManager.SetSpawnthing(pCommand->emitter);
 
+                PS3_CGF("SFX execute before emitter effect=%d cmd=%d", iEffect, i);
                 (commandManager.*pCommand->endfcn)();
+                PS3_CGF("SFX execute after emitter effect=%d cmd=%d", iEffect, i);
             }
         }
 
         current_entity = old_entity;
         current_tiki   = old_tiki;
     }
+    PS3_CGF("SFX execute done effect=%d", iEffect);
 }
 
 void ClientSpecialEffectsManager::MakeEffect_Normal(int iEffect, Vector vPos, Vector vNormal)
@@ -535,9 +627,22 @@ void ClientSpecialEffectsManager::MakeEffect_Normal(int iEffect, Vector vPos, Ve
     Vector vAngles;
     float  axis[3][3];
 
+    PS3_CGF("SFX normal enter effect=%d", iEffect);
+    if (iEffect < 0 || iEffect >= SFX_COUNT) {
+        PS3_CGF("SFX normal invalid effect=%d", iEffect);
+        return;
+    }
+    if (!m_bEffectsLoaded) {
+        PS3_CGF("SFX normal table not loaded; loading");
+        LoadEffects();
+    }
+
     vAngles = vNormal.toAngles();
+    PS3_CGF("SFX normal after ToAngles effect=%d", iEffect);
     AnglesToAxis(vAngles, axis);
+    PS3_CGF("SFX normal before execute effect=%d", iEffect);
     ClientSpecialEffectsManager::ExecuteEffect(iEffect, 0, vPos, vAngles, axis);
+    PS3_CGF("SFX normal done effect=%d", iEffect);
 }
 
 void ClientSpecialEffectsManager::MakeEffect_Angles(int iEffect, Vector vPos, Vector vAngles)
