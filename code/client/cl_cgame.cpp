@@ -35,17 +35,17 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #if defined(__PS3__)
 static int ps3_cgtime_last_state = -1;
 static int ps3_cgtime_trace_budget = 0;
-#define PS3_CGTIME_TRACE(...) do { \\
-    int ps3_cgtime_state_now = (int)clc.state; \\
-    if (ps3_cgtime_state_now != ps3_cgtime_last_state) { \\
-        ps3_cgtime_last_state = ps3_cgtime_state_now; \\
-        ps3_cgtime_trace_budget = 40; \\
-        PS3_BootTracef("CGTIME state transition=%d", ps3_cgtime_state_now); \\
-    } \\
-    if (ps3_cgtime_trace_budget > 0) { \\
-        PS3_BootTracef("CGTIME " __VA_ARGS__); \\
-        --ps3_cgtime_trace_budget; \\
-    } \\
+#define PS3_CGTIME_TRACE(...) do { \
+    int ps3_cgtime_state_now = (int)clc.state; \
+    if (ps3_cgtime_state_now != ps3_cgtime_last_state) { \
+        ps3_cgtime_last_state = ps3_cgtime_state_now; \
+        ps3_cgtime_trace_budget = 40; \
+        PS3_BootTracef("CGTIME state transition=%d", ps3_cgtime_state_now); \
+    } \
+    if (ps3_cgtime_trace_budget > 0) { \
+        PS3_BootTracef("CGTIME " __VA_ARGS__); \
+        --ps3_cgtime_trace_budget; \
+    } \
 } while (0)
 #else
 #define PS3_CGTIME_TRACE(...) ((void)0)
