@@ -34,7 +34,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             autoconf automake bison flex build-essential ccache cmake ninja-build \
-            file imagemagick libelf-dev libgmp-dev libmpfr-dev libmpc-dev \
+            ffmpeg file git imagemagick libgtest-dev libsndfile1-dev libelf-dev libgmp-dev libmpfr-dev libmpc-dev \
             libncurses-dev libssl-dev libtool libtool-bin pkg-config \
             python3 python3-pil python3-setuptools subversion texinfo wget \
             zlib1g-dev zip
@@ -159,16 +159,57 @@ jobs:
           find build-ps3 \( -type f -name '*.elf' -o -type f -name 'openmohaa' \) -print | sort > ps3-build-outputs.txt
           cat ps3-build-outputs.txt
 
+      - name: Prepare XMB background and hover sound
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          if [[ -f assets/xmb/PIC1.PNG ]]; then
+            cp assets/xmb/PIC1.PNG dist/PIC1.PNG
+          else
+            echo "::warning::assets/xmb/PIC1.PNG is not present; package will use no custom XMB background"
+          fi
+
+          audio="assets/xmb/Medal_of_Honor_Allied_Assault_30s.mp3"
+          if [[ -f "$audio" ]]; then
+            encoder_src="$RUNNER_TEMP/atracdenc"
+            git clone --depth 1 --branch Atracdenc-0.2.3 https://github.com/dcherednik/atracdenc.git "$encoder_src"
+            git -C "$encoder_src" submodule update --init --recursive
+            cmake -S "$encoder_src" -B "$encoder_src/build" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DATRACDENC_PCM_IO_BACKEND=libsndfile
+            cmake --build "$encoder_src/build" --parallel 2
+            export PATH="$encoder_src/build/src:$PATH"
+
+            # Decode and trim to exactly 30 seconds before ATRAC3 encoding.
+            ffmpeg -y -v error -i "$audio" -t 30 -ar 44100 -ac 2 \
+              -sample_fmt s16 -c:a pcm_s16le "$RUNNER_TEMP/xmb-hover-30s.wav"
+            python3 tools/pspmedia.py snd0 "$RUNNER_TEMP/xmb-hover-30s.wav" \
+              -o dist/SND0.AT3 --encoder atracdenc --codec at3
+            python3 tools/pspmedia.py analyze dist/SND0.AT3
+            test -s dist/SND0.AT3
+            test "$(wc -c < dist/SND0.AT3)" -le "$((500 * 1024))"
+          else
+            echo "::warning::assets/xmb/Medal_of_Honor_Allied_Assault_30s.mp3 is not present; package will use no custom XMB hover sound"
+          fi
+
       - name: Package installable PKG files
         shell: bash
         run: |
           set -o pipefail
           mkdir -p dist
-          bash make_ps3_pkg.sh \
-            --build-dir build-ps3 \
-            --out-dir dist \
-            --name OpenMoHAA-PS3-OMOHAA020 \
-            2>&1 | tee ps3-package.log
+          pkg_args=(
+            --build-dir build-ps3
+            --out-dir dist
+            --name OpenMoHAA-PS3-OMOHAA020
+          )
+          if [[ -s dist/PIC1.PNG ]]; then
+            pkg_args+=(--pic1 dist/PIC1.PNG)
+          fi
+          if [[ -s dist/SND0.AT3 ]]; then
+            pkg_args+=(--snd0 dist/SND0.AT3)
+          fi
+          bash make_ps3_pkg.sh "${pkg_args[@]}" 2>&1 | tee ps3-package.log
           find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print
           test -n "$(find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print -quit)"
 
@@ -185,6 +226,8 @@ jobs:
             build-ps3/bin/openmohaa
             build-ps3/**/*.elf
             dist/*.pkg
+            dist/PIC1.PNG
+            dist/SND0.AT3
             ps3-sdk-info.txt
             ps3-build-outputs.txt
             ps3-configure.log
