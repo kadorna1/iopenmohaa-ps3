@@ -26,6 +26,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "archive.h"
 #include "level.h"
 #include "../corepp/lz77.h"
+#include "../sys/ps3_step.h"
 
 #ifdef GAME_DLL
 #    include "../fgame/entity.h"
@@ -88,7 +89,11 @@ ArchiveFile::~ArchiveFile()
 void ArchiveFile::Close()
 {
     if (writing) {
+        PS3_TRACEF("SAVE ArchiveFile::Close before FS_WriteFile name=%s length=%u capacity=%u", filename.c_str(), (unsigned)length, (unsigned)bufferlength);
+        PS3_TRACEMEM("ArchiveFile::Close before FS_WriteFile");
         gi.FS_WriteFile(filename.c_str(), buffer, length);
+        PS3_TRACEF("SAVE ArchiveFile::Close after FS_WriteFile name=%s length=%u", filename.c_str(), (unsigned)length);
+        PS3_TRACEMEM("ArchiveFile::Close after FS_WriteFile");
     }
 
     if (buffer) {
@@ -234,7 +239,11 @@ qboolean ArchiveFile::OpenWrite(const char *name)
     this->length = 0;
     // 4 MiB buffer
     this->bufferlength = 4 * 1024 * 1024;
-    this->buffer       = (byte *)gi.Malloc(bufferlength);
+    PS3_TRACEF("SAVE ArchiveFile::OpenWrite begin name=%s capacity=%u", name ? name : "(null)", (unsigned)this->bufferlength);
+    PS3_TRACEMEM("ArchiveFile::OpenWrite before allocation");
+    this->buffer = (byte *)gi.Malloc(bufferlength);
+    PS3_TRACEF("SAVE ArchiveFile::OpenWrite allocation result=%p capacity=%u", (void *)this->buffer, (unsigned)this->bufferlength);
+    PS3_TRACEMEM("ArchiveFile::OpenWrite after allocation");
     this->filename     = name;
     this->pos          = buffer;
     this->writing      = true;
@@ -264,6 +273,8 @@ qboolean ArchiveFile::Write(const void *source, size_t size)
     if ((pos + size) > (buffer + bufferlength)) {
         byte *oldbuf;
 
+        PS3_TRACEF("SAVE ArchiveFile::Write grow begin name=%s length=%u requested=%u oldCapacity=%u", filename.c_str(), (unsigned)length, (unsigned)size, (unsigned)bufferlength);
+        PS3_TRACEMEM("ArchiveFile::Write before growth");
         do {
             bufferlength *= 2;
         } while ((pos + size) > (buffer + bufferlength));
@@ -271,11 +282,14 @@ qboolean ArchiveFile::Write(const void *source, size_t size)
         oldbuf = buffer;
         // reallocate a bigger buffer
         buffer = (byte *)gi.Malloc(bufferlength);
+        PS3_TRACEF("SAVE ArchiveFile::Write growth allocation result=%p newCapacity=%u", (void *)buffer, (unsigned)bufferlength);
+        PS3_TRACEMEM("ArchiveFile::Write after growth allocation");
         memcpy(buffer, oldbuf, length);
         // free the old buffer
         gi.Free(oldbuf);
         // set the position with the new buffer
         pos = buffer + (pos - oldbuf);
+        PS3_TRACEF("SAVE ArchiveFile::Write growth copied bytes=%u", (unsigned)length);
     }
 
     memcpy(pos, source, size);

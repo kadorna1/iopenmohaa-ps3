@@ -1413,12 +1413,18 @@ qboolean G_ArchiveLevel(
     try {
         int         i;
         int         num;
+        int         entityWalkCount;
+        int         archiveEntityCount;
         Archiver    arc;
         gentity_t  *edict;
         char        szSaveName[MAX_STRING_TOKENS];
         const char *pszSaveName;
         cvar_t     *cvar;
 
+        PS3_TRACEF("SAVE G_ArchiveLevel enter file=%s autosave=%d loading=%d cgameBytes=%u cgameState=%p",
+            filename, (int)autosave, (int)loading, (unsigned)*savedCgameStateSize,
+            savedCgameState ? (void *)*savedCgameState : NULL);
+        PS3_TRACEMEM("G_ArchiveLevel enter");
         COM_StripExtension(filename, szSaveName, sizeof(szSaveName));
         pszSaveName = COM_SkipPath(szSaveName);
 
@@ -1439,7 +1445,11 @@ qboolean G_ArchiveLevel(
         } else {
             int temp;
 
+            PS3_TRACEF("SAVE G_ArchiveLevel before arc.Create file=%s", filename);
+            PS3_TRACEMEM("G_ArchiveLevel before arc.Create");
             arc.Create(filename);
+            PS3_TRACEF("SAVE G_ArchiveLevel after arc.Create");
+            PS3_TRACEMEM("G_ArchiveLevel after arc.Create");
 
             // write out the version number
             temp = GAME_API_VERSION;
@@ -1449,7 +1459,9 @@ qboolean G_ArchiveLevel(
 
             // Write out the pending events.  These are written first in case
             // later objects need to post events when reading the archive.
+            PS3_TRACEF("SAVE G_ArchiveLevel before L_ArchiveEvents");
             L_ArchiveEvents(arc);
+            PS3_TRACEF("SAVE G_ArchiveLevel after L_ArchiveEvents");
         }
 
         if (!arc.Saving()) {
@@ -1465,7 +1477,9 @@ qboolean G_ArchiveLevel(
             num = (int)*savedCgameStateSize;
             arc.ArchiveInteger(&num);
         }
+        PS3_TRACEF("SAVE G_ArchiveLevel before ArchiveRaw cgameBytes=%u", (unsigned)*savedCgameStateSize);
         arc.ArchiveRaw(*savedCgameState, *savedCgameStateSize);
+        PS3_TRACEF("SAVE G_ArchiveLevel after ArchiveRaw cgameBytes=%u", (unsigned)*savedCgameStateSize);
 
         if (arc.Saving()) {
             str s;
@@ -1477,6 +1491,7 @@ qboolean G_ArchiveLevel(
                 }
             }
 
+            PS3_TRACEF("SAVE G_ArchiveLevel savegame cvar count=%d before values", num);
             arc.ArchiveInteger(&num);
             for (cvar = gi.NextCvar(NULL); cvar != NULL; cvar = gi.NextCvar(cvar)) {
                 if (cvar->flags & CVAR_SAVEGAME) {
@@ -1492,6 +1507,7 @@ qboolean G_ArchiveLevel(
                     arc.ArchiveInteger(&cvar->integer);
                 }
             }
+            PS3_TRACEF("SAVE G_ArchiveLevel after serializing savegame cvars");
         } else {
             str sName, sValue;
 
@@ -1510,33 +1526,52 @@ qboolean G_ArchiveLevel(
         }
 
         // archive the game object
+        PS3_TRACEF("SAVE G_ArchiveLevel before game object");
         arc.ArchiveObject(&game);
+        PS3_TRACEF("SAVE G_ArchiveLevel after game object");
 
         // archive Level
+        PS3_TRACEF("SAVE G_ArchiveLevel before Level object");
         arc.ArchiveObject(&level);
+        PS3_TRACEF("SAVE G_ArchiveLevel after Level object");
 
         // archive camera paths
+        PS3_TRACEF("SAVE G_ArchiveLevel before CameraMan object");
         arc.ArchiveObject(&CameraMan);
+        PS3_TRACEF("SAVE G_ArchiveLevel after CameraMan object");
 
         // archive paths
+        PS3_TRACEF("SAVE G_ArchiveLevel before PathManager object");
         arc.ArchiveObject(&PathManager);
+        PS3_TRACEF("SAVE G_ArchiveLevel after PathManager object");
 
         // archive script controller
+        PS3_TRACEF("SAVE G_ArchiveLevel before Director object");
         arc.ArchiveObject(&Director);
+        PS3_TRACEF("SAVE G_ArchiveLevel after Director object");
 
         // archive lightstyles
+        PS3_TRACEF("SAVE G_ArchiveLevel before lightStyles object");
         arc.ArchiveObject(&lightStyles);
+        PS3_TRACEF("SAVE G_ArchiveLevel after lightStyles object");
 
         if (arc.Saving()) {
             // count the entities
             num = 0;
+            entityWalkCount = 0;
+            PS3_TRACEF("SAVE G_ArchiveLevel before counting active entities");
             for (edict = active_edicts.next; edict != &active_edicts; edict = edict->next) {
+                entityWalkCount++;
+                if ((entityWalkCount & 63) == 0) {
+                    PS3_STEPF("SAVE G_ArchiveLevel count entities walked=%d saveable=%d", entityWalkCount, num);
+                }
                 if (edict == world->edict || !edict->entity || (edict->entity->flags & FL_DONTSAVE)) {
                     continue;
                 }
 
                 num++;
             }
+            PS3_TRACEF("SAVE G_ArchiveLevel entity count done walked=%d saveable=%d", entityWalkCount, num);
         }
 
         // archive all the entities
@@ -1545,15 +1580,22 @@ qboolean G_ArchiveLevel(
 
         if (arc.Saving()) {
             // write out the world
+            PS3_TRACEF("SAVE G_ArchiveLevel before world object");
             arc.ArchiveObject(world);
+            PS3_TRACEF("SAVE G_ArchiveLevel after world object");
 
+            archiveEntityCount = 0;
             for (edict = active_edicts.next; edict != &active_edicts; edict = edict->next) {
                 if (edict == world->edict || !edict->entity || (edict->entity->flags & FL_DONTSAVE)) {
                     continue;
                 }
 
+                archiveEntityCount++;
+                PS3_STEPF("SAVE G_ArchiveLevel entity before index=%d", archiveEntityCount);
                 arc.ArchiveObject(edict->entity);
+                PS3_STEPF("SAVE G_ArchiveLevel entity after index=%d", archiveEntityCount);
             }
+            PS3_TRACEF("SAVE G_ArchiveLevel all game entities serialized count=%d", archiveEntityCount);
         } else {
             // Tell the server about our data
             gi.LocateGameData(
@@ -1580,25 +1622,37 @@ qboolean G_ArchiveLevel(
         arc.ArchiveInteger(&num);
 
         if (arc.Saving()) {
+            PS3_TRACEF("SAVE G_ArchiveLevel simple archived entities count=%d", num);
             for (i = 1; i <= num; i++) {
+                PS3_STEPF("SAVE G_ArchiveLevel simple entity before index=%d/%d", i, num);
                 arc.ArchiveObject(level.m_SimpleArchivedEntities.ObjectAt(i));
+                PS3_STEPF("SAVE G_ArchiveLevel simple entity after index=%d/%d", i, num);
             }
+            PS3_TRACEF("SAVE G_ArchiveLevel simple archived entities done");
         } else {
             for (i = 1; i <= num; i++) {
                 arc.ReadObject();
             }
         }
 
+        PS3_TRACEF("SAVE G_ArchiveLevel before ArchiveAliases");
         ArchiveAliases(arc);
+        PS3_TRACEF("SAVE G_ArchiveLevel after ArchiveAliases");
 
         // Added in 2.0
+        PS3_TRACEF("SAVE G_ArchiveLevel before G_ArchiveSmokeSprites");
         G_ArchiveSmokeSprites(arc);
+        PS3_TRACEF("SAVE G_ArchiveLevel after G_ArchiveSmokeSprites");
 
         currentArc = &arc;
+        PS3_TRACEF("SAVE G_ArchiveLevel before gi.ArchiveLevel loading=%d", (int)arc.Loading());
         gi.ArchiveLevel(arc.Loading());
+        PS3_TRACEF("SAVE G_ArchiveLevel after gi.ArchiveLevel");
         currentArc = NULL;
 
+        PS3_TRACEF("SAVE G_ArchiveLevel before PathSearch::ArchiveDynamic");
         PathSearch::ArchiveDynamic(arc);
+        PS3_TRACEF("SAVE G_ArchiveLevel after PathSearch::ArchiveDynamic");
 
         if (arc.Loading()) {
             // Make sure all code that needs to setup the player after they have been loaded is run
@@ -1614,14 +1668,21 @@ qboolean G_ArchiveLevel(
         }
 
         if (arc.Loading()) {
+            PS3_TRACEF("SAVE G_ArchiveLevel before arc.Close (loading)");
             arc.Close();
+            PS3_TRACEF("SAVE G_ArchiveLevel after arc.Close (loading)");
             LoadingSavegame = false;
             gi.Printf(HUD_MESSAGE_YELLOW "%s\n", gi.LV_ConvertString("Game Loaded"));
         } else {
+            PS3_TRACEF("SAVE G_ArchiveLevel before arc.Close (saving)");
+            PS3_TRACEMEM("G_ArchiveLevel before arc.Close");
             arc.Close();
+            PS3_TRACEF("SAVE G_ArchiveLevel after arc.Close (saving)");
+            PS3_TRACEMEM("G_ArchiveLevel after arc.Close");
             gi.Printf(HUD_MESSAGE_YELLOW "%s\n", gi.LV_ConvertString("Game Saved"));
         }
 
+        PS3_TRACEF("SAVE G_ArchiveLevel done loading=%d", (int)loading);
         return qtrue;
     }
 
