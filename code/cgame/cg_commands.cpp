@@ -30,6 +30,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../corepp/tiki.h"
 #include "cg_archive.h"
 #include "memarchiver.h"
+#include "../sys/ps3_step.h"
 
 refEntity_t *current_entity        = NULL;
 int          current_entity_number = -1;
@@ -6073,12 +6074,20 @@ void ClientGameCommandManager::ArchiveToMemory(MemArchiver& archiver)
     int           num;
     int           i;
 
+    PS3_TRACEF("SAVE CMD_ARCHIVE enter reading=%d emitters=%d allocatedVSS=%d tempmodels=%d",
+               archiver.IsReading(), m_emitters.NumObjects(), m_iAllocatedvsssources, MAX_TEMPMODELS);
+    PS3_TRACEF("SAVE CMD_ARCHIVE before local emitter");
     m_localemitter.ArchiveToMemory(archiver);
+    PS3_TRACEF("SAVE CMD_ARCHIVE after local emitter");
 
     if (archiver.IsReading()) {
         archiver.ArchiveInteger(&num);
+        PS3_TRACEF("SAVE CMD_ARCHIVE read emitter count=%d", num);
 
         for (i = 0; i < num; i++) {
+            if ((i & 63) == 0) {
+                PS3_TRACEF("SAVE CMD_ARCHIVE read emitter index=%d/%d", i, num);
+            }
             sp = new spawnthing_t();
             sp->ArchiveToMemory(archiver);
 
@@ -6087,23 +6096,36 @@ void ClientGameCommandManager::ArchiveToMemory(MemArchiver& archiver)
     } else {
         num = m_emitters.NumObjects();
         archiver.ArchiveInteger(&num);
+        PS3_TRACEF("SAVE CMD_ARCHIVE write emitter count=%d", num);
 
         for (i = 0; i < num; i++) {
+            if ((i & 63) == 0) {
+                PS3_TRACEF("SAVE CMD_ARCHIVE write emitter index=%d/%d", i, num);
+            }
             sp = m_emitters[i];
             sp->ArchiveToMemory(archiver);
         }
     }
+    PS3_TRACEF("SAVE CMD_ARCHIVE after emitters");
 
+    PS3_TRACEF("SAVE CMD_ARCHIVE before active tempmodel pointers");
     ArchiveTempModelPointerToMemory(archiver, &m_active_tempmodels.prev);
     ArchiveTempModelPointerToMemory(archiver, &m_active_tempmodels.next);
     ArchiveTempModelPointerToMemory(archiver, &m_free_tempmodels);
+    PS3_TRACEF("SAVE CMD_ARCHIVE after active tempmodel pointers");
 
+    PS3_TRACEF("SAVE CMD_ARCHIVE before tempmodel array count=%d", MAX_TEMPMODELS);
     for (i = 0; i < MAX_TEMPMODELS; i++) {
+        if ((i & 127) == 0) {
+            PS3_TRACEF("SAVE CMD_ARCHIVE tempmodel index=%d/%d", i, MAX_TEMPMODELS);
+        }
         m_tempmodels[i].ArchiveToMemory(archiver);
     }
+    PS3_TRACEF("SAVE CMD_ARCHIVE after tempmodel array");
 
     if (archiver.IsReading()) {
         archiver.ArchiveInteger(&num);
+        PS3_TRACEF("SAVE CMD_ARCHIVE read vss count=%d", num);
         if (m_iAllocatedvsssources != num) {
             m_iAllocatedvsssources = num;
 
@@ -6115,22 +6137,32 @@ void ClientGameCommandManager::ArchiveToMemory(MemArchiver& archiver)
         }
     } else {
         archiver.ArchiveInteger(&m_iAllocatedvsssources);
+        PS3_TRACEF("SAVE CMD_ARCHIVE write vss count=%d", m_iAllocatedvsssources);
     }
 
+    PS3_TRACEF("SAVE CMD_ARCHIVE before active vss pointers");
     ArchiveVssSourcePointerToMemory(archiver, &m_active_vsssources.prev);
     ArchiveVssSourcePointerToMemory(archiver, &m_active_vsssources.next);
     ArchiveVssSourcePointerToMemory(archiver, &m_free_vsssources);
+    PS3_TRACEF("SAVE CMD_ARCHIVE after active vss pointers");
 
     for (i = 0; i < m_iAllocatedvsssources; i++) {
+        if ((i & 63) == 0) {
+            PS3_TRACEF("SAVE CMD_ARCHIVE vss index=%d/%d", i, m_iAllocatedvsssources);
+        }
         m_vsssources[i].ArchiveToMemory(archiver);
     }
+    PS3_TRACEF("SAVE CMD_ARCHIVE after vss array");
 
     archiver.ArchiveTime(&m_iLastVSSRepulsionTime);
+    PS3_TRACEF("SAVE CMD_ARCHIVE before command time manager");
     m_command_time_manager.ArchiveToMemory(archiver);
+    PS3_TRACEF("SAVE CMD_ARCHIVE after command time manager");
     archiver.ArchiveInteger(&m_seed);
     archiver.ArchiveFloat(&m_fEventWait);
 
     m_pCurrentSfx = NULL;
+    PS3_TRACEF("SAVE CMD_ARCHIVE done");
 }
 
 void commandthing_t::ArchiveToMemory(MemArchiver& archiver)
@@ -6241,31 +6273,47 @@ void emitterthing_t::ArchiveToMemory(MemArchiver& archiver)
     int num;
     int i;
 
+    PS3_TRACEF("SAVE CMD_EMITTER_ARCHIVE enter reading=%d times=%d",
+               archiver.IsReading(), m_emittertimes.NumObjects());
     enttracker_t::ArchiveToMemory(archiver);
+    PS3_TRACEF("SAVE CMD_EMITTER_ARCHIVE after tracker");
 
     if (archiver.IsReading()) {
         emittertime_t et;
 
         archiver.ArchiveInteger(&num);
+        PS3_TRACEF("SAVE CMD_EMITTER_ARCHIVE read count=%d", num);
         for (i = 0; i < num; i++) {
+            if ((i & 63) == 0) PS3_TRACEF("SAVE CMD_EMITTER_ARCHIVE read index=%d/%d", i, num);
             et.ArchiveToMemory(archiver);
             m_emittertimes.AddObject(et);
         }
     } else {
         num = m_emittertimes.NumObjects();
         archiver.ArchiveInteger(&num);
+        PS3_TRACEF("SAVE CMD_EMITTER_ARCHIVE write count=%d", num);
 
         for (i = 0; i < num; i++) {
+            if ((i & 63) == 0) PS3_TRACEF("SAVE CMD_EMITTER_ARCHIVE write index=%d/%d", i, num);
             emittertime_t& et = m_emittertimes[i];
             et.ArchiveToMemory(archiver);
         }
     }
 
     archiver.ArchiveBoolean(&startoff);
+    PS3_TRACEF("SAVE CMD_EMITTER_ARCHIVE done");
 }
 
 void cg_common_data::ArchiveToMemory(MemArchiver& archiver)
 {
+#if defined(__PS3__)
+    static unsigned int ps3_cg_common_archive_count = 0;
+    unsigned int ps3_cg_common_archive_id = ++ps3_cg_common_archive_count;
+    int ps3_trace_cg_common = (ps3_cg_common_archive_id <= 4 || (ps3_cg_common_archive_id & 127U) == 0);
+    if (ps3_trace_cg_common) {
+        PS3_TRACEF("SAVE CMD_CG_COMMON enter id=%u", ps3_cg_common_archive_id);
+    }
+#endif
     archiver.ArchiveInteger(&life);
     archiver.ArchiveTime(&createTime);
     archiver.ArchiveVector(&origin);
@@ -6290,12 +6338,24 @@ void cg_common_data::ArchiveToMemory(MemArchiver& archiver)
     archiver.ArchiveFloat(&bouncefactor);
     archiver.ArchiveInteger(&bouncecount);
     archiver.ArchiveInteger(&maxbouncecount);
+#if defined(__PS3__)
+    if (ps3_trace_cg_common) PS3_TRACEF("SAVE CMD_CG_COMMON id=%u before bouncesound", ps3_cg_common_archive_id);
+#endif
     archiver.ArchiveString(&bouncesound);
+#if defined(__PS3__)
+    if (ps3_trace_cg_common) PS3_TRACEF("SAVE CMD_CG_COMMON id=%u after bouncesound", ps3_cg_common_archive_id);
+#endif
     archiver.ArchiveInteger(&bouncesound_delay);
     archiver.ArchiveInteger(&flags);
     archiver.ArchiveInteger(&flags2);
 
+#if defined(__PS3__)
+    if (ps3_trace_cg_common) PS3_TRACEF("SAVE CMD_CG_COMMON id=%u before tiki pointer", ps3_cg_common_archive_id);
+#endif
     CG_ArchiveTikiPointer(archiver, &tiki);
+#if defined(__PS3__)
+    if (ps3_trace_cg_common) PS3_TRACEF("SAVE CMD_CG_COMMON id=%u after tiki pointer", ps3_cg_common_archive_id);
+#endif
 
     archiver.ArchiveInteger(&swarmfreq);
     archiver.ArchiveFloat(&swarmmaxspeed);
@@ -6314,6 +6374,9 @@ void cg_common_data::ArchiveToMemory(MemArchiver& archiver)
     archiver.ArchiveInteger(&physicsRate);
     archiver.ArchiveFloat(&scale);
     archiver.ArchiveFloat(&scale2);
+#if defined(__PS3__)
+    if (ps3_trace_cg_common) PS3_TRACEF("SAVE CMD_CG_COMMON id=%u before swipe strings", ps3_cg_common_archive_id);
+#endif
     archiver.ArchiveString(&swipe_shader);
     archiver.ArchiveString(&swipe_tag_start);
     archiver.ArchiveString(&swipe_tag_end);
@@ -6323,16 +6386,28 @@ void cg_common_data::ArchiveToMemory(MemArchiver& archiver)
     archiver.ArchiveFloat(&spin_rotation);
     archiver.ArchiveFloat(&decal_orientation);
     archiver.ArchiveFloat(&decal_radius);
+#if defined(__PS3__)
+    if (ps3_trace_cg_common) PS3_TRACEF("SAVE CMD_CG_COMMON done id=%u", ps3_cg_common_archive_id);
+#endif
 }
 
 void spawnthing_t::ArchiveToMemory(MemArchiver& archiver)
 {
+    PS3_TRACEF("SAVE CMD_SPAWNTHING enter emitterTimes=%d models=%d tags=%d",
+               m_emittertimes.NumObjects(), m_modellist.NumObjects(), m_taglist.NumObjects());
     emitterthing_t::ArchiveToMemory(archiver);
+    PS3_TRACEF("SAVE CMD_SPAWNTHING after emitter base");
 
+    PS3_TRACEF("SAVE CMD_SPAWNTHING before model list count=%d", m_modellist.NumObjects());
     CG_ArchiveStringContainer(archiver, &m_modellist);
+    PS3_TRACEF("SAVE CMD_SPAWNTHING after model list");
+    PS3_TRACEF("SAVE CMD_SPAWNTHING before tag list count=%d", m_taglist.NumObjects());
     CG_ArchiveStringContainer(archiver, &m_taglist);
+    PS3_TRACEF("SAVE CMD_SPAWNTHING after tag list");
 
+    PS3_TRACEF("SAVE CMD_SPAWNTHING before common data");
     cgd.ArchiveToMemory(archiver);
+    PS3_TRACEF("SAVE CMD_SPAWNTHING after common data");
 
     archiver.ArchiveInteger(&entnum);
     archiver.ArchiveVector(&origin_offset_base);
@@ -6358,6 +6433,7 @@ void spawnthing_t::ArchiveToMemory(MemArchiver& archiver)
     archiver.ArchiveTime(&lastTime);
     archiver.ArchiveInteger(&count);
     archiver.ArchiveInteger(&tagnum);
+    PS3_TRACEF("SAVE CMD_SPAWNTHING before emitter strings");
     archiver.ArchiveString(&emittername);
     archiver.ArchiveString(&animName);
     archiver.ArchiveFloat(dcolor);
@@ -6386,6 +6462,7 @@ void spawnthing_t::ArchiveToMemory(MemArchiver& archiver)
     archiver.ArchiveFloat(&spreadx);
     archiver.ArchiveFloat(&spready);
     archiver.ArchiveBoolean(&use_last_trace_end);
+    PS3_TRACEF("SAVE CMD_SPAWNTHING done");
 }
 
 void commandtime_t::ArchiveToMemory(MemArchiver& archiver)
