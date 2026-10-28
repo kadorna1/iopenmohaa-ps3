@@ -1062,6 +1062,23 @@ void GLimp_Init(qboolean fixedFunction)
      * ps3gl scales it into a centered rect of vid_ps3_screenfit percent
      * (PS3_ApplyScreenFit, every frame: the menu slider applies live). */
     ps3_fit_cvar = ri.Cvar_Get("vid_ps3_screenfit", PS3_DEFAULT_SCREENFIT, CVAR_ARCHIVE);
+
+    /* Existing PS3 installs may have archived the old default (88%) into the
+     * config. Migrate that old default once so the new full-screen default also
+     * applies after an in-place PKG update, without overwriting other custom
+     * screen-fit values. An explicitly chosen 88% is indistinguishable from
+     * the old default; users can still lower the slider again after migration. */
+    {
+        cvar_t *fit_migration = ri.Cvar_Get("vid_ps3_screenfit_migration", "0", CVAR_ARCHIVE);
+        if (fit_migration && fit_migration->integer < 1) {
+            if (ps3_fit_cvar && ps3_fit_cvar->integer == 88) {
+                ri.Cvar_Set("vid_ps3_screenfit", "100");
+                ps3_fit_cvar = ri.Cvar_Get("vid_ps3_screenfit", PS3_DEFAULT_SCREENFIT, CVAR_ARCHIVE);
+                PS3_Logf("[video] migrated legacy default screen fit from 88%% to 100%%");
+            }
+            ri.Cvar_Set("vid_ps3_screenfit_migration", "1");
+        }
+    }
     ps3_fit_pct = -1;
     PS3_ApplyScreenFit();
     glConfig.vidWidth  = ps3_display_width;
