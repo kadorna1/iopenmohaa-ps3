@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "cg_local.h"
 #include "memarchiver.h"
+#include "../sys/ps3_step.h"
 #include "../corepp/vector.h"
 #include "../corepp/str.h"
 
@@ -219,9 +220,14 @@ void MemArchiver::ArchiveWriteRaw(const void *buffer, size_t size)
     }
 
     if (size + this->bufferSize > this->allocatedSize) {
+        size_t oldAllocatedSize = this->allocatedSize;
+        PS3_TRACEF("SAVE MEMARCHIVE grow enter used=%u request=%u capacity=%u",
+                   (unsigned)this->bufferSize, (unsigned)size, (unsigned)this->allocatedSize);
         if (!this->allocatedSize) {
             this->allocatedSize = 1024;
-            this->buffer        = (byte *)cgi.Malloc(this->allocatedSize);
+            PS3_TRACEF("SAVE MEMARCHIVE first allocation before bytes=%u", (unsigned)this->allocatedSize);
+            this->buffer = (byte *)cgi.Malloc(this->allocatedSize);
+            PS3_TRACEF("SAVE MEMARCHIVE first allocation after ptr=%p", this->buffer);
         } else {
             byte *newBuffer;
 
@@ -229,10 +235,18 @@ void MemArchiver::ArchiveWriteRaw(const void *buffer, size_t size)
                 this->allocatedSize *= 2;
             } while (size + this->bufferSize > this->allocatedSize);
 
+            PS3_TRACEF("SAVE MEMARCHIVE realloc before old=%u new=%u used=%u",
+                       (unsigned)oldAllocatedSize, (unsigned)this->allocatedSize, (unsigned)this->bufferSize);
             newBuffer = (byte *)cgi.Malloc(this->allocatedSize);
+            PS3_TRACEF("SAVE MEMARCHIVE realloc after ptr=%p new=%u", newBuffer, (unsigned)this->allocatedSize);
+            PS3_TRACEF("SAVE MEMARCHIVE copy-old before dst=%p src=%p bytes=%u",
+                       newBuffer, this->buffer, (unsigned)this->bufferSize);
             memcpy(newBuffer, this->buffer, this->bufferSize);
+            PS3_TRACEF("SAVE MEMARCHIVE copy-old after");
             cgi.Free(this->buffer);
             this->buffer = newBuffer;
+            PS3_TRACEF("SAVE MEMARCHIVE old buffer freed; current=%p capacity=%u",
+                       this->buffer, (unsigned)this->allocatedSize);
         }
     }
 
