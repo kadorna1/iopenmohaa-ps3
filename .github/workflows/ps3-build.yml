@@ -216,7 +216,7 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/openmohaa-ps3-install" \
             -DOPENMOHAA_PS3_APPID="$OPENMOHAA_PS3_APPID" \
-            -DOPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO="${{ inputs.experimental_spu_audio || false }}" \
+            -DOPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO="${{ inputs.experimental_spu_audio || startsWith(github.ref_name, 'experimental/rsxkit-spukit-audio') }}" \
             -DBUILD_SERVER=OFF \
             -DBUILD_CLIENT=ON \
             -DBUILD_RENDERER_GL2=OFF \
