@@ -242,15 +242,6 @@ jobs:
           find build-ps3 \( -type f -name '*.elf' -o -type f -name 'openmohaa' \) -print | sort > ps3-build-outputs.txt
           cat ps3-build-outputs.txt
 
-      # ATRAC3 encoder source and its compiled binary are cached separately.
-      - name: Restore ATRAC3 encoder cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/atracdenc
-          key: ps3-atracdenc-${{ runner.os }}-Atracdenc-0.2.3-v1
-          restore-keys: |
-            ps3-atracdenc-${{ runner.os }}-Atracdenc-0.2.3-
-
       - name: Prepare XMB background and hover sound
         shell: bash
         run: |
@@ -337,8 +328,6 @@ jobs:
             dist/*.pkg
             dist/PIC1.PNG
             dist/SND0.AT3
-            dist/SND01.AT3
-            dist/SND0_01.AT3
             ps3-sdk-info.txt
             ps3-build-outputs.txt
             ps3-configure.log
