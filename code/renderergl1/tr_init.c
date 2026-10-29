@@ -1560,7 +1560,12 @@ void R_Register( void )
 	r_static_shadermultiplier1 = ri.Cvar_Get("r_static_shadermultiplier1", "1", CVAR_SYSTEMINFO);
 	r_static_shadermultiplier2 = ri.Cvar_Get("r_static_shadermultiplier2", "1", CVAR_SYSTEMINFO);
 	r_static_shadermultiplier3 = ri.Cvar_Get("r_static_shadermultiplier3", "1", CVAR_SYSTEMINFO);
+#if defined(__PS3__)
+	/* Warm registered map textures before gameplay; set r_precacheimages 0 to disable. */
+	r_precacheimages = ri.Cvar_Get("r_precacheimages", "1", 0);
+#else
 	r_precacheimages = ri.Cvar_Get("r_precacheimages", "0", 0);
+#endif
 	ter_minMarkRadius = ri.Cvar_Get("ter_minMarkRadius", "8", CVAR_ARCHIVE);
 	ter_fastMarks = ri.Cvar_Get("ter_fastMarks", "1", CVAR_ARCHIVE);
 	r_alpha_foliage1 = ri.Cvar_Get("r_alpha_foliage1", "0.75", CVAR_CHEAT);
@@ -1834,15 +1839,16 @@ Touch all images to make sure they are resident
 void RE_EndRegistration( void ) {
 	R_IssuePendingRenderCommands();
 	if (r_precacheimages->integer) {
+#if defined(__PS3__)
+		RB_PrecacheImages();
+#else
 		int start, end;
 
 		start = ri.Milliseconds();
-
 		RB_ShowImages(qtrue);
-
 		end = ri.Milliseconds();
-
-		ri.Printf(PRINT_ALL, "RB_ShowImages: %5.2f seconds\n", (float)((end - start) / 1000.f));
+		ri.Printf(PRINT_ALL, "RB_ShowImages: %5.2f seconds\\n", (float)((end - start) / 1000.f));
+#endif
 	}
 
 	R_FreeUnusedImages();
