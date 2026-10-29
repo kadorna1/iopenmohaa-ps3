@@ -29,6 +29,18 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Fetch canonical XMB assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p assets/xmb
+          for asset in PIC1.PNG SND0.AT3; do
+            url="https://raw.githubusercontent.com/kadorna1/iopenmohaa-ps3/main/assets/xmb/${asset}"
+            curl --fail --location --retry 4 --retry-all-errors --connect-timeout 30 "$url" -o "$RUNNER_TEMP/$asset"
+            test -s "$RUNNER_TEMP/$asset"
+            install -m 0644 "$RUNNER_TEMP/$asset" "assets/xmb/$asset"
+          done
+
       # Cache downloaded .deb packages. apt indexes are refreshed each run,
       # but already-cached dependency archives do not need to be downloaded again.
       - name: Restore host dependency package cache
@@ -275,101 +287,89 @@ jobs:
           restore-keys: |
             ps3-atracdenc-${{ runner.os }}-Atracdenc-0.2.3-
 
+      - name: Restore ATRAC3 encoder cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/atracdenc
+          key: atracdenc-${{ runner.os }}-0.2.3-${{ hashFiles('.github/ps3-host-deps.txt') }}
+          restore-keys: |
+            atracdenc-${{ runner.os }}-0.2.3-
+
       - name: Prepare XMB background and hover sound
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
-          image="assets/xmb/PIC1.PNG"
-          if [[ -f "$image" ]]; then
-            # Produce the PS3 XMB background as a 1920x1080 RGBA PNG.
-            ffmpeg -y -v error -i "$image" -frames:v 1 \
-              -vf "scale=1920:1080:flags=lanczos,format=rgba" dist/PIC1.PNG
-            test -s dist/PIC1.PNG
-            dimensions="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 dist/PIC1.PNG)"
-            test "$dimensions" = "1920x1080"
-          else
-            echo "::warning::assets/xmb/PIC1.PNG is not present; package will use no custom XMB background"
+          test -s assets/xmb/PIC1.PNG
+          test -s assets/xmb/SND0.AT3
+
+          # Prepare the canonical PS3 XMB background.
+          ffmpeg -y -v error -i assets/xmb/PIC1.PNG -frames:v 1 \
+            -vf "scale=1920:1080:flags=lanczos,format=rgba" dist/PIC1.PNG
+          test -s dist/PIC1.PNG
+          dimensions="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 dist/PIC1.PNG)"
+          if [[ "$dimensions" != "1920x1080" ]]; then
+            echo "::error::dist/PIC1.PNG must be 1920x1080, got '$dimensions'"
+            exit 1
           fi
 
-          # XMB audio is checked in pre-encoded in the PS3's canonical SND0.AT3 format.
-          # Do not download/build an encoder or convert source audio in CI.
-          audio="assets/xmb/SND0.AT3"
-          if [[ -f "$audio" ]]; then
-            install -D -m 0644 "$audio" dist/SND0.AT3
-            python3 tools/pspmedia.py analyze dist/SND0.AT3 2>&1 | tee dist/SND0-analysis.txt
+          # Decode the committed audio source and re-encode it as plain
+          # ATRAC3 LP4 at 66 kbps, the format produced by pspmedia.py for SND0.
+          # Trim to the XMB's approximately 30-second playback window.
+          ffmpeg -y -v error -i assets/xmb/SND0.AT3 -t 30 -ar 44100 -ac 2 \
+            -sample_fmt s16 -c:a pcm_s16le "$RUNNER_TEMP/xmb-hover-30s.wav"
+          test -s "$RUNNER_TEMP/xmb-hover-30s.wav"
 
-            codec="$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 dist/SND0.AT3)"
-            sample_rate="$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate -of default=nw=1:nk=1 dist/SND0.AT3)"
-            channels="$(ffprobe -v error -select_streams a:0 -show_entries stream=channels -of default=nw=1:nk=1 dist/SND0.AT3)"
-            size_bytes="$(wc -c < dist/SND0.AT3)"
-            if [[ "$codec" != "atrac3" ]]; then
-              echo "::error::assets/xmb/SND0.AT3 must contain plain ATRAC3 audio; ffprobe reports '$codec'"
-              exit 1
-            fi
-            if [[ "$sample_rate" != "44100" || "$channels" != "2" ]]; then
-              echo "::error::assets/xmb/SND0.AT3 must be 44.1 kHz stereo"
-              exit 1
-            fi
-            if (( size_bytes > 500 * 1024 )); then
-              echo "::error::assets/xmb/SND0.AT3 exceeds the 500 KiB PS3 XMB audio budget"
-              exit 1
-            fi
-            test -s dist/SND0.AT3
-          else
-            echo "::warning::assets/xmb/SND0.AT3 is not present; package will use no custom XMB hover sound"
+          encoder_root="$HOME/.cache/atracdenc"
+          encoder_src="$encoder_root/src"
+          encoder_build="$encoder_root/build"
+          mkdir -p "$encoder_root"
+          if [[ ! -f "$encoder_src/CMakeLists.txt" ]]; then
+            rm -rf "$encoder_src"
+            git clone --depth 1 --branch Atracdenc-0.2.3 https://github.com/dcherednik/atracdenc.git "$encoder_src"
+            git -C "$encoder_src" submodule update --init --recursive
           fi
+          if [[ ! -x "$encoder_build/src/atracdenc" ]]; then
+            cmake -S "$encoder_src" -B "$encoder_build" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DATRACDENC_PCM_IO_BACKEND=libsndfile
+          fi
+          cmake --build "$encoder_build" --parallel 2
+          export PATH="$encoder_build/src:$PATH"
+          test -x "$encoder_build/src/atracdenc"
+          python3 tools/pspmedia.py snd0 "$RUNNER_TEMP/xmb-hover-30s.wav" \
+            -o dist/SND0.AT3 --encoder atracdenc --codec at3
+
+          # Fail the run if either media file is invalid; do not silently
+          # make a PKG without the requested XMB assets.
+          python3 tools/pspmedia.py analyze dist/SND0.AT3 2>&1 | tee dist/SND0-analysis.txt
+          codec="$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 dist/SND0.AT3)"
+          sample_rate="$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate -of default=nw=1:nk=1 dist/SND0.AT3)"
+          channels="$(ffprobe -v error -select_streams a:0 -show_entries stream=channels -of default=nw=1:nk=1 dist/SND0.AT3)"
+          size_bytes="$(wc -c < dist/SND0.AT3)"
+          [[ "$codec" == "atrac3" ]] || { echo "::error::Expected ATRAC3 in dist/SND0.AT3, got '$codec'"; exit 1; }
+          [[ "$sample_rate" == "44100" && "$channels" == "2" ]] || { echo "::error::SND0.AT3 must be 44.1 kHz stereo"; exit 1; }
+          (( size_bytes <= 500 * 1024 )) || { echo "::error::Encoded dist/SND0.AT3 exceeds the 500 KiB XMB budget"; exit 1; }
+          test -s dist/PIC1.PNG
+          test -s dist/SND0.AT3
 
       - name: Package installable PKG files
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           mkdir -p dist
+          test -s dist/PIC1.PNG
+          test -s dist/SND0.AT3
           pkg_args=(
             --build-dir build-ps3
             --out-dir dist
             --name OpenMoHAA-PS3-OMOHAA020
+            --pic1 dist/PIC1.PNG
+            --snd0 dist/SND0.AT3
           )
-          if [[ -s dist/PIC1.PNG ]]; then
-            pkg_args+=(--pic1 dist/PIC1.PNG)
-          fi
-          if [[ -s dist/SND0.AT3 ]]; then
-            pkg_args+=(--snd0 dist/SND0.AT3)
-          fi
           bash make_ps3_pkg.sh "${pkg_args[@]}" 2>&1 | tee ps3-package.log
           find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print
           test -n "$(find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print -quit)"
-
-      - name: Record source hashes for next incremental build
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import hashlib
-          import json
-          import os
-          import subprocess
-          from pathlib import Path
-
-          paths = subprocess.run(
-              ["git", "ls-files", "-z"], check=True, stdout=subprocess.PIPE
-          ).stdout.split(b"\0")
-          manifest = {}
-          for raw in paths:
-              if not raw:
-                  continue
-              name = os.fsdecode(raw)
-              path = Path(name)
-              if path.is_file() and not path.is_symlink():
-                  manifest[name] = hashlib.sha256(path.read_bytes()).hexdigest()
-
-          target = Path("build-ps3/.ps3-source-hashes.json")
-          target.write_text(
-              json.dumps(manifest, sort_keys=True, separators=(",", ":")),
-              encoding="utf-8"
-          )
-          print(f"Recorded {len(manifest)} tracked source-file hashes.")
-          PY
 
       - name: Upload PS3 build, PKG files, and logs
         if: always()
