@@ -242,15 +242,6 @@ jobs:
           find build-ps3 \( -type f -name '*.elf' -o -type f -name 'openmohaa' \) -print | sort > ps3-build-outputs.txt
           cat ps3-build-outputs.txt
 
-      # ATRAC3 encoder source and its compiled binary are cached separately.
-      - name: Restore ATRAC3 encoder cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/atracdenc
-          key: ps3-atracdenc-${{ runner.os }}-Atracdenc-0.2.3-v1
-          restore-keys: |
-            ps3-atracdenc-${{ runner.os }}-Atracdenc-0.2.3-
-
       - name: Prepare XMB background and hover sound
         shell: bash
         run: |
@@ -268,41 +259,32 @@ jobs:
             echo "::warning::assets/xmb/PIC1.PNG is not present; package will use no custom XMB background"
           fi
 
-          audio="assets/xmb/Medal_of_Honor_Allied_Assault_30s.mp3"
+          # XMB audio is checked in pre-encoded in the PS3's canonical SND0.AT3 format.
+          # Do not download/build an encoder or convert source audio in CI.
+          audio="assets/xmb/SND0.AT3"
           if [[ -f "$audio" ]]; then
-            encoder_root="$HOME/.cache/atracdenc"
-            encoder_src="$encoder_root/src"
-            encoder_build="$encoder_root/build"
-            mkdir -p "$encoder_root"
-            if [[ ! -f "$encoder_src/CMakeLists.txt" ]]; then
-              rm -rf "$encoder_src"
-              git clone --depth 1 --branch Atracdenc-0.2.3 https://github.com/dcherednik/atracdenc.git "$encoder_src"
-              git -C "$encoder_src" submodule update --init --recursive
-            fi
-            if [[ ! -x "$encoder_build/src/atracdenc" ]]; then
-              cmake -S "$encoder_src" -B "$encoder_build" \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DATRACDENC_PCM_IO_BACKEND=libsndfile
-            fi
-            cmake --build "$encoder_build" --parallel 2
-            export PATH="$encoder_build/src:$PATH"
+            install -D -m 0644 "$audio" dist/SND0.AT3
+            python3 tools/pspmedia.py analyze dist/SND0.AT3 2>&1 | tee dist/SND0-analysis.txt
 
-            # Decode and trim to exactly 30 seconds before ATRAC3 encoding.
-            ffmpeg -y -v error -i "$audio" -t 30 -ar 44100 -ac 2 \
-              -sample_fmt s16 -c:a pcm_s16le "$RUNNER_TEMP/xmb-hover-30s.wav"
-            python3 tools/pspmedia.py snd0 "$RUNNER_TEMP/xmb-hover-30s.wav" \
-              -o dist/SND0.AT3 --encoder atracdenc --codec at3
-            python3 tools/pspmedia.py analyze dist/SND0.AT3
-            # Keep the canonical PS3 XMB filename and aliases for the requested
-            # name plus the numbered language-specific PS3 naming convention.
-            cp dist/SND0.AT3 dist/SND01.AT3
-            cp dist/SND0.AT3 dist/SND0_01.AT3
+            codec="$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 dist/SND0.AT3)"
+            sample_rate="$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate -of default=nw=1:nk=1 dist/SND0.AT3)"
+            channels="$(ffprobe -v error -select_streams a:0 -show_entries stream=channels -of default=nw=1:nk=1 dist/SND0.AT3)"
+            size_bytes="$(wc -c < dist/SND0.AT3)"
+            if [[ "$codec" != "atrac3" ]]; then
+              echo "::error::assets/xmb/SND0.AT3 must contain plain ATRAC3 audio; ffprobe reports '$codec'"
+              exit 1
+            fi
+            if [[ "$sample_rate" != "44100" || "$channels" != "2" ]]; then
+              echo "::error::assets/xmb/SND0.AT3 must be 44.1 kHz stereo"
+              exit 1
+            fi
+            if (( size_bytes > 500 * 1024 )); then
+              echo "::error::assets/xmb/SND0.AT3 exceeds the 500 KiB PS3 XMB audio budget"
+              exit 1
+            fi
             test -s dist/SND0.AT3
-            test -s dist/SND01.AT3
-            test -s dist/SND0_01.AT3
-            test "$(wc -c < dist/SND0.AT3)" -le "$((500 * 1024))"
           else
-            echo "::warning::assets/xmb/Medal_of_Honor_Allied_Assault_30s.mp3 is not present; package will use no custom XMB hover sound"
+            echo "::warning::assets/xmb/SND0.AT3 is not present; package will use no custom XMB hover sound"
           fi
 
       - name: Package installable PKG files
@@ -346,8 +328,6 @@ jobs:
             dist/*.pkg
             dist/PIC1.PNG
             dist/SND0.AT3
-            dist/SND01.AT3
-            dist/SND0_01.AT3
             ps3-sdk-info.txt
             ps3-build-outputs.txt
             ps3-configure.log
