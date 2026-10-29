@@ -302,7 +302,7 @@ jobs:
             test -s dist/SND0_01.AT3
             test "$(wc -c < dist/SND0.AT3)" -le "$((500 * 1024))"
           else
-            echo "::warning::assets/xmb/Medal_of_Honor_Allied_Assault_30s.mp3 is not present; package will use no custom XMB hover sound"
+            echo "::warning::assets/xmb/Medal Of Honor Allied Assault.mp3 is not present; package will use no custom XMB hover sound"
           fi
 
       - name: Package installable PKG files
