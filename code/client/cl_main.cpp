@@ -2775,7 +2775,9 @@ void CL_Frame ( int msec ) {
 			UI_ForceMenuOff(qtrue);
 		}
 	}
+	PS3_CLF("after intro/menu check");
 
+	PS3_CLF("before CL_VideoRecording check");
 	// if recording an avi, lock to a fixed fps
 	if ( CL_VideoRecording( ) && cl_aviFrameRate->integer && msec) {
 		// save the current screen
@@ -2789,7 +2791,9 @@ void CL_Frame ( int msec ) {
 			}
 		}
 	}
+	PS3_CLF("after CL_VideoRecording check");
 
+	PS3_CLF("before auto-record demo check");
 	if( cl_autoRecordDemo->integer ) {
 		if( clc.state == CA_ACTIVE && !clc.demorecording && !clc.demoplaying ) {
 			// If not recording a demo, and we should be, start one
@@ -2827,6 +2831,7 @@ void CL_Frame ( int msec ) {
 			CL_StopRecord_f( );
 		}
 	}
+	PS3_CLF("after auto-record demo check");
 
 	// save the msec before checking pause
 	cls.realFrametime = msec;
@@ -2835,12 +2840,14 @@ void CL_Frame ( int msec ) {
 	cls.frametime = msec;
 
 	cls.realtime += cls.frametime;
+	PS3_CLF("after frame time/realtime setup");
 
 	if ( cl_timegraph->integer ) {
 		SCR_DebugGraph ( cls.realFrametime * 0.25 );
 	}
 
 	cls.timeScaled = com_timescale->integer != 1;
+	PS3_CLF("after timegraph/timescale setup");
 
 	//
 	// Added in 2.0: network profiling
@@ -2867,9 +2874,12 @@ void CL_Frame ( int msec ) {
 		cls.netprofile.initialized = qfalse;
 	}
 
+	PS3_CLF("after netprofile setup");
+
 	// see if we need to update any userinfo
 	PS3_CLF("before CL_CheckUserinfo");
 	CL_CheckUserinfo();
+	PS3_CLF("after CL_CheckUserinfo");
 
 	// if we haven't gotten a packet in a long time,
 	// drop the connection
