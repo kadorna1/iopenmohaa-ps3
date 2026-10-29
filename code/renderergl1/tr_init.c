@@ -1847,7 +1847,7 @@ void RE_EndRegistration( void ) {
 		start = ri.Milliseconds();
 		RB_ShowImages(qtrue);
 		end = ri.Milliseconds();
-		ri.Printf(PRINT_ALL, "RB_ShowImages: %5.2f seconds\\n", (float)((end - start) / 1000.f));
+		ri.Printf(PRINT_ALL, "RB_ShowImages: %5.2f seconds\n", (float)((end - start) / 1000.f));
 #endif
 	}
 
