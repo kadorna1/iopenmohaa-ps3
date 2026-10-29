@@ -1401,7 +1401,7 @@ void RB_PrecacheImages( void ) {
 	qglFinish();
 
 	end = ri.Milliseconds();
-	ri.Printf( PRINT_ALL, "PS3 texture warmup: %d registered images in %.2f seconds\\n",
+	ri.Printf( PRINT_ALL, "PS3 texture warmup: %d registered images in %.2f seconds\n",
 		tr.numImages, (float)(end - start) / 1000.0f );
 }
 
