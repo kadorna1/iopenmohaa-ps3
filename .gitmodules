@@ -1,0 +1,6 @@
+[submodule "third_party/rsxkit"]
+	path = third_party/rsxkit
+	url = https://github.com/kadorna1/rsxkit.git
+[submodule "third_party/spukit"]
+	path = third_party/spukit
+	url = https://github.com/kadorna1/spukit.git

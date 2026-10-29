@@ -64,6 +64,7 @@ link_directories(
 
 add_compile_definitions(__PS3__ _PS3 __lv2ppu__ __PSL1GHT__ PS3_APPID=\"${OPENMOHAA_PS3_APPID}\")
 option(OPENMOHAA_PS3_RSX_TEST "Boot into the RSX bring-up test (sys/ps3_rsxtest.c) instead of the engine" OFF)
+option(OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO "Use an experimental SPU-backed block mixer for supported PCM voices" OFF)
 if(OPENMOHAA_PS3_RSX_TEST)
     add_compile_definitions(PS3_RSX_TEST=1)
 endif()

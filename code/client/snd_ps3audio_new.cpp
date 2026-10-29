@@ -29,7 +29,13 @@ refuses to start with it.
 #include <sys/mutex.h>
 #include <sys/thread.h>
 
+#include <malloc.h>
 #include <math.h>
+#ifdef OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO
+#include <spukit/spukit.h>
+#include "ps3_spukit_mix.h"
+extern const u8 ps3_spukit_mix_bin[];
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -82,6 +88,13 @@ static int          g_tick       = 0;
 
 static vec3_t g_lpos  = {0, 0, 0};
 static vec3_t g_laxis[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+
+#ifdef OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO
+static spukit_worker *g_spu_mix_worker;
+static uint8_t *g_spu_mix_stage;
+static ps3a_spu_voice_t g_spu_mix_voices[PS3A_MAX_VOICES] __attribute__((aligned(128)));
+static int g_spu_mix_warned;
+#endif
 
 static void ps3a_lock()
 {
@@ -337,7 +350,7 @@ static void ps3a_target_gains(const ps3a_voice_t *v, float master, float *gl, fl
     }
 }
 
-static void ps3a_mix_block(float *out)
+static void ps3a_mix_block_ppu(float *out)
 {
     float  mixL[PS3A_BLOCK], mixR[PS3A_BLOCK];
     float  master = (s_volume ? s_volume->value : 0.9f);
@@ -415,6 +428,134 @@ static void ps3a_mix_block(float *out)
         out[k * 2]     = l;
         out[k * 2 + 1] = r;
     }
+}
+
+
+#ifdef OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO
+static uint32_t ps3a_align16(uint32_t n) { return (n + 15u) & ~15u; }
+
+/* Locking pins source buffers through the SPE job. This is intentionally
+ * experimental because the waiting audio thread may briefly block game calls. */
+static bool ps3a_mix_block_spu(float *out)
+{
+    if (!g_spu_mix_worker || !g_spu_mix_stage || !out || (((uintptr_t)out) & 15u)) return false;
+    memset(g_spu_mix_voices, 0, sizeof(g_spu_mix_voices));
+    ps3a_lock();
+
+    for (uint32_t i = 0; i < PS3A_MAX_VOICES; i++) {
+        ps3a_voice_t *src = &g_voice[i];
+        ps3a_spu_voice_t *dst = &g_spu_mix_voices[i];
+        if (!src->active) continue;
+        if (!src->pcm || src->frames <= 0 ||
+            (src->width != 1 && src->width != 2) ||
+            (src->chans != 1 && src->chans != 2) ||
+            src->step <= 0.0 || src->step > 4.0) goto ppu_fallback;
+
+        const uint32_t bpf = (uint32_t)src->width * (uint32_t)src->chans;
+        uint64_t pos_q16 = (uint64_t)(src->pos * 65536.0 + 0.5);
+        const uint64_t step_q16 = (uint64_t)(src->step * 65536.0 + 0.5);
+        const uint64_t frame_limit_q16 = (uint64_t)(uint32_t)src->frames << 16;
+        if (src->loop && pos_q16 >= frame_limit_q16) pos_q16 -= frame_limit_q16;
+        if (pos_q16 >= frame_limit_q16) {
+            if (src->loop) goto ppu_fallback;
+            dst->frames = (uint32_t)src->frames;
+            dst->pos_q16 = pos_q16;
+            dst->step_q16 = step_q16;
+            dst->active = 0;
+            continue;
+        }
+
+        const uint32_t start = (uint32_t)(pos_q16 >> 16);
+        const uint64_t final_offset_q16 = (pos_q16 & 0xFFFFu) +
+            (uint64_t)(PS3A_BLOCK - 1) * step_q16;
+        const uint64_t required64 = (final_offset_q16 >> 16) + 2u;
+        if (required64 > PS3A_SPU_STAGE_PER_VOICE / bpf) goto ppu_fallback;
+        const uint32_t required = (uint32_t)required64;
+        uint32_t first = (uint32_t)src->frames - start;
+        if (first > required) first = required;
+        const uint32_t second = required - first;
+        if (second && (!src->loop || second > (uint32_t)src->frames)) goto ppu_fallback;
+
+        const uint32_t base = i * PS3A_SPU_STAGE_PER_VOICE;
+        const uint32_t first_bytes = first * bpf;
+        const uint32_t first_padded = ps3a_align16(first_bytes);
+        const uint32_t second_off = base + first_padded;
+        const uint32_t second_bytes = second * bpf;
+        const uint32_t second_padded = ps3a_align16(second_bytes);
+        if (first_padded + second_padded > PS3A_SPU_STAGE_PER_VOICE) goto ppu_fallback;
+
+        memcpy(g_spu_mix_stage + base, src->pcm + (size_t)start * bpf, first_bytes);
+        if (first_padded > first_bytes)
+            memset(g_spu_mix_stage + base + first_bytes, 0, first_padded - first_bytes);
+        if (second) {
+            memcpy(g_spu_mix_stage + second_off, src->pcm, second_bytes);
+            if (second_padded > second_bytes)
+                memset(g_spu_mix_stage + second_off + second_bytes, 0, second_padded - second_bytes);
+        }
+
+        float target_l, target_r;
+        ps3a_target_gains(src, s_volume ? s_volume->value : 0.9f, &target_l, &target_r);
+        dst->first_off = base;
+        dst->second_off = second_off;
+        dst->first_start = start;
+        dst->first_frames = first;
+        dst->second_frames = second;
+        dst->frames = (uint32_t)src->frames;
+        dst->pos_q16 = pos_q16;
+        dst->step_q16 = step_q16;
+        dst->gain_l = src->gainsValid ? src->gL : target_l;
+        dst->gain_r = src->gainsValid ? src->gR : target_r;
+        dst->delta_l = (target_l - dst->gain_l) * (1.0f / PS3A_BLOCK);
+        dst->delta_r = (target_r - dst->gain_r) * (1.0f / PS3A_BLOCK);
+        dst->target_l = target_l;
+        dst->target_r = target_r;
+        dst->width = (uint32_t)src->width;
+        dst->chans = (uint32_t)src->chans;
+        dst->loop = src->loop ? 1u : 0u;
+        dst->active = 1u;
+    }
+
+    {
+        ps3a_spu_mix_job_t job;
+        job.voices_ea = (uint64_t)(uintptr_t)g_spu_mix_voices;
+        job.stage_ea = (uint64_t)(uintptr_t)g_spu_mix_stage;
+        job.output_ea = (uint64_t)(uintptr_t)out;
+        job.voice_count = PS3A_MAX_VOICES;
+        job.output_frames = PS3A_BLOCK;
+        uint32_t seq = spukit_post(g_spu_mix_worker, PS3A_SPU_JOB_MIX, &job, sizeof(job));
+        const spukit_result *res = spukit_wait(g_spu_mix_worker, seq);
+        if (!res || res->error != 0) {
+            ps3a_unlock();
+            if (!g_spu_mix_warned++) PS3_BootTracef("PS3AUDIO: experimental SPU mixer job failed; using PPU mixer");
+            return false;
+        }
+        for (uint32_t i = 0; i < PS3A_MAX_VOICES; i++) {
+            ps3a_voice_t *src = &g_voice[i];
+            ps3a_spu_voice_t *dst = &g_spu_mix_voices[i];
+            if (!src->active) continue;
+            src->active = dst->active ? true : false;
+            src->pos = (double)dst->pos_q16 / 65536.0;
+            src->gL = dst->target_l;
+            src->gR = dst->target_r;
+            src->gainsValid = true;
+        }
+    }
+    ps3a_unlock();
+    return true;
+
+ppu_fallback:
+    ps3a_unlock();
+    if (!g_spu_mix_warned++) PS3_BootTracef("PS3AUDIO: voice outside experimental SPU mixer limits; using PPU mixer");
+    return false;
+}
+#endif
+
+static void ps3a_mix_block(float *out)
+{
+#ifdef OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO
+    if (ps3a_mix_block_spu(out)) return;
+#endif
+    ps3a_mix_block_ppu(out);
 }
 
 static void ps3a_thread(void *arg)
@@ -542,6 +683,20 @@ qboolean S_PS3AUDIO_Init()
 
     g_run = 1;
     PS3_BootTracef("PS3AUDIO: about to create the audio thread");
+
+#ifdef OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO
+    if (!g_spu_mix_stage) {
+        g_spu_mix_stage = (uint8_t *)memalign(128, PS3A_MAX_VOICES * PS3A_SPU_STAGE_PER_VOICE);
+    }
+    if (g_spu_mix_stage) {
+        /* worker_start is the actual capability check; failure is non-fatal. */
+        (void)spukit_init(1);
+        g_spu_mix_worker = spukit_worker_start(ps3_spukit_mix_bin, "mohaa-audio", 0);
+    }
+    PS3_BootTracef("PS3AUDIO: experimental SPU mixer %s",
+                   g_spu_mix_worker ? "available" : "unavailable; PPU fallback");
+#endif
+
     rc = sysThreadCreate(&g_thread, ps3a_thread, NULL, 500, 0x10000, 0, (char *)"ps3audio");
     PS3_BootTracef("PS3AUDIO: sysThreadCreate rc=0x%x", (unsigned)rc);
     if (rc != 0) {
