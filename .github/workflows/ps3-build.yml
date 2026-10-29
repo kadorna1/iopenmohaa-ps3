@@ -256,10 +256,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          if [[ -f assets/xmb/PIC1.PNG ]]; then
-            cp assets/xmb/PIC1.PNG dist/PIC1.PNG
+          image="assets/xmb/2015_Inc._(2002)-s.png"
+          if [[ -f "$image" ]]; then
+            # Produce the PS3 XMB background as a 1920x1080 RGBA PNG.
+            ffmpeg -y -v error -i "$image" -frames:v 1 \
+              -vf "scale=1920:1080:flags=lanczos,format=rgba" dist/PIC1.PNG
+            test -s dist/PIC1.PNG
+            dimensions="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 dist/PIC1.PNG)"
+            test "$dimensions" = "1920x1080"
           else
-            echo "::warning::assets/xmb/PIC1.PNG is not present; package will use no custom XMB background"
+            echo "::warning::assets/xmb/2015_Inc._(2002)-s.png is not present; package will use no custom XMB background"
           fi
 
           audio="assets/xmb/Medal Of Honor Allied Assault.mp3"
