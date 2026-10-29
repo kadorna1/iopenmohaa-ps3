@@ -1368,6 +1368,7 @@ void RB_PrecacheImages( void ) {
 	int i;
 	image_t *image;
 	int start, end;
+	unsigned long savedStateBits;
 
 	if ( tr.numImages <= 0 ) {
 		return;
@@ -1380,10 +1381,13 @@ void RB_PrecacheImages( void ) {
 	qglFinish();
 	start = ri.Milliseconds();
 
-	/* Sample a transparent 1x1 quad for each texture; leave the screen intact. */
-	qglDisable( GL_ALPHA_TEST );
-	qglEnable( GL_BLEND );
-	qglBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+	/*
+	 * Sample a transparent 1x1 quad for each texture. Save/restore the
+	 * renderer's state vector rather than calling raw qglEnable/qglDisable:
+	 * raw calls would desynchronize GL_State's cache.
+	 */
+	savedStateBits = glState.glStateBits;
+	GL_State( GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA );
 	qglColor4f( 1.0f, 1.0f, 1.0f, 0.0f );
 
 	for ( i = 0; i < tr.numImages; i++ ) {
@@ -1398,10 +1402,11 @@ void RB_PrecacheImages( void ) {
 	}
 
 	qglColor4f( 1.0f, 1.0f, 1.0f, 1.0f );
+	GL_State( savedStateBits );
 	qglFinish();
 
 	end = ri.Milliseconds();
-	ri.Printf( PRINT_ALL, "PS3 texture warmup: %d registered images in %.2f seconds\n",
+	ri.Printf( PRINT_ALL, "PS3 texture warmup: %d registered images in %.2f seconds\\n",
 		tr.numImages, (float)(end - start) / 1000.0f );
 }
 
