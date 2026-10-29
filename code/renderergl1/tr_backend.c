@@ -1356,6 +1356,56 @@ void RB_ShowImages( qboolean quiet ) {
 }
 
 /*
+===============
+RB_PrecacheImages
+
+Touch each registered image before gameplay without replacing the loading
+screen with the developer texture grid. Assets that have not been registered
+yet are still loaded on demand.
+===============
+*/
+void RB_PrecacheImages( void ) {
+	int i;
+	image_t *image;
+	int start, end;
+
+	if ( tr.numImages <= 0 ) {
+		return;
+	}
+
+	if ( !backEnd.in2D ) {
+		RB_SetGL2D();
+	}
+
+	qglFinish();
+	start = ri.Milliseconds();
+
+	/* Sample a transparent 1x1 quad for each texture; leave the screen intact. */
+	qglDisable( GL_ALPHA_TEST );
+	qglEnable( GL_BLEND );
+	qglBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+	qglColor4f( 1.0f, 1.0f, 1.0f, 0.0f );
+
+	for ( i = 0; i < tr.numImages; i++ ) {
+		image = &tr.images[i];
+		GL_Bind( image );
+		qglBegin( GL_QUADS );
+		qglTexCoord2f( 0.0f, 0.0f ); qglVertex2f( 0.0f, 0.0f );
+		qglTexCoord2f( 1.0f, 0.0f ); qglVertex2f( 1.0f, 0.0f );
+		qglTexCoord2f( 1.0f, 1.0f ); qglVertex2f( 1.0f, 1.0f );
+		qglTexCoord2f( 0.0f, 1.0f ); qglVertex2f( 0.0f, 1.0f );
+		qglEnd();
+	}
+
+	qglColor4f( 1.0f, 1.0f, 1.0f, 1.0f );
+	qglFinish();
+
+	end = ri.Milliseconds();
+	ri.Printf( PRINT_ALL, "PS3 texture warmup: %d registered images in %.2f seconds\\n",
+		tr.numImages, (float)(end - start) / 1000.0f );
+}
+
+/*
 =============
 RB_ColorMask
 
