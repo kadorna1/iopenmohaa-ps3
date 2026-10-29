@@ -2271,8 +2271,27 @@ qboolean SV_ArchiveLevelFile(qboolean loading, qboolean autosave)
 			cls.savedCgameStateSize = cge->CG_SaveStateToBuffer(&cls.savedCgameState, svs.time);
 		}
 		ge->WriteLevel(name, autosave, (byte **)&cls.savedCgameState, &cls.savedCgameStateSize);
-		Z_Free(cls.savedCgameState);
+#if defined(__PS3__)
+		PS3_TRACEF("SAVE PS3 after ge->WriteLevel map=%s cgameState=%p size=%u",
+			svs.rawServerName, (void *)cls.savedCgameState, (unsigned)cls.savedCgameStateSize);
+#endif
+		/* The PS3 map-entry autosave deliberately has no CGame snapshot. Z_Free
+		 * dereferences its argument before checking the zone tag, so NULL must
+		 * never reach it. */
+		if (cls.savedCgameState) {
+#if defined(__PS3__)
+			PS3_TRACEF("SAVE PS3 freeing CGame snapshot map=%s", svs.rawServerName);
+#endif
+			Z_Free(cls.savedCgameState);
+		} else {
+#if defined(__PS3__)
+			PS3_TRACEF("SAVE PS3 skipping NULL CGame snapshot free map=%s", svs.rawServerName);
+#endif
+		}
 		cls.savedCgameState = NULL;
+#if defined(__PS3__)
+		PS3_TRACEF("SAVE PS3 level snapshot cleanup complete map=%s", svs.rawServerName);
+#endif
 	}
 
 	return qtrue;
