@@ -85,6 +85,13 @@ static sys_ppu_thread_t g_thread;
 static u32          g_port       = 0;
 static audioPortConfig g_cfg;
 static int          g_tick       = 0;
+/* Counters are updated by the single audio producer thread. Periodic snapshots
+ * reveal whether audible output is actually being mixed on SPU or PPU. */
+static uint32_t g_mix_blocks_total    = 0;
+static uint32_t g_mix_blocks_spu      = 0;
+static uint32_t g_mix_blocks_ppu      = 0;
+static uint32_t g_mix_blocks_fallback = 0;
+
 
 static vec3_t g_lpos  = {0, 0, 0};
 static vec3_t g_laxis[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
@@ -553,9 +560,30 @@ ppu_fallback:
 static void ps3a_mix_block(float *out)
 {
 #ifdef OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO
-    if (ps3a_mix_block_spu(out)) return;
-#endif
+    if (ps3a_mix_block_spu(out)) {
+        g_mix_blocks_total++;
+        g_mix_blocks_spu++;
+    } else {
+        g_mix_blocks_fallback++;
+        ps3a_mix_block_ppu(out);
+        g_mix_blocks_total++;
+        g_mix_blocks_ppu++;
+    }
+#else
     ps3a_mix_block_ppu(out);
+    g_mix_blocks_total++;
+    g_mix_blocks_ppu++;
+#endif
+
+    /* One diagnostic every 1024 output blocks (~5.5 s at 48 kHz). */
+    if ((g_mix_blocks_total & 1023u) == 0) {
+        PS3_BootTraceFastf(
+            "PS3AUDIO: mix blocks total=%u spu=%u ppu=%u fallback=%u",
+            (unsigned)g_mix_blocks_total,
+            (unsigned)g_mix_blocks_spu,
+            (unsigned)g_mix_blocks_ppu,
+            (unsigned)g_mix_blocks_fallback);
+    }
 }
 
 static void ps3a_thread(void *arg)
