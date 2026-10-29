@@ -256,13 +256,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          if [[ -f assets/xmb/PIC1.PNG ]]; then
-            cp assets/xmb/PIC1.PNG dist/PIC1.PNG
+          image="assets/xmb/2015_Inc._(2002)-s.png"
+          if [[ -f "$image" ]]; then
+            # Produce the PS3 XMB background as a 1920x1080 RGBA PNG.
+            ffmpeg -y -v error -i "$image" -frames:v 1 \
+              -vf "scale=1920:1080:flags=lanczos,format=rgba" dist/PIC1.PNG
+            test -s dist/PIC1.PNG
+            dimensions="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 dist/PIC1.PNG)"
+            test "$dimensions" = "1920x1080"
           else
-            echo "::warning::assets/xmb/PIC1.PNG is not present; package will use no custom XMB background"
+            echo "::warning::assets/xmb/2015_Inc._(2002)-s.png is not present; package will use no custom XMB background"
           fi
 
-          audio="assets/xmb/Medal_of_Honor_Allied_Assault_30s.mp3"
+          audio="assets/xmb/Medal Of Honor Allied Assault.mp3"
           if [[ -f "$audio" ]]; then
             encoder_root="$HOME/.cache/atracdenc"
             encoder_src="$encoder_root/src"
@@ -287,10 +293,15 @@ jobs:
             python3 tools/pspmedia.py snd0 "$RUNNER_TEMP/xmb-hover-30s.wav" \
               -o dist/SND0.AT3 --encoder atracdenc --codec at3
             python3 tools/pspmedia.py analyze dist/SND0.AT3
+            # Emit the requested filename and the documented numbered variant too.
+            cp dist/SND0.AT3 dist/SND01.AT3
+            cp dist/SND0.AT3 dist/SND0_01.AT3
             test -s dist/SND0.AT3
+            test -s dist/SND01.AT3
+            test -s dist/SND0_01.AT3
             test "$(wc -c < dist/SND0.AT3)" -le "$((500 * 1024))"
           else
-            echo "::warning::assets/xmb/Medal_of_Honor_Allied_Assault_30s.mp3 is not present; package will use no custom XMB hover sound"
+            echo "::warning::assets/xmb/Medal Of Honor Allied Assault.mp3 is not present; package will use no custom XMB hover sound"
           fi
 
       - name: Package installable PKG files
@@ -334,6 +345,8 @@ jobs:
             dist/*.pkg
             dist/PIC1.PNG
             dist/SND0.AT3
+            dist/SND01.AT3
+            dist/SND0_01.AT3
             ps3-sdk-info.txt
             ps3-build-outputs.txt
             ps3-configure.log
