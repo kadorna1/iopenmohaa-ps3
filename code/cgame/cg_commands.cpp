@@ -30,6 +30,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../corepp/tiki.h"
 #include "cg_archive.h"
 #include "memarchiver.h"
+#include "../sys/ps3_step.h"
 
 refEntity_t *current_entity        = NULL;
 int          current_entity_number = -1;
@@ -6266,6 +6267,7 @@ void emitterthing_t::ArchiveToMemory(MemArchiver& archiver)
 
 void cg_common_data::ArchiveToMemory(MemArchiver& archiver)
 {
+    PS3_TRACEF("SAVE CGD enter reading=%d tiki=%p", archiver.IsReading() ? 1 : 0, (void *)tiki);
     archiver.ArchiveInteger(&life);
     archiver.ArchiveTime(&createTime);
     archiver.ArchiveVector(&origin);
@@ -6295,7 +6297,9 @@ void cg_common_data::ArchiveToMemory(MemArchiver& archiver)
     archiver.ArchiveInteger(&flags);
     archiver.ArchiveInteger(&flags2);
 
+    PS3_TRACEF("SAVE CGD before tiki pointer=%p", (void *)tiki);
     CG_ArchiveTikiPointer(archiver, &tiki);
+    PS3_TRACEF("SAVE CGD after tiki pointer");
 
     archiver.ArchiveInteger(&swarmfreq);
     archiver.ArchiveFloat(&swarmmaxspeed);
@@ -6314,15 +6318,19 @@ void cg_common_data::ArchiveToMemory(MemArchiver& archiver)
     archiver.ArchiveInteger(&physicsRate);
     archiver.ArchiveFloat(&scale);
     archiver.ArchiveFloat(&scale2);
+    PS3_TRACEF("SAVE CGD before swipe shader string");
     archiver.ArchiveString(&swipe_shader);
+    PS3_TRACEF("SAVE CGD after swipe shader string");
     archiver.ArchiveString(&swipe_tag_start);
     archiver.ArchiveString(&swipe_tag_end);
     archiver.ArchiveString(&shadername);
+    PS3_TRACEF("SAVE CGD after swipe strings");
     archiver.ArchiveFloat(&swipe_life);
     archiver.ArchiveFloat(&friction);
     archiver.ArchiveFloat(&spin_rotation);
     archiver.ArchiveFloat(&decal_orientation);
     archiver.ArchiveFloat(&decal_radius);
+    PS3_TRACEF("SAVE CGD done");
 }
 
 void spawnthing_t::ArchiveToMemory(MemArchiver& archiver)
@@ -6332,7 +6340,9 @@ void spawnthing_t::ArchiveToMemory(MemArchiver& archiver)
     CG_ArchiveStringContainer(archiver, &m_modellist);
     CG_ArchiveStringContainer(archiver, &m_taglist);
 
+    PS3_TRACEF("SAVE SPAWNTHING before common data models=%d tags=%d", m_modellist.NumObjects(), m_taglist.NumObjects());
     cgd.ArchiveToMemory(archiver);
+    PS3_TRACEF("SAVE SPAWNTHING after common data");
 
     archiver.ArchiveInteger(&entnum);
     archiver.ArchiveVector(&origin_offset_base);
