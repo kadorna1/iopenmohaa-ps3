@@ -4742,10 +4742,10 @@ void CL_SaveShot_f( void ) {
 			ps3_saveshot = Cvar_Get( "ps3_saveshot", "0", 0 );
 		}
 		if( !ps3_saveshot->integer ) {
-			PS3_TRACEF( "SAVESHOT skipped (ps3_saveshot=0): %s", Cmd_Argc() > 1 ? Cmd_Argv( 1 ) : "" );
+			PS3_STEPF( "SAVESHOT skipped (ps3_saveshot=0): %s", Cmd_Argc() > 1 ? Cmd_Argv( 1 ) : "" );
 			return;
 		}
-		PS3_TRACEF( "SAVESHOT begin: %s", Cmd_Argc() > 1 ? Cmd_Argv( 1 ) : "" );
+		PS3_STEPF( "SAVESHOT begin: %s", Cmd_Argc() > 1 ? Cmd_Argv( 1 ) : "" );
 	}
 #endif
 
@@ -4762,9 +4762,9 @@ void CL_SaveShot_f( void ) {
 	// hide menus
 	cls.no_menus = qtrue;
 	UpdateStereoSide( STEREO_CENTER );
-	PS3_TRACEF( "SAVESHOT before screenshot command: %.80s", expanded );
+	PS3_STEPF( "SAVESHOT before screenshot command: %.80s", expanded );
 	Cbuf_ExecuteText( EXEC_NOW, expanded );
-	PS3_TRACEF( "SAVESHOT after screenshot command" );
+	PS3_STEPF( "SAVESHOT after screenshot command" );
 	cls.no_menus = qfalse;
 }
 
