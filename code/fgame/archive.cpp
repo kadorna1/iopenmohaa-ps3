@@ -26,6 +26,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "archive.h"
 #include "level.h"
 #include "../corepp/lz77.h"
+#include "../sys/ps3_step.h"
 
 #ifdef GAME_DLL
 #    include "../fgame/entity.h"
@@ -88,7 +89,15 @@ ArchiveFile::~ArchiveFile()
 void ArchiveFile::Close()
 {
     if (writing) {
+#if defined(__PS3__)
+        const int ps3WriteStart = gi.Milliseconds();
+        const size_t ps3WriteBytes = length;
+        const int ps3WriteResult = gi.FS_WriteFile(filename.c_str(), buffer, length);
+        PS3_STEPF("SAVE ARCHIVE write-done file=%s bytes=%u result=%d elapsedMs=%d",
+            filename.c_str(), (unsigned)ps3WriteBytes, ps3WriteResult, gi.Milliseconds() - ps3WriteStart);
+#else
         gi.FS_WriteFile(filename.c_str(), buffer, length);
+#endif
     }
 
     if (buffer) {
@@ -112,6 +121,10 @@ qboolean ArchiveFile::Compress()
     byte  *tempbuf;
     size_t out_len;
     size_t tempbuf_len;
+#if defined(__PS3__)
+    const size_t ps3RawBytes = length;
+    const int ps3CompressStart = gi.Milliseconds();
+#endif
 
     tempbuf_len = (length >> 6) + length + 27;
     tempbuf     = (byte *)gi.Malloc(tempbuf_len);
@@ -127,6 +140,10 @@ qboolean ArchiveFile::Compress()
 
     // Compress the data
     if (g_lz77.Compress(buffer, length, tempbuf + 8, &out_len)) {
+#if defined(__PS3__)
+        PS3_STEPF("SAVE ARCHIVE compress-failed file=%s rawBytes=%u elapsedMs=%d",
+            filename.c_str(), (unsigned)ps3RawBytes, gi.Milliseconds() - ps3CompressStart);
+#endif
         gi.Error(ERR_DROP, "Compression of SaveGame Failed!\n");
         return false;
     }
@@ -135,6 +152,10 @@ qboolean ArchiveFile::Compress()
     buffer       = tempbuf;
     length       = out_len + 8;
     bufferlength = tempbuf_len;
+#if defined(__PS3__)
+    PS3_STEPF("SAVE ARCHIVE compress-done file=%s rawBytes=%u compressedBytes=%u elapsedMs=%d",
+        filename.c_str(), (unsigned)ps3RawBytes, (unsigned)length, gi.Milliseconds() - ps3CompressStart);
+#endif
 
     return true;
 }
@@ -263,6 +284,11 @@ qboolean ArchiveFile::Write(const void *source, size_t size)
 {
     if ((pos + size) > (buffer + bufferlength)) {
         byte *oldbuf;
+#if defined(__PS3__)
+        const size_t ps3OldCapacity = bufferlength;
+        const size_t ps3CopiedBytes = length;
+        const int ps3GrowStart = gi.Milliseconds();
+#endif
 
         do {
             bufferlength *= 2;
@@ -276,6 +302,11 @@ qboolean ArchiveFile::Write(const void *source, size_t size)
         gi.Free(oldbuf);
         // set the position with the new buffer
         pos = buffer + (pos - oldbuf);
+#if defined(__PS3__)
+        PS3_STEPF("SAVE ARCHIVE buffer-grow file=%s oldCapacity=%u newCapacity=%u copiedBytes=%u elapsedMs=%d",
+            filename.c_str(), (unsigned)ps3OldCapacity, (unsigned)bufferlength,
+            (unsigned)ps3CopiedBytes, gi.Milliseconds() - ps3GrowStart);
+#endif
     }
 
     memcpy(pos, source, size);
