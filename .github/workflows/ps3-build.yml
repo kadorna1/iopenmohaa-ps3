@@ -280,6 +280,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
+          test -s assets/xmb/ICON0.PNG
           test -s assets/xmb/PIC1.PNG
           test -s assets/xmb/SND0.AT3
 

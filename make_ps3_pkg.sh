@@ -53,7 +53,7 @@ Usage: make_ps3_pkg.sh [options]
                       in CMakeCache.txt, else OMOHAA020.
   --title TEXT        Name shown in the XMB (default: OpenMoHAA).
   --icon FILE         ICON0.PNG source; resized to 320x176 when ImageMagick or
-                      Pillow is available (default: misc/openmohaa-text.png).
+                      Pillow is available (default: assets/xmb/ICON0.PNG).
   --pic1 FILE         optional PIC1.PNG (background, 1920x1080).
   --snd0 FILE         optional PS3 XMB hover sound (RIFF ATRAC3/ATRAC3+); copied as SND0.AT3,
                       SND01.AT3, and SND0_01.AT3 (PS3-compatible aliases).
@@ -296,15 +296,15 @@ done
 
 # 4. icon / background
 if [ -z "$ICON" ]; then
-    ICON="$REPO_DIR/misc/openmohaa-text.png"
+    ICON="$REPO_DIR/assets/xmb/ICON0.PNG"
 fi
 fit_png() {   # fit_png SRC DST WxH
     local src="$1" dst="$2" size="$3" w h
     w="${size%x*}"; h="${size#*x}"
     if command -v magick >/dev/null 2>&1; then
-        magick "$src" -resize "$size" -background black -gravity center -extent "$size" "PNG32:$dst"
+        magick "$src" -resize "$size" -background none -gravity center -extent "$size" "PNG32:$dst"
     elif command -v convert >/dev/null 2>&1; then
-        convert "$src" -resize "$size" -background black -gravity center -extent "$size" "PNG32:$dst"
+        convert "$src" -resize "$size" -background none -gravity center -extent "$size" "PNG32:$dst"
     elif python3 -c 'import PIL' >/dev/null 2>&1; then
         python3 - "$src" "$dst" "$w" "$h" <<'PY'
 import sys
@@ -312,8 +312,8 @@ from PIL import Image
 src, dst, w, h = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 im = Image.open(src).convert("RGBA")
 im.thumbnail((w, h), Image.LANCZOS)
-canvas = Image.new("RGBA", (w, h), (0, 0, 0, 255))
-canvas.paste(im, ((w - im.width) // 2, (h - im.height) // 2), im)
+canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+canvas.alpha_composite(im, ((w - im.width) // 2, (h - im.height) // 2))
 canvas.save(dst, "PNG")
 PY
     else
