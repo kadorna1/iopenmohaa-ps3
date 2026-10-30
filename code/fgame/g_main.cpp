@@ -1418,6 +1418,9 @@ qboolean G_ArchiveLevel(
         char        szSaveName[MAX_STRING_TOKENS];
         const char *pszSaveName;
         cvar_t     *cvar;
+#if defined(__PS3__)
+        const int ps3LevelArchiveStart = gi.Milliseconds();
+#endif
 
         COM_StripExtension(filename, szSaveName, sizeof(szSaveName));
         pszSaveName = COM_SkipPath(szSaveName);
@@ -1439,6 +1442,9 @@ qboolean G_ArchiveLevel(
         } else {
             int temp;
 
+#if defined(__PS3__)
+            PS3_STEPF("SAVE LEVEL begin file=%s autosave=%d", filename, autosave ? 1 : 0);
+#endif
             arc.Create(filename);
 
             // write out the version number
@@ -1618,7 +1624,18 @@ qboolean G_ArchiveLevel(
             LoadingSavegame = false;
             gi.Printf(HUD_MESSAGE_YELLOW "%s\n", gi.LV_ConvertString("Game Loaded"));
         } else {
+#if defined(__PS3__)
+            PS3_STEPF("SAVE LEVEL serialize-done file=%s archiveBytes=%u entitySlots=%d simpleEntities=%d elapsedMs=%d",
+                filename, (unsigned)arc.Counter(), globals.num_entities,
+                level.m_SimpleArchivedEntities.NumObjects(), gi.Milliseconds() - ps3LevelArchiveStart);
+            const int ps3ArchiveCloseStart = gi.Milliseconds();
+#endif
             arc.Close();
+#if defined(__PS3__)
+            PS3_STEPF("SAVE LEVEL close-done file=%s closeMs=%d totalMs=%d",
+                filename, gi.Milliseconds() - ps3ArchiveCloseStart,
+                gi.Milliseconds() - ps3LevelArchiveStart);
+#endif
             gi.Printf(HUD_MESSAGE_YELLOW "%s\n", gi.LV_ConvertString("Game Saved"));
         }
 
