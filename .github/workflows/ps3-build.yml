@@ -263,7 +263,6 @@ jobs:
           find build-ps3 \( -type f -name '*.elf' -o -type f -name 'openmohaa' \) -print | sort > ps3-build-outputs.txt
           cat ps3-build-outputs.txt
 
-      # ATRAC3 encoder source and its compiled binary are cached separately.
       - name: Prepare XMB background and hover sound
         shell: bash
         run: |
