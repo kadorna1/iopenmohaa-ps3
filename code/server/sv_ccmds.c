@@ -2262,7 +2262,7 @@ qboolean SV_ArchiveLevelFile(qboolean loading, qboolean autosave)
 			 * CGame payload is valid: G_ArchiveLevel stores size 0 and the client
 			 * restore path skips CG_LoadStateToBuffer when there is no payload.
 			 */
-			PS3_TRACEF("SAVE PS3 autosave: skipping transient CGame snapshot map=%s", svs.rawServerName);
+			PS3_STEPF("SAVE PS3 autosave: skipping transient CGame snapshot map=%s", svs.rawServerName);
 			cls.savedCgameState = NULL;
 			cls.savedCgameStateSize = 0;
 		} else
@@ -2289,7 +2289,7 @@ qboolean SV_ArchiveLevelFile(qboolean loading, qboolean autosave)
             svs.rawServerName, Com_Milliseconds() - ps3GameWriteStart);
 #endif
 #if defined(__PS3__)
-		PS3_TRACEF("SAVE PS3 after ge->WriteLevel map=%s cgameState=%p size=%u",
+		PS3_STEPF("SAVE PS3 after ge->WriteLevel map=%s cgameState=%p size=%u",
 			svs.rawServerName, (void *)cls.savedCgameState, (unsigned)cls.savedCgameStateSize);
 #endif
 		/* The PS3 map-entry autosave deliberately has no CGame snapshot. Z_Free
@@ -2297,17 +2297,17 @@ qboolean SV_ArchiveLevelFile(qboolean loading, qboolean autosave)
 		 * never reach it. */
 		if (cls.savedCgameState) {
 #if defined(__PS3__)
-			PS3_TRACEF("SAVE PS3 freeing CGame snapshot map=%s", svs.rawServerName);
+			PS3_STEPF("SAVE PS3 freeing CGame snapshot map=%s", svs.rawServerName);
 #endif
 			Z_Free(cls.savedCgameState);
 		} else {
 #if defined(__PS3__)
-			PS3_TRACEF("SAVE PS3 skipping NULL CGame snapshot free map=%s", svs.rawServerName);
+			PS3_STEPF("SAVE PS3 skipping NULL CGame snapshot free map=%s", svs.rawServerName);
 #endif
 		}
 		cls.savedCgameState = NULL;
 #if defined(__PS3__)
-		PS3_TRACEF("SAVE PS3 level snapshot cleanup complete map=%s", svs.rawServerName);
+		PS3_STEPF("SAVE PS3 level snapshot cleanup complete map=%s", svs.rawServerName);
 #endif
 	}
 
@@ -2757,12 +2757,12 @@ void SV_CheckSaveGame(void)
 		return;
 	}
 
-	PS3_TRACEF("SAVE SV_CheckSaveGame: save pending cl.serverTime=%d svs.time=%d", cl.serverTime, svs.time);
+	PS3_STEPF("SAVE SV_CheckSaveGame: save pending cl.serverTime=%d svs.time=%d", cl.serverTime, svs.time);
 	if (cl.serverTime >= svs.time) {
 		bSavegame = qfalse;
-		PS3_TRACEF("SAVE before SV_SaveGame name=%s", savegame_name[0] ? savegame_name : "(auto)");
+		PS3_STEPF("SAVE before SV_SaveGame name=%s", savegame_name[0] ? savegame_name : "(auto)");
 		SV_SaveGame(savegame_name[0] ? savegame_name : NULL, qfalse);
-		PS3_TRACEF("SAVE after SV_SaveGame, before UI_SetupFiles");
+		PS3_STEPF("SAVE after SV_SaveGame, before UI_SetupFiles");
 #if defined(__PS3__)
         const int ps3SetupFilesStart = Com_Milliseconds();
         PS3_STEPF("SAVE UI_SetupFiles begin");
@@ -2771,7 +2771,7 @@ void SV_CheckSaveGame(void)
 #if defined(__PS3__)
         PS3_STEPF("SAVE UI_SetupFiles done elapsedMs=%d", Com_Milliseconds() - ps3SetupFilesStart);
 #endif
-		PS3_TRACEF("SAVE after UI_SetupFiles");
+		PS3_STEPF("SAVE after UI_SetupFiles");
 	}
 #endif
 }
