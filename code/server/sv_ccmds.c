@@ -2268,9 +2268,26 @@ qboolean SV_ArchiveLevelFile(qboolean loading, qboolean autosave)
 		} else
 #endif
 		{
+#if defined(__PS3__)
+            const int ps3CgameSnapshotStart = Com_Milliseconds();
+#endif
 			cls.savedCgameStateSize = cge->CG_SaveStateToBuffer(&cls.savedCgameState, svs.time);
+#if defined(__PS3__)
+            PS3_STEPF("SAVE CGAME snapshot-done map=%s bytes=%u elapsedMs=%d",
+                svs.rawServerName, (unsigned)cls.savedCgameStateSize,
+                Com_Milliseconds() - ps3CgameSnapshotStart);
+#endif
 		}
+#if defined(__PS3__)
+        const int ps3GameWriteStart = Com_Milliseconds();
+        PS3_STEPF("SAVE SERVER game-write-begin map=%s autosave=%d cgameBytes=%u",
+            svs.rawServerName, autosave ? 1 : 0, (unsigned)cls.savedCgameStateSize);
+#endif
 		ge->WriteLevel(name, autosave, (byte **)&cls.savedCgameState, &cls.savedCgameStateSize);
+#if defined(__PS3__)
+        PS3_STEPF("SAVE SERVER game-write-done map=%s elapsedMs=%d",
+            svs.rawServerName, Com_Milliseconds() - ps3GameWriteStart);
+#endif
 #if defined(__PS3__)
 		PS3_TRACEF("SAVE PS3 after ge->WriteLevel map=%s cgameState=%p size=%u",
 			svs.rawServerName, (void *)cls.savedCgameState, (unsigned)cls.savedCgameStateSize);
@@ -2347,6 +2364,10 @@ qboolean SV_ArchiveServerFile(qboolean loading, qboolean autosave)
 	name = Com_GetArchiveFileName(svs.gameName, "ssv");
 
 	if (!loading) {
+#if defined(__PS3__)
+        const int ps3ServerSaveStart = Com_Milliseconds();
+        PS3_STEPF("SAVE SERVER metadata-begin file=%s autosave=%d", name, autosave ? 1 : 0);
+#endif
 		f = FS_FOpenFileWrite_HomeData(name);
 		if (!f) {
 			Com_Printf("Couldn't write %s\n", name);
@@ -2402,10 +2423,23 @@ qboolean SV_ArchiveServerFile(qboolean loading, qboolean autosave)
 		S_Save(f);
 		CM_WritePortalState(f);
 		FS_FCloseFile(f);
+#if defined(__PS3__)
+        PS3_STEPF("SAVE SERVER metadata-file-done file=%s elapsedMs=%d",
+            name, Com_Milliseconds() - ps3ServerSaveStart);
+#endif
 
 		name = Com_GetArchiveFileName(svs.gameName, "tga");
 		Com_sprintf(cmdString, sizeof(cmdString), "saveshot %s 256 256\n", name);
+#if defined(__PS3__)
+        const int ps3ScreenshotStart = Com_Milliseconds();
+        PS3_STEPF("SAVE SCREENSHOT begin file=%s deferred=%d", name, svs.autosave ? 1 : 0);
+#endif
 		Cbuf_ExecuteText(svs.autosave ? EXEC_INSERT : EXEC_NOW, cmdString);
+#if defined(__PS3__)
+        PS3_STEPF("SAVE SCREENSHOT return file=%s elapsedMs=%d serverTotalMs=%d",
+            name, Com_Milliseconds() - ps3ScreenshotStart,
+            Com_Milliseconds() - ps3ServerSaveStart);
+#endif
 	} else {
 		FS_FOpenFileRead(name, &f, qfalse, qtrue);
 		if (!f) {
@@ -2613,6 +2647,11 @@ void SV_SaveGame(const char *gamename, qboolean autosave)
 	char *ptr;
 	char  name[64];
 	char  mname[64];
+#if defined(__PS3__)
+    const int ps3SaveStart = Com_Milliseconds();
+    PS3_STEPF("SAVE TOTAL begin map=%s autosave=%d requestedName=%s",
+        svs.rawServerName, autosave ? 1 : 0, gamename ? gamename : "(auto)");
+#endif
 
 	if (!SV_AllowSaveGame()) {
 		return;
@@ -2642,16 +2681,34 @@ void SV_SaveGame(const char *gamename, qboolean autosave)
 
 	Q_strncpyz(svs.gameName, name, sizeof(svs.gameName));
 
+#if defined(__PS3__)
+    const int ps3LevelFileStart = Com_Milliseconds();
+#endif
 	if (!SV_ArchiveLevelFile(qfalse, autosave)) {
 		if (cls.savedCgameState) {
 			Z_Free(cls.savedCgameState);
 			cls.savedCgameState = 0;
 		}
 	}
+#if defined(__PS3__)
+    PS3_STEPF("SAVE TOTAL level-file-return map=%s elapsedMs=%d totalMs=%d",
+        svs.rawServerName, Com_Milliseconds() - ps3LevelFileStart,
+        Com_Milliseconds() - ps3SaveStart);
+    const int ps3ServerFileStart = Com_Milliseconds();
+#endif
 
 	SV_ArchiveServerFile(qfalse, autosave);
+#if defined(__PS3__)
+    PS3_STEPF("SAVE TOTAL server-file-return map=%s elapsedMs=%d totalMs=%d",
+        svs.rawServerName, Com_Milliseconds() - ps3ServerFileStart,
+        Com_Milliseconds() - ps3SaveStart);
+#endif
 
 	Com_Printf("Done.\n");
+#if defined(__PS3__)
+    PS3_STEPF("SAVE TOTAL complete map=%s elapsedMs=%d",
+        svs.rawServerName, Com_Milliseconds() - ps3SaveStart);
+#endif
 
 	Q_strncpyz(svs.gameName, "current", sizeof(svs.gameName));
 #endif
@@ -2706,7 +2763,14 @@ void SV_CheckSaveGame(void)
 		PS3_TRACEF("SAVE before SV_SaveGame name=%s", savegame_name[0] ? savegame_name : "(auto)");
 		SV_SaveGame(savegame_name[0] ? savegame_name : NULL, qfalse);
 		PS3_TRACEF("SAVE after SV_SaveGame, before UI_SetupFiles");
+#if defined(__PS3__)
+        const int ps3SetupFilesStart = Com_Milliseconds();
+        PS3_STEPF("SAVE UI_SetupFiles begin");
+#endif
 		UI_SetupFiles();
+#if defined(__PS3__)
+        PS3_STEPF("SAVE UI_SetupFiles done elapsedMs=%d", Com_Milliseconds() - ps3SetupFilesStart);
+#endif
 		PS3_TRACEF("SAVE after UI_SetupFiles");
 	}
 #endif
