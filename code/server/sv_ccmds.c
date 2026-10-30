@@ -2252,10 +2252,46 @@ qboolean SV_ArchiveLevelFile(qboolean loading, qboolean autosave)
 			FS_FCloseFile(f);
 		}
 	} else {
-		cls.savedCgameStateSize = cge->CG_SaveStateToBuffer(&cls.savedCgameState, svs.time);
+#if defined(__PS3__)
+		if (autosave) {
+			/*
+			 * The map-entry autosave is taken just after CGame has rebuilt its
+			 * map-owned emitter/effect state. Serializing that transient client
+			 * state stalls the PS3 loading transition in the emitter archive.
+			 * The server/game checkpoint is still written below. A zero-sized
+			 * CGame payload is valid: G_ArchiveLevel stores size 0 and the client
+			 * restore path skips CG_LoadStateToBuffer when there is no payload.
+			 */
+			PS3_TRACEF("SAVE PS3 autosave: skipping transient CGame snapshot map=%s", svs.rawServerName);
+			cls.savedCgameState = NULL;
+			cls.savedCgameStateSize = 0;
+		} else
+#endif
+		{
+			cls.savedCgameStateSize = cge->CG_SaveStateToBuffer(&cls.savedCgameState, svs.time);
+		}
 		ge->WriteLevel(name, autosave, (byte **)&cls.savedCgameState, &cls.savedCgameStateSize);
-		Z_Free(cls.savedCgameState);
+#if defined(__PS3__)
+		PS3_TRACEF("SAVE PS3 after ge->WriteLevel map=%s cgameState=%p size=%u",
+			svs.rawServerName, (void *)cls.savedCgameState, (unsigned)cls.savedCgameStateSize);
+#endif
+		/* The PS3 map-entry autosave deliberately has no CGame snapshot. Z_Free
+		 * dereferences its argument before checking the zone tag, so NULL must
+		 * never reach it. */
+		if (cls.savedCgameState) {
+#if defined(__PS3__)
+			PS3_TRACEF("SAVE PS3 freeing CGame snapshot map=%s", svs.rawServerName);
+#endif
+			Z_Free(cls.savedCgameState);
+		} else {
+#if defined(__PS3__)
+			PS3_TRACEF("SAVE PS3 skipping NULL CGame snapshot free map=%s", svs.rawServerName);
+#endif
+		}
 		cls.savedCgameState = NULL;
+#if defined(__PS3__)
+		PS3_TRACEF("SAVE PS3 level snapshot cleanup complete map=%s", svs.rawServerName);
+#endif
 	}
 
 	return qtrue;

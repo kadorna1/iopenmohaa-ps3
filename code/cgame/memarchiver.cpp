@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "cg_local.h"
 #include "memarchiver.h"
+#include "../sys/ps3_step.h"
 #include "../corepp/vector.h"
 #include "../corepp/str.h"
 
@@ -205,6 +206,10 @@ void MemArchiver::ArchiveReadRaw(void *buffer, size_t size)
     }
 
     if (size + this->bufferSize > this->allocatedSize) {
+#if defined(__PS3__)
+        PS3_TRACEF("SAVE MEMARCH growth used=%lu add=%lu capacity=%lu",
+            (unsigned long)this->bufferSize, (unsigned long)size, (unsigned long)this->allocatedSize);
+#endif
         Com_Error(ERR_DROP, "MemArchiver: tried to read past end of buffer");
     }
 
@@ -230,6 +235,13 @@ void MemArchiver::ArchiveWriteRaw(const void *buffer, size_t size)
             } while (size + this->bufferSize > this->allocatedSize);
 
             newBuffer = (byte *)cgi.Malloc(this->allocatedSize);
+#if defined(__PS3__)
+            PS3_TRACEF("SAVE MEMARCH allocation result=%p capacity=%lu", (void *)newBuffer, (unsigned long)this->allocatedSize);
+#endif
+            if (!newBuffer) {
+                cgi.Error(ERR_DROP, "MemArchiver: unable to grow save buffer to %lu bytes", (unsigned long)this->allocatedSize);
+                return;
+            }
             memcpy(newBuffer, this->buffer, this->bufferSize);
             cgi.Free(this->buffer);
             this->buffer = newBuffer;

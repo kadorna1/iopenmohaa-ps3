@@ -6,6 +6,12 @@ on:
       - '**'
   pull_request:
   workflow_dispatch:
+    inputs:
+      experimental_spu_audio:
+        description: "Build the experimental SPU audio mixer (hardware testing required)"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -28,6 +34,20 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Fetch canonical XMB assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p assets/xmb
+          for asset in PIC1.PNG SND0.AT3; do
+            url="https://raw.githubusercontent.com/kadorna1/iopenmohaa-ps3/main/assets/xmb/${asset}"
+            curl --fail --location --retry 4 --retry-all-errors --connect-timeout 30 "$url" -o "$RUNNER_TEMP/$asset"
+            test -s "$RUNNER_TEMP/$asset"
+            install -m 0644 "$RUNNER_TEMP/$asset" "assets/xmb/$asset"
+          done
 
       - name: Fetch canonical XMB assets
         shell: bash
@@ -220,6 +240,7 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/openmohaa-ps3-install" \
             -DOPENMOHAA_PS3_APPID="$OPENMOHAA_PS3_APPID" \
+            -DOPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO="${{ inputs.experimental_spu_audio || startsWith(github.head_ref || github.ref_name, 'experimental/rsxkit-spukit-audio') }}" \
             -DBUILD_SERVER=OFF \
             -DBUILD_CLIENT=ON \
             -DBUILD_RENDERER_GL2=OFF \
@@ -318,6 +339,8 @@ jobs:
             dist/*.pkg
             dist/PIC1.PNG
             dist/SND0.AT3
+            dist/SND01.AT3
+            dist/SND0_01.AT3
             ps3-sdk-info.txt
             ps3-build-outputs.txt
             ps3-configure.log
