@@ -25,22 +25,43 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cg_commands.h"
 #include "memarchiver.h"
 #include "../corepp/tiki.h"
+#include "../sys/ps3_step.h"
 
 void CG_ArchiveStuff(MemArchiver& archiver, int svsTime)
 {
 	archiver.SetBaseTime(svsTime);
+#if defined(__PS3__)
+    const int ps3CommandArchiveStart = cgi.Milliseconds();
+#endif
 	commandManager.ArchiveToMemory(archiver);
+#if defined(__PS3__)
+    PS3_STEPF("SAVE CGAME command-manager-done bytes=%u elapsedMs=%d",
+        (unsigned)archiver.BufferSize(), cgi.Milliseconds() - ps3CommandArchiveStart);
+    const int ps3VssArchiveStart = cgi.Milliseconds();
+#endif
 	CG_ArchiveVSSGlobals(archiver);
+#if defined(__PS3__)
+    PS3_STEPF("SAVE CGAME vss-globals-done bytes=%u elapsedMs=%d totalMs=%d",
+        (unsigned)archiver.BufferSize(), cgi.Milliseconds() - ps3VssArchiveStart,
+        cgi.Milliseconds() - ps3CommandArchiveStart);
+#endif
 }
 
 size_t CG_SaveStateToBuffer(void** out, int svsTime)
 {
 	MemArchiver archiver;
 	size_t size;
+#if defined(__PS3__)
+    const int ps3SnapshotStart = cgi.Milliseconds();
+#endif
 
 	archiver.SetupForWriting(0x200000);
 	CG_ArchiveStuff(archiver, svsTime);
 	size = archiver.BufferSize();
+#if defined(__PS3__)
+    PS3_STEPF("SAVE CGAME buffer-ready bytes=%u elapsedMs=%d",
+        (unsigned)size, cgi.Milliseconds() - ps3SnapshotStart);
+#endif
 	if (size && out) {
 		*out = archiver.ConfiscateBuffer();
 	}
