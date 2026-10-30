@@ -207,7 +207,7 @@ void MemArchiver::ArchiveReadRaw(void *buffer, size_t size)
 
     if (size + this->bufferSize > this->allocatedSize) {
 #if defined(__PS3__)
-        PS3_TRACEF("SAVE MEMARCH growth used=%lu add=%lu capacity=%lu",
+        PS3_STEPF("SAVE MEMARCH growth used=%lu add=%lu capacity=%lu",
             (unsigned long)this->bufferSize, (unsigned long)size, (unsigned long)this->allocatedSize);
 #endif
         Com_Error(ERR_DROP, "MemArchiver: tried to read past end of buffer");
@@ -236,7 +236,7 @@ void MemArchiver::ArchiveWriteRaw(const void *buffer, size_t size)
 
             newBuffer = (byte *)cgi.Malloc(this->allocatedSize);
 #if defined(__PS3__)
-            PS3_TRACEF("SAVE MEMARCH allocation result=%p capacity=%lu", (void *)newBuffer, (unsigned long)this->allocatedSize);
+            PS3_STEPF("SAVE MEMARCH allocation result=%p capacity=%lu", (void *)newBuffer, (unsigned long)this->allocatedSize);
 #endif
             if (!newBuffer) {
                 cgi.Error(ERR_DROP, "MemArchiver: unable to grow save buffer to %lu bytes", (unsigned long)this->allocatedSize);
