@@ -1,15 +1,25 @@
-# PS3 XMB presentation assets
+# PS3 XMB assets
 
-This directory is the source location for optional PS3 XMB presentation assets.
+This directory is optional. The PKG builder copies every file and subdirectory
+under `assets/xmb/` to the package content root, excluding this README. No
+particular XMB file is required for CI or packaging to succeed.
 
-- `PIC1.PNG`: Game-column background image. The workflow scales it to 1920x1080 RGBA PNG.
-- `SND0.AT3`: pre-converted PS3 XMB hover audio. Use the canonical Sony filename exactly; do not check in an MP3 and do not generate aliases such as `SND01.AT3` or `SND0_01.AT3`.
+Recognized Sony filenames receive their normal handling when present:
 
-## Audio requirements
+- `ICON0.PNG`: fitted to 320x176 RGBA while preserving transparency.
+- `PIC1.PNG`: fitted to 1920x1080 RGBA.
+- `SND0.AT3`: checked for a RIFF/WAVE ATRAC stream and copied as the canonical
+  XMB hover sound.
 
-The workflow copies `assets/xmb/SND0.AT3` to the package content root as `SND0.AT3` and validates it before packaging. It must be a RIFF/WAVE SND0 file containing plain ATRAC3 audio, 44.1 kHz stereo, with the expected Sony XMB chunks, and be no larger than 500 KiB. An MP3 is not a PS3-compatible XMB hover file and is not converted during the build.
+Other files and subdirectories retain their names and contents. The builder
+does not fetch missing assets, generate filename aliases, or require a source
+MP3. An absent icon, background, or hover sound simply means that custom item
+is omitted (the legacy default icon may still be used when available).
 
-To prepare the file locally from a legally obtained source MP3, first decode/trim it to a 30-second 44.1 kHz stereo PCM WAV, then use the checked-in media tool and an ATRAC3 encoder:
+## Preparing hover audio
+
+For a PS3-compatible XMB hover sound, use a legal source recording and prepare
+a 30-second, 44.1 kHz, stereo PCM WAV before ATRAC3 encoding:
 
 ```sh
 ffmpeg -y -v error -i source.mp3 -t 30 -ar 44100 -ac 2 \
@@ -24,6 +34,6 @@ ffprobe -v error -select_streams a:0 \
   -of default=nw=1 assets/xmb/SND0.AT3
 ```
 
-Commit the resulting binary at `assets/xmb/SND0.AT3`. The build no longer clones or compiles an ATRAC3 encoder and therefore does not need the source MP3 at CI time.
-
-The package builder places `PIC1.PNG` and `SND0.AT3` at the package content root, beside `PARAM.SFO` and `ICON0.PNG`, not under `USRDIR`. If either asset is absent, the build warns and continues without that custom XMB media.
+The package builder validates the ATRAC container structure when the
+canonical `SND0.AT3` is supplied. It does not download or compile an encoder
+during CI.
