@@ -51,6 +51,7 @@ extern const u8 ps3_spukit_mix_bin[];
 #define PS3A_OUT_RATE   48000.0
 #define PS3A_BLOCK      AUDIO_BLOCK_SAMPLES /* 256 frames */
 #define PS3A_LEAD       6                   /* blocks kept queued ahead of the reader */
+#define PS3A_MIX_HEADROOM 0.50f              /* reserve 6 dB for overlapping game sounds */
 
 typedef struct {
     bool           active;
@@ -433,7 +434,7 @@ static void ps3a_target_gains(const ps3a_voice_t *v, float master, float *gl, fl
 static void ps3a_mix_block_ppu(float *out)
 {
     float  mixL[PS3A_BLOCK], mixR[PS3A_BLOCK];
-    float  master = (s_volume ? s_volume->value : 0.9f);
+    float  master = (s_volume ? s_volume->value : 0.9f) * PS3A_MIX_HEADROOM;
     int    i, k;
 
     memset(mixL, 0, sizeof(mixL));
@@ -500,13 +501,11 @@ static void ps3a_mix_block_ppu(float *out)
     }
     ps3a_unlock();
 
+    /* Do not clip the dry voice mix here: streams are added afterwards.
+     * Apply the output limit once, after every source has been summed. */
     for (k = 0; k < PS3A_BLOCK; k++) {
-        float l = mixL[k], r = mixR[k];
-
-        if (l > 1.0f) l = 1.0f; else if (l < -1.0f) l = -1.0f;
-        if (r > 1.0f) r = 1.0f; else if (r < -1.0f) r = -1.0f;
-        out[k * 2]     = l;
-        out[k * 2 + 1] = r;
+        out[k * 2]     = mixL[k];
+        out[k * 2 + 1] = mixR[k];
     }
 }
 
@@ -574,7 +573,8 @@ static bool ps3a_mix_block_spu(float *out)
         }
 
         float target_l, target_r;
-        ps3a_target_gains(src, s_volume ? s_volume->value : 0.9f, &target_l, &target_r);
+        ps3a_target_gains(src, (s_volume ? s_volume->value : 0.9f) * PS3A_MIX_HEADROOM,
+                          &target_l, &target_r);
         dst->first_off = base;
         dst->second_off = second_off;
         dst->first_start = start;
@@ -771,7 +771,7 @@ static void ps3a_stream_refill(int slot)
 
 static void ps3a_mix_streams(float *out)
 {
-    float master=s_volume?s_volume->value:0.9f;
+    float master=(s_volume?s_volume->value:0.9f)*PS3A_MIX_HEADROOM;
     int slot,k;
     ps3a_lock();
     for(slot=0;slot<PS3A_STREAM_COUNT;slot++) {
@@ -1146,6 +1146,8 @@ qboolean S_PS3AUDIO_Init()
     g_up     = true;
     PS3_BootTracef("PS3AUDIO: up (48 kHz stereo, %u blocks)", (unsigned)g_cfg.numBlocks);
     PS3_BootTracef("PS3AUDIO: startup mode=%s", g_ps3_test_tone ? "440Hz test tone" : "normal game mix");
+    PS3_BootTracef("PS3AUDIO: normal mixer headroom=%.2f (%.1f dB)",
+                   (double)PS3A_MIX_HEADROOM, 20.0 * log10((double)PS3A_MIX_HEADROOM));
     PS3_CompatAudioInit();
     Cmd_AddCommand("ps3audiotest", ps3a_testtone_cmd);
     return qtrue;
