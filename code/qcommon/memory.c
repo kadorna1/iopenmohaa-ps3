@@ -130,9 +130,20 @@ static int ps3_zone_ptr_ok( const void *p )
 Z_Free
 ========================
 */
-void Z_Free( void *ptr )
+PS3_NOINLINE void Z_Free( void *ptr )
 {
 	memblock_t *block = ( memblock_t * )( ( byte * )ptr - sizeof( memblock_t ) );
+#if defined(__PS3__)
+	void *caller = __builtin_return_address( 0 );
+
+	/* Validate the candidate header address before dereferencing it. This is
+	 * diagnostic-only: never pass a non-zone pointer to free() as a fallback. */
+	if( !ps3_zone_ptr_ok( ptr ) || !ps3_zone_ptr_ok( block ) ) {
+		PS3_BootTracef( "ZONE FREE BADPTR ptr=%p header=%p caller=%p", ptr, ( void * )block, caller );
+		Com_Error( ERR_FATAL, "Z_Free: freed a pointer without ZONEID" );
+		return;
+	}
+#endif
 
 	// don't free constant memory
 	if( block->id == ZONEID_CONST ) {
@@ -140,7 +151,12 @@ void Z_Free( void *ptr )
 	}
 
 	if( block->id != ZONEID ) {
+#if defined(__PS3__)
+		PS3_BootTracef( "ZONE FREE BADID ptr=%p header=%p id=0x%08x caller=%p",
+			ptr, ( void * )block, ( unsigned )block->id, caller );
+#endif
 		Com_Error( ERR_FATAL, "Z_Free: freed a pointer without ZONEID" );
+		return;
 	}
 
 	// check the memory trash tester
