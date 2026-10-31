@@ -1137,6 +1137,9 @@ CL_FirstSnapshot
 ==================
 */
 void CL_FirstSnapshot( void ) {
+#if defined(__PS3__)
+	PS3_BootTraceFastf("MAPLOAD FIRSTSNAP enter map=%s flags=%d", cl.mapname, cl.snap.snapFlags);
+#endif
 	// ignore snapshots that don't have entities
 	if ( cl.snap.snapFlags & SNAPFLAG_NOT_ACTIVE ) {
 		return;
@@ -1144,7 +1147,13 @@ void CL_FirstSnapshot( void ) {
 	clc.state = CA_ACTIVE;
 
 	// notify the UI
+#if defined(__PS3__)
+	PS3_BootTraceFastf("MAPLOAD FIRSTSNAP before UI_ServerLoaded map=%s", cl.mapname);
+#endif
 	UI_ServerLoaded();
+#if defined(__PS3__)
+	PS3_BootTraceFastf("MAPLOAD FIRSTSNAP after UI_ServerLoaded map=%s", cl.mapname);
+#endif
 
 	// set the timedelta so we are exactly on this first frame
 	cl.serverStartTime = cl.snap.serverTime;
@@ -1230,7 +1239,13 @@ void CL_SetCGameTime( void ) {
 		}
 		if ( cl.newSnapshots ) {
 			cl.newSnapshots = qfalse;
+#if defined(__PS3__)
+			PS3_BootTraceFastf("MAPLOAD CGTIME before CL_FirstSnapshot map=%s state=%d snapValid=%d", cl.mapname, (int)clc.state, (int)cl.snap.valid);
+#endif
 			CL_FirstSnapshot();
+#if defined(__PS3__)
+			PS3_BootTraceFastf("MAPLOAD CGTIME after CL_FirstSnapshot map=%s state=%d", cl.mapname, (int)clc.state);
+#endif
 		}
 		if ( clc.state != CA_ACTIVE ) {
 			return;

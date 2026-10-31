@@ -818,8 +818,8 @@ void IN_Init(void *windowData)
     Cvar_Set("j_yaw_axis", "4");
     Cvar_Set("j_forward_axis", "1");
     Cvar_Set("j_side_axis", "0");
-    Cvar_Set("j_pitch", "0.011");
-    Cvar_Set("j_yaw", "-0.011");
+    Cvar_Set("j_pitch", "0.0055");
+    Cvar_Set("j_yaw", "-0.0055");
     Cvar_Set("j_forward", "-0.25");
     Cvar_Set("j_side", "0.25");
 

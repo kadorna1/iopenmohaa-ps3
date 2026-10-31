@@ -2697,12 +2697,46 @@ CL_Frame
 #define PS3_CLF(msg) ((void)0)
 #endif
 
+#if defined(__PS3__)
+/* Low-volume, fast breadcrumbs for the first four client frames after a map
+ * change. Avoid trace_level=2's per-image disk-sync cost while locating hangs. */
+static char ps3_mapframe_trace_map[MAX_QPATH];
+static int ps3_mapframe_trace_frames;
+
+static void PS3_MapFrameTraceBegin(void)
+{
+    if (strcmp(ps3_mapframe_trace_map, cl.mapname) != 0) {
+        Q_strncpyz(ps3_mapframe_trace_map, cl.mapname, sizeof(ps3_mapframe_trace_map));
+        ps3_mapframe_trace_frames = 4;
+        PS3_BootTraceFastf("MAPFRAME enter map=%s state=%d",
+            cl.mapname[0] ? cl.mapname : "(empty)", (int)clc.state);
+    }
+}
+
+static void PS3_MapFrameTrace(const char *stage)
+{
+    if (ps3_mapframe_trace_frames <= 0)
+        return;
+    PS3_BootTraceFastf("MAPFRAME map=%s frame=%u stage=%s state=%d",
+        cl.mapname[0] ? cl.mapname : "(empty)", ps3_clframe_trace, stage, (int)clc.state);
+    if (strcmp(stage, "frame-complete") == 0)
+        ps3_mapframe_trace_frames--;
+}
+#define PS3_MAPFRAME_BEGIN() PS3_MapFrameTraceBegin()
+#define PS3_MAPFRAME(stage) PS3_MapFrameTrace(stage)
+#else
+#define PS3_MAPFRAME_BEGIN() ((void)0)
+#define PS3_MAPFRAME(stage) ((void)0)
+#endif
+
 void CL_Frame ( int msec ) {
 
 	if ( !com_cl_running->integer ) {
 		return;
 	}
 	PS3_CLF("enter");
+	PS3_MAPFRAME_BEGIN();
+	PS3_MAPFRAME("frame-enter");
 
 #ifdef USE_CURL
 	if(clc.downloadCURLM) {
@@ -2741,7 +2775,9 @@ void CL_Frame ( int msec ) {
 			UI_ForceMenuOff(qtrue);
 		}
 	}
+	PS3_CLF("after intro/menu check");
 
+	PS3_CLF("before CL_VideoRecording check");
 	// if recording an avi, lock to a fixed fps
 	if ( CL_VideoRecording( ) && cl_aviFrameRate->integer && msec) {
 		// save the current screen
@@ -2755,7 +2791,9 @@ void CL_Frame ( int msec ) {
 			}
 		}
 	}
+	PS3_CLF("after CL_VideoRecording check");
 
+	PS3_CLF("before auto-record demo check");
 	if( cl_autoRecordDemo->integer ) {
 		if( clc.state == CA_ACTIVE && !clc.demorecording && !clc.demoplaying ) {
 			// If not recording a demo, and we should be, start one
@@ -2793,6 +2831,7 @@ void CL_Frame ( int msec ) {
 			CL_StopRecord_f( );
 		}
 	}
+	PS3_CLF("after auto-record demo check");
 
 	// save the msec before checking pause
 	cls.realFrametime = msec;
@@ -2801,12 +2840,14 @@ void CL_Frame ( int msec ) {
 	cls.frametime = msec;
 
 	cls.realtime += cls.frametime;
+	PS3_CLF("after frame time/realtime setup");
 
 	if ( cl_timegraph->integer ) {
 		SCR_DebugGraph ( cls.realFrametime * 0.25 );
 	}
 
 	cls.timeScaled = com_timescale->integer != 1;
+	PS3_CLF("after timegraph/timescale setup");
 
 	//
 	// Added in 2.0: network profiling
@@ -2833,9 +2874,12 @@ void CL_Frame ( int msec ) {
 		cls.netprofile.initialized = qfalse;
 	}
 
+	PS3_CLF("after netprofile setup");
+
 	// see if we need to update any userinfo
 	PS3_CLF("before CL_CheckUserinfo");
 	CL_CheckUserinfo();
+	PS3_CLF("after CL_CheckUserinfo");
 
 	// if we haven't gotten a packet in a long time,
 	// drop the connection
@@ -2848,36 +2892,51 @@ void CL_Frame ( int msec ) {
 	CL_CheckForResend();
 
 	// decide on the serverTime to render
+	PS3_MAPFRAME("before-CL_SetCGameTime");
 	PS3_CLF("before CL_SetCGameTime");
 	CL_SetCGameTime();
 	PS3_CLF("after CL_SetCGameTime");
+	PS3_MAPFRAME("after-CL_SetCGameTime");
 
 	// set the time if we loaded a save
+	PS3_MAPFRAME("before-SV_DoSaveGame");
 	if( SV_DoSaveGame() )
 	{
 		if( cl.serverTime < svs.time ) {
 			cl.serverTime = svs.time;
 		}
 	}
+	PS3_MAPFRAME("after-SV_DoSaveGame");
 
+	PS3_MAPFRAME("before-L_ProcessPendingEvents");
 	L_ProcessPendingEvents();
+	PS3_MAPFRAME("after-L_ProcessPendingEvents");
 
     // Added in OPM
+    PS3_MAPFRAME("before-CL_UpdateMouse");
     CL_UpdateMouse();
+    PS3_MAPFRAME("after-CL_UpdateMouse");
 
 	// update the screen
+	PS3_MAPFRAME("before-SCR_UpdateScreen");
 	PS3_CLF("before SCR_UpdateScreen");
 	SCR_UpdateScreen();
 	PS3_CLF("after SCR_UpdateScreen");
+	PS3_MAPFRAME("after-SCR_UpdateScreen");
 
 	// update audio
+	PS3_MAPFRAME("before-S_Update");
 	PS3_CLF("before S_Update");
 	S_Update();
 	PS3_CLF("after S_Update");
+	PS3_MAPFRAME("after-S_Update");
 
 	// advance local effects for next frame
+	PS3_MAPFRAME("before-SCR_RunCinematic");
 	SCR_RunCinematic();
+	PS3_MAPFRAME("after-SCR_RunCinematic");
 
+	PS3_MAPFRAME("frame-complete");
 	cls.framecount++;
 #if defined(__PS3__)
 	ps3_clframe_trace++;

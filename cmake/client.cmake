@@ -131,6 +131,59 @@ endif()
 
 add_executable(${CLIENT_BINARY} ${CLIENT_EXECUTABLE_OPTIONS} ${CLIENT_BINARY_SOURCES})
 
+# Experimental SPU-backed mixer. This is deliberately opt-in: the existing
+# PPU mixer remains the fallback for unsupported voices or SPU startup/job
+# failures. rsxkit is pinned for future renderer work, but is not linked here:
+# it owns its own RSX context and is not an OpenGL 1.1 compatibility renderer.
+if(CMAKE_SYSTEM_NAME STREQUAL "PS3" AND OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO)
+    set(_openmohaa_spukit "${CMAKE_SOURCE_DIR}/third_party/spukit")
+    if(NOT EXISTS "${_openmohaa_spukit}/include/spukit/spukit.h")
+        message(FATAL_ERROR "SPUKit submodule missing. Configure with git submodules checked out.")
+    endif()
+
+    find_program(OPENMOHAA_SPU_GCC NAMES spu-gcc
+        HINTS "${PS3DEV}/spu/bin" "${PSL1GHT}/spu/bin" REQUIRED)
+    find_program(OPENMOHAA_PPU_AS NAMES ppu-as
+        HINTS "${PS3DEV}/ppu/bin" "${PSL1GHT}/ppu/bin" REQUIRED)
+    find_program(OPENMOHAA_BIN2S NAMES bin2s
+        HINTS "${PS3DEV}/bin" "${PSL1GHT}/bin" REQUIRED)
+
+    set(_openmohaa_spu_dir "${CMAKE_CURRENT_BINARY_DIR}/openmohaa-spukit")
+    file(MAKE_DIRECTORY "${_openmohaa_spu_dir}")
+    set(_openmohaa_spu_bin "${_openmohaa_spu_dir}/ps3_spukit_mix.bin")
+    set(_openmohaa_spu_obj "${_openmohaa_spu_dir}/ps3_spukit_mix_bin.o")
+
+    add_custom_command(
+        OUTPUT "${_openmohaa_spu_bin}"
+        COMMAND "${OPENMOHAA_SPU_GCC}"
+            -std=gnu11 -O2 -Wall -Wextra -mdual-nops -fmodulo-sched
+            -ffunction-sections -fdata-sections
+            "-I${PSL1GHT}/spu/include"
+            "-I${_openmohaa_spukit}/include"
+            "-I${SOURCE_DIR}/client"
+            "${SOURCE_DIR}/client/ps3_spukit_mix_spu.c"
+            -Wl,--gc-sections "-L${PSL1GHT}/spu/lib" -lsputhread
+            -o "${_openmohaa_spu_bin}"
+        DEPENDS
+            "${SOURCE_DIR}/client/ps3_spukit_mix_spu.c"
+            "${SOURCE_DIR}/client/ps3_spukit_mix.h"
+            "${_openmohaa_spukit}/include/spukit/spu.h"
+            "${_openmohaa_spukit}/include/spukit/queue.h"
+        VERBATIM)
+
+    add_custom_command(
+        OUTPUT "${_openmohaa_spu_obj}"
+        COMMAND /bin/bash -c "\"${OPENMOHAA_BIN2S}\" -a 64 \"${_openmohaa_spu_bin}\" | \"${OPENMOHAA_PPU_AS}\" -o \"${_openmohaa_spu_obj}\""
+        DEPENDS "${_openmohaa_spu_bin}"
+        VERBATIM)
+
+    target_sources(${CLIENT_BINARY} PRIVATE
+        "${_openmohaa_spukit}/src/spukit.c"
+        "${_openmohaa_spu_obj}")
+    target_include_directories(${CLIENT_BINARY} PRIVATE "${_openmohaa_spukit}/include")
+    target_compile_definitions(${CLIENT_BINARY} PRIVATE OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO=1)
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "PS3" AND PS3_FSELF)
     # Mirror PSL1GHT's %.self rule: strip the ELF, run sprxlinker when the
     # SDK provides it, then feed the prepared ELF to fself.
