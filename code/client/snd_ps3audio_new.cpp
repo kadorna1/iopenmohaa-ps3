@@ -1156,7 +1156,11 @@ qboolean S_PS3AUDIO_Init()
         }
     }
 
-    ps3a_load_mix_mode();
+    /* The audio producer reads this without taking the mixer lock; set it
+     * before the first thread starts and keep it immutable for that run. */
+    if (!g_inited) {
+        ps3a_load_mix_mode();
+    }
 
     if (!g_codecs_inited) {
         S_CodecInit();
