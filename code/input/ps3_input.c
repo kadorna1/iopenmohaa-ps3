@@ -855,7 +855,13 @@ void IN_Init(void *windowData)
 
     PS3_OSK_Init();
     PS3_Input_Init();
-    ps3_log("IN_Init: PS3 input initialized; DS3 axes left=0/1 right=yaw4/pitch3; aim scale=%.2f (ps3_aim_sensitivity)", PS3_AimSensitivity());
+    {
+        char aim_log[160];
+        snprintf(aim_log, sizeof(aim_log),
+                 "IN_Init: PS3 input initialized; DS3 axes left=0/1 right=yaw4/pitch3; aim scale=%.2f (ps3_aim_sensitivity)",
+                 PS3_AimSensitivity());
+        ps3_log(aim_log);
+    }
 }
 
 void IN_Frame(void)
