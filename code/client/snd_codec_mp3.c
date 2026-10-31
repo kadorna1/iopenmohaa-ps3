@@ -280,7 +280,8 @@ static int S_MP3_NextFrame(snd_stream_t *stream,
 
             mp3info->frameCount++;
 #if defined(__PS3__)
-            S_MP3_ProbePCM(mp3info, pcm, samples, frameInfo);
+            if (pcm)
+                S_MP3_ProbePCM(mp3info, pcm, samples, frameInfo);
 #endif
             return samples;
         }
@@ -309,7 +310,6 @@ static int S_MP3_NextFrame(snd_stream_t *stream,
 static int S_MP3_Scanfile(snd_stream_t *stream,
                           struct snd_codec_mp3_info *mp3info)
 {
-    mp3d_sample_t pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
     mp3dec_frame_info_t frameInfo;
     int decoded;
     int totalSamples = 0;
@@ -326,7 +326,8 @@ static int S_MP3_Scanfile(snd_stream_t *stream,
     mp3info->decodeErrors = 0;
 
     for (;;) {
-        decoded = S_MP3_NextFrame(stream, mp3info, pcm, &frameInfo);
+        /* pcm == NULL asks minimp3 for frame/header metadata only. */
+        decoded = S_MP3_NextFrame(stream, mp3info, NULL, &frameInfo);
         if (decoded <= 0)
             break;
 
