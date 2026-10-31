@@ -29,18 +29,6 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Fetch canonical XMB assets
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p assets/xmb
-          for asset in PIC1.PNG SND0.AT3; do
-            url="https://raw.githubusercontent.com/kadorna1/iopenmohaa-ps3/main/assets/xmb/${asset}"
-            curl --fail --location --retry 4 --retry-all-errors --connect-timeout 30 "$url" -o "$RUNNER_TEMP/$asset"
-            test -s "$RUNNER_TEMP/$asset"
-            install -m 0644 "$RUNNER_TEMP/$asset" "assets/xmb/$asset"
-          done
-
       - name: Install host build dependencies
         run: |
           sudo apt-get update
