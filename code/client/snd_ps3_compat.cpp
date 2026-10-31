@@ -120,6 +120,59 @@ void PS3_CompatMusicUpdate(void)
     PS3_MusicUpdateInternal();
 }
 
+
+static void PS3_MusicCommand(void)
+{
+    if (Cmd_Argc() != 2) {
+        Com_Printf("music <file>\n");
+        return;
+    }
+    ps3_music_active = qfalse;
+    ps3_music_song = -1;
+    (void)S_PS3AUDIO_StartStream(0, Cmd_Argv(1), 0, 0,
+        s_musicVolume ? s_musicVolume->value : 0.9f, 1.0f,
+        qtrue, NULL, 0, CHAN_LOCAL, 1.0f, 1.0f);
+}
+
+static void PS3_StopMusicCommand(void)
+{
+    MUSIC_StopAllSongs();
+    S_TriggeredMusic_Stop();
+}
+
+static void PS3_PlayMP3Command(void)
+{
+    if (Cmd_Argc() != 2) {
+        Com_Printf("playmp3 <file.mp3>\n");
+        return;
+    }
+    (void)S_PS3AUDIO_StartStream(1, Cmd_Argv(1), 1, 0, 1.0f, 1.0f,
+        qtrue, NULL, 0, CHAN_LOCAL, 1.0f, 1.0f);
+}
+
+static void PS3_StopMP3Command(void)
+{
+    S_PS3AUDIO_StopStream(1);
+}
+
+void PS3_CompatAudioInit(void)
+{
+    static qboolean registered = qfalse;
+    if (registered) return;
+    Cmd_AddCommand("music", PS3_MusicCommand);
+    Cmd_AddCommand("stopmusic", PS3_StopMusicCommand);
+    Cmd_AddCommand("playmp3", PS3_PlayMP3Command);
+    Cmd_AddCommand("stopmp3", PS3_StopMP3Command);
+    Cmd_AddCommand("loadsoundtrack", S_loadsoundtrack);
+    Cmd_AddCommand("playsong", S_PlaySong);
+    Cmd_AddCommand("tmstart", S_TriggeredMusic_Start);
+    Cmd_AddCommand("tmstartloop", S_TriggeredMusic_StartLoop);
+    Cmd_AddCommand("tmstop", S_TriggeredMusic_Stop);
+    Cmd_AddCommand("tmvolume", S_TriggeredMusic_Volume);
+    registered = qtrue;
+}
+
+
 qboolean S_IsSoundPlaying(int channel_number, const char *sfxName)
 {
     (void)channel_number;
