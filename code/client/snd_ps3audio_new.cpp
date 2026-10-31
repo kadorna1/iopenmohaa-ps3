@@ -195,6 +195,23 @@ static void ps3a_diag_reset(ps3a_mix_diag_t *diag)
     memset(diag, 0, sizeof(*diag));
 }
 
+static bool ps3a_is_synthetic_voice_mode(void)
+{
+    return g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+           g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_22K_TEST;
+}
+
+static bool ps3a_is_synthetic_stream_mode(void)
+{
+    return g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST ||
+           g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_22K_TEST;
+}
+
+static bool ps3a_is_synthetic_mode(void)
+{
+    return ps3a_is_synthetic_voice_mode() || ps3a_is_synthetic_stream_mode();
+}
+
 static const char *ps3a_mix_mode_name(void)
 {
     switch (g_ps3_mix_mode) {
@@ -315,8 +332,7 @@ static void ps3a_init_pcm_test_source(void)
     const int voiceFrames = fractional22k ? PS3A_STREAM_RING_FRAMES : PS3A_SYNTH_TEST_FRAMES;
     int i;
 
-    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
-        g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_22K_TEST) {
+    if (ps3a_is_synthetic_voice_mode()) {
         ps3a_voice_t *v = &g_voice[0];
         for (i = 0; i < voiceFrames; i++) {
             const double phase = fractional22k
@@ -1020,8 +1036,7 @@ qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
     ps3a_stream_t *s;
     snd_stream_t *d;
     int rate=0,width=0,chans=0;
-    if(!g_up ||         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
-       g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST ||
+    if(!g_up || ps3a_is_synthetic_mode() ||
        slot<0 || slot>=PS3A_STREAM_COUNT || !filename || !filename[0]) return qfalse;
     ps3a_stream_stop(slot);
     d=ps3a_stream_open_decoder(filename,&rate,&width,&chans,offsetFrames);
@@ -1054,21 +1069,18 @@ qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
 
 void S_PS3AUDIO_StopStream(int slot)
 {
-    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
-        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) return;
+    if (ps3a_is_synthetic_mode()) return;
     ps3a_stream_stop(slot);
 }
 void S_PS3AUDIO_PauseStream(int slot,qboolean pause)
 {
-    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
-        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) return;
+    if (ps3a_is_synthetic_mode()) return;
     if(slot<0 || slot>=PS3A_STREAM_COUNT) return;
     ps3a_lock(); g_streams[slot].paused=pause?qtrue:qfalse; ps3a_unlock();
 }
 void S_PS3AUDIO_SetStreamVolume(int slot,float volume)
 {
-    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
-        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) return;
+    if (ps3a_is_synthetic_mode()) return;
     if(slot<0 || slot>=PS3A_STREAM_COUNT) return;
     ps3a_lock(); g_streams[slot].volume=volume<0.0f?0.0f:volume; ps3a_unlock();
 }
@@ -1297,8 +1309,7 @@ qboolean S_PS3AUDIO_Init()
 
     memset(g_voice, 0, sizeof(g_voice));
     memset(g_streams, 0, sizeof(g_streams));
-    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
-        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) {
+    if (ps3a_is_synthetic_mode()) {
         ps3a_init_pcm_test_source();
     }
 
@@ -1433,8 +1444,7 @@ void S_PS3AUDIO_Shutdown()
     /* Keep synthetic test sources alive across the engine's sound-system
      * shutdown/restart cycle. The libaudio producer is intentionally persistent
      * and the selected test mode remains immutable for the life of this EBOOT. */
-    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
-        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) {
+    if (ps3a_is_synthetic_mode()) {
         g_up = false;
         PS3_BootTracef("PS3AUDIO: preserved synthetic source through sound shutdown mode=%s",
                        ps3a_mix_mode_name());
@@ -1463,8 +1473,7 @@ void S_PS3AUDIO_StartSound(
     ps3a_voice_t *v;
     sfx_t        *sfx;
 
-    if (!g_up ||         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
-        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST ||
+    if (!g_up || ps3a_is_synthetic_mode() ||
         sfxHandle <= 0 || sfxHandle >= s_numSfx) {
         return;
     }
@@ -1585,8 +1594,7 @@ void S_PS3AUDIO_AddLoopingSound(
     int           i;
 
     (void)velocity;
-    if (!g_up ||         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
-        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST ||
+    if (!g_up || ps3a_is_synthetic_mode() ||
         sfxHandle <= 0 || sfxHandle >= s_numSfx) {
         return;
     }
@@ -1708,8 +1716,7 @@ void S_PS3AUDIO_StopSound(int entnum, int channel)
 {
     int i;
 
-    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
-        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) return;
+    if (ps3a_is_synthetic_mode()) return;
     if (!g_up) {
         return;
     }
@@ -1731,8 +1738,7 @@ void S_PS3AUDIO_StopSound(int entnum, int channel)
 void S_PS3AUDIO_StopAllSounds(qboolean stop_music)
 {
     int i;
-    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
-        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) return;
+    if (ps3a_is_synthetic_mode()) return;
     for (i = PS3A_STREAM_FIRST_SFX; i < PS3A_STREAM_COUNT; i++) ps3a_stream_stop(i);
     ps3a_stream_stop(2);
     if (stop_music) {
