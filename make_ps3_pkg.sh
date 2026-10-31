@@ -294,17 +294,28 @@ for cand in "${SFO_LIST[@]}"; do
 done
 [ "$sfo_ok" -eq 1 ] || die "no sfo tool produced a PARAM.SFO"
 
-# 4. icon / background
-if [ -z "$ICON" ]; then
-    ICON="$REPO_DIR/misc/openmohaa-text.png"
+# 4. optional XMB assets
+# Preserve every supplied item under assets/xmb at the package root. README
+# documentation is not runtime content. Recognized PS3 filenames receive the
+# usual size/format handling below; all other filenames are copied unchanged.
+XMB_DIR="$REPO_DIR/assets/xmb"
+if [ -d "$XMB_DIR" ]; then
+    while IFS= read -r -d '' item; do
+        [ "$(basename "$item")" = "README.md" ] && continue
+        cp -a "$item" "$PKGDIR/"
+    done < <(find "$XMB_DIR" -mindepth 1 -maxdepth 1 -print0)
 fi
-fit_png() {   # fit_png SRC DST WxH
+if [ -z "$ICON" ] && [ -f "$XMB_DIR/ICON0.PNG" ]; then ICON="$XMB_DIR/ICON0.PNG"; fi
+if [ -z "$PIC1" ] && [ -f "$XMB_DIR/PIC1.PNG" ]; then PIC1="$XMB_DIR/PIC1.PNG"; fi
+if [ -z "$SND0" ] && [ -f "$XMB_DIR/SND0.AT3" ]; then SND0="$XMB_DIR/SND0.AT3"; fi
+
+fit_png() {
     local src="$1" dst="$2" size="$3" w h
     w="${size%x*}"; h="${size#*x}"
     if command -v magick >/dev/null 2>&1; then
-        magick "$src" -resize "$size" -background black -gravity center -extent "$size" "PNG32:$dst"
+        magick "$src" -resize "$size" -background none -gravity center -extent "$size" "PNG32:$dst"
     elif command -v convert >/dev/null 2>&1; then
-        convert "$src" -resize "$size" -background black -gravity center -extent "$size" "PNG32:$dst"
+        convert "$src" -resize "$size" -background none -gravity center -extent "$size" "PNG32:$dst"
     elif python3 -c 'import PIL' >/dev/null 2>&1; then
         python3 - "$src" "$dst" "$w" "$h" <<'PY'
 import sys
@@ -312,8 +323,8 @@ from PIL import Image
 src, dst, w, h = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 im = Image.open(src).convert("RGBA")
 im.thumbnail((w, h), Image.LANCZOS)
-canvas = Image.new("RGBA", (w, h), (0, 0, 0, 255))
-canvas.paste(im, ((w - im.width) // 2, (h - im.height) // 2), im)
+canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+canvas.alpha_composite(im, ((w - im.width) // 2, (h - im.height) // 2))
 canvas.save(dst, "PNG")
 PY
     else
@@ -321,10 +332,9 @@ PY
         cp "$src" "$dst"
     fi
 }
-if [ -f "$ICON" ]; then
+if [ -n "$ICON" ]; then
+    [ -f "$ICON" ] || die "ICON not found: $ICON"
     fit_png "$ICON" "$PKGDIR/ICON0.PNG" 320x176
-else
-    warn "icon not found ($ICON): package will have no ICON0.PNG"
 fi
 if [ -n "$PIC1" ]; then
     [ -f "$PIC1" ] || die "PIC1 not found: $PIC1"
