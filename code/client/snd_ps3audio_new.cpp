@@ -29,6 +29,7 @@ refuses to start with it.
 
 #include <audio/audio.h>
 #include <sys/mutex.h>
+#include <sys/event_queue.h>
 #include <sys/thread.h>
 
 #include <malloc.h>
@@ -109,6 +110,11 @@ static volatile int g_run        = 0;
 static sys_ppu_thread_t g_thread;
 static u32          g_port       = 0;
 static audioPortConfig g_cfg;
+static sys_event_queue_t g_audio_queue;
+static sys_ipc_key_t g_audio_queue_key;
+static bool g_audio_notify_ready = false;
+static volatile uint64_t g_audio_blocks = 0;
+static volatile uint64_t g_audio_late_blocks = 0;
 static int          g_tick       = 0;
 /* Counters are updated by the single audio producer thread. Periodic snapshots
  * reveal whether audible output is actually being mixed on SPU or PPU. */
@@ -838,11 +844,13 @@ static void ps3a_mix_block(float *out)
     /* One diagnostic every 1024 output blocks (~5.5 s at 48 kHz). */
     if ((g_mix_blocks_total & 1023u) == 0) {
         PS3_BootTraceFastf(
-            "PS3AUDIO: mix blocks total=%u spu=%u ppu=%u fallback=%u",
+            "PS3AUDIO: mix blocks total=%u spu=%u ppu=%u fallback=%u ring=%llu late=%llu",
             (unsigned)g_mix_blocks_total,
             (unsigned)g_mix_blocks_spu,
             (unsigned)g_mix_blocks_ppu,
-            (unsigned)g_mix_blocks_fallback);
+            (unsigned)g_mix_blocks_fallback,
+            (unsigned long long)g_audio_blocks,
+            (unsigned long long)g_audio_late_blocks);
     }
 }
 
@@ -852,29 +860,44 @@ static void ps3a_thread(void *arg)
     float        *ring    = (float *)(uintptr_t)g_cfg.audioDataStart;
     const u32     nb      = (u32)g_cfg.numBlocks;
     const u32     blockFloats = PS3A_BLOCK * 2;
-    u32           lastRd  = (u32)*readPtr % nb;
-    u32           wp      = (lastRd + PS3A_LEAD) % nb;
-    int           lead    = PS3A_LEAD;
+    uint64_t      readAbs = (uint64_t)*readPtr;
+    uint64_t      nextAbs = readAbs + 1;
+    u32           lastRd  = (u32)(readAbs % nb);
 
     (void)arg;
 
     while (g_run) {
-        const u32 rd  = (u32)*readPtr % nb;
-        const int adv = (int)((rd + nb - lastRd) % nb);
+        uint64_t nowAbs;
+        u32 nowMod;
 
-        lastRd = rd;
-        lead -= adv;
-        if (lead < 0) {
-            /* underrun: the reader overtook us; resynchronise just ahead of it */
-            wp   = (rd + 1) % nb;
-            lead = 1;
+        /* libaudio notifies this queue when it consumes a block. This avoids
+         * the old 1.5 ms polling loop, which could be starved by the renderer. */
+        if (g_audio_notify_ready) {
+            sys_event_t event;
+            (void)sysEventQueueReceive(g_audio_queue, &event, 100000);
+        } else {
+            usleep(1000);
         }
-        while (lead < PS3A_LEAD) {
-            ps3a_mix_block(ring + (size_t)wp * blockFloats);
-            wp = (wp + 1) % nb;
-            lead++;
+
+        nowAbs = (uint64_t)*readPtr;
+        nowMod = (u32)(nowAbs % nb);
+        readAbs += (nowMod + nb - lastRd) % nb;
+        lastRd = nowMod;
+
+        if (nextAbs <= readAbs) {
+            /* The reader overtook the producer. Skip consumed blocks, count
+             * the miss, and refill only future blocks (never overwrite audio
+             * currently being scanned out by libaudio). */
+            g_audio_late_blocks++;
+            nextAbs = readAbs + 1;
         }
-        usleep(1500);
+
+        while (nextAbs <= readAbs + PS3A_LEAD) {
+            const u32 block = (u32)(nextAbs % nb);
+            ps3a_mix_block(ring + (size_t)block * blockFloats);
+            nextAbs++;
+            g_audio_blocks++;
+        }
     }
 
     sysThreadExit(0);
@@ -939,10 +962,9 @@ qboolean S_PS3AUDIO_Init()
     {
         audioPortParam param;
 
-        memset(&param, 0, sizeof(param));
         param.numChannels = AUDIO_PORT_2CH;
-        param.numBlocks   = AUDIO_BLOCK_8;
-        param.attrib      = 0;
+        param.numBlocks   = AUDIO_BLOCK_16;
+        param.attrib      = AUDIO_PORT_INITLEVEL;
         param.level       = 1.0f;
 
         PS3_BootTracef("PS3AUDIO: about to call audioPortOpen");
@@ -966,6 +988,27 @@ qboolean S_PS3AUDIO_Init()
         return qfalse;
     }
 
+    /* Register the libaudio block notification queue before starting the port.
+     * The producer thread uses this event instead of timer polling. */
+    PS3_BootTracef("PS3AUDIO: about to create block notification queue");
+    rc = audioCreateNotifyEventQueue(&g_audio_queue, &g_audio_queue_key);
+    PS3_BootTracef("PS3AUDIO: audioCreateNotifyEventQueue rc=0x%x", (unsigned)rc);
+    if (rc != 0) {
+        audioPortClose(g_port);
+        audioQuit();
+        return qfalse;
+    }
+    rc = audioSetNotifyEventQueue(g_audio_queue_key);
+    PS3_BootTracef("PS3AUDIO: audioSetNotifyEventQueue rc=0x%x", (unsigned)rc);
+    if (rc != 0) {
+        sysEventQueueDestroy(g_audio_queue, 0);
+        audioPortClose(g_port);
+        audioQuit();
+        return qfalse;
+    }
+    (void)sysEventQueueDrain(g_audio_queue);
+    g_audio_notify_ready = true;
+
     /* start from silence */
     memset((void *)(uintptr_t)g_cfg.audioDataStart, 0,
            (size_t)g_cfg.numBlocks * PS3A_BLOCK * 2 * sizeof(float));
@@ -974,6 +1017,9 @@ qboolean S_PS3AUDIO_Init()
     rc = audioPortStart(g_port);
     PS3_BootTracef("PS3AUDIO: audioPortStart rc=0x%x", (unsigned)rc);
     if (rc != 0) {
+        (void)audioRemoveNotifyEventQueue(g_audio_queue_key);
+        (void)sysEventQueueDestroy(g_audio_queue, 0);
+        g_audio_notify_ready = false;
         audioPortClose(g_port);
         audioQuit();
         return qfalse;
@@ -987,19 +1033,23 @@ qboolean S_PS3AUDIO_Init()
         g_spu_mix_stage = (uint8_t *)memalign(128, PS3A_MAX_VOICES * PS3A_SPU_STAGE_PER_VOICE);
     }
     if (g_spu_mix_stage) {
-        /* worker_start is the actual capability check; failure is non-fatal. */
         (void)spukit_init(1);
         g_spu_mix_worker = spukit_worker_start(ps3_spukit_mix_bin, "mohaa-audio", 0);
     }
     PS3_BootTracef("PS3AUDIO: experimental SPU mixer %s",
                    g_spu_mix_worker ? "available" : "unavailable; PPU fallback");
+#else
+    PS3_BootTracef("PS3AUDIO: using PPU mixer (SPU path disabled for output validation)");
 #endif
 
-    rc = sysThreadCreate(&g_thread, ps3a_thread, NULL, 500, 0x10000, 0, (char *)"ps3audio");
+    rc = sysThreadCreate(&g_thread, ps3a_thread, NULL, 100, 0x10000, 0, (char *)"ps3audio");
     PS3_BootTracef("PS3AUDIO: sysThreadCreate rc=0x%x", (unsigned)rc);
     if (rc != 0) {
         g_run = 0;
         audioPortStop(g_port);
+        (void)audioRemoveNotifyEventQueue(g_audio_queue_key);
+        (void)sysEventQueueDestroy(g_audio_queue, 0);
+        g_audio_notify_ready = false;
         audioPortClose(g_port);
         audioQuit();
         return qfalse;
