@@ -94,6 +94,7 @@ typedef struct {
     double pos;
     int rate, width, chans, loopCount, loopsCompleted;
     int entnum, entchannel, sfxHandle, startTime;
+    unsigned int probeChunks;
     float step, pitch, volume, minDist, maxDist;
     vec3_t origin;
 } ps3a_stream_t;
@@ -147,7 +148,9 @@ typedef enum {
     PS3A_MIX_PCM_VOICE_TEST = 3,
     PS3A_MIX_PCM_STREAM_TEST = 4,
     PS3A_MIX_PCM_VOICE_22K_TEST = 5,
-    PS3A_MIX_PCM_STREAM_22K_TEST = 6
+    PS3A_MIX_PCM_STREAM_22K_TEST = 6,
+    PS3A_MIX_STREAMS_MP3 = 7,
+    PS3A_MIX_STREAMS_WAV = 8
 } ps3a_mix_mode_t;
 
 typedef struct {
@@ -164,6 +167,7 @@ static ps3a_mix_diag_t g_audio_diag_streams;
 static ps3a_mix_diag_t g_audio_diag_combined;
 static uint32_t g_audio_diag_active_voices = 0;
 static uint32_t g_audio_diag_active_streams = 0;
+static unsigned int g_voice_pcm_probe_count = 0;
 
 static inline void ps3a_diag_add(ps3a_mix_diag_t *diag, float left, float right)
 {
@@ -212,11 +216,41 @@ static bool ps3a_is_synthetic_mode(void)
     return ps3a_is_synthetic_voice_mode() || ps3a_is_synthetic_stream_mode();
 }
 
+static bool ps3a_is_stream_isolation_mode(void)
+{
+    return g_ps3_mix_mode == PS3A_MIX_STREAMS ||
+           g_ps3_mix_mode == PS3A_MIX_STREAMS_MP3 ||
+           g_ps3_mix_mode == PS3A_MIX_STREAMS_WAV;
+}
+
+static bool ps3a_is_voice_isolation_mode(void)
+{
+    return g_ps3_mix_mode == PS3A_MIX_VOICES;
+}
+
+static bool ps3a_stream_allowed_by_mode(const char *filename)
+{
+    const char *extension;
+    if (g_ps3_mix_mode != PS3A_MIX_STREAMS_MP3 &&
+        g_ps3_mix_mode != PS3A_MIX_STREAMS_WAV) {
+        return true;
+    }
+    if (!filename || !(extension = strrchr(filename, '.'))) {
+        return false;
+    }
+    if (g_ps3_mix_mode == PS3A_MIX_STREAMS_MP3) {
+        return Q_stricmp(extension, ".mp3") == 0;
+    }
+    return Q_stricmp(extension, ".wav") == 0;
+}
+
 static const char *ps3a_mix_mode_name(void)
 {
     switch (g_ps3_mix_mode) {
     case PS3A_MIX_VOICES: return "voices";
     case PS3A_MIX_STREAMS: return "streams";
+    case PS3A_MIX_STREAMS_MP3: return "streams-mp3";
+    case PS3A_MIX_STREAMS_WAV: return "streams-wav";
     case PS3A_MIX_PCM_VOICE_TEST: return "pcm-voice";
     case PS3A_MIX_PCM_STREAM_TEST: return "pcm-stream";
     case PS3A_MIX_PCM_VOICE_22K_TEST: return "pcm-voice22k";
@@ -244,6 +278,10 @@ static void ps3a_load_mix_mode(void)
         g_ps3_mix_mode = PS3A_MIX_PCM_STREAM_TEST;
     } else if (!strncmp(mode, "voices", 6)) {
         g_ps3_mix_mode = PS3A_MIX_VOICES;
+    } else if (!strncmp(mode, "streams-mp3", 11)) {
+        g_ps3_mix_mode = PS3A_MIX_STREAMS_MP3;
+    } else if (!strncmp(mode, "streams-wav", 11)) {
+        g_ps3_mix_mode = PS3A_MIX_STREAMS_WAV;
     } else if (!strncmp(mode, "streams", 7)) {
         g_ps3_mix_mode = PS3A_MIX_STREAMS;
     } else {
@@ -482,53 +520,75 @@ static bool ps3a_sfx_usable(const sfx_t *sfx)
         && ps3a_voice_source_bytes(sfx) > 0;
 }
 
-/* Emit a bounded preview of real decoder input. On PS3 the file-backed voice
- * payload is little-endian, while codec stream decoders are expected to return
- * host-native samples. Logging both byte interpretations makes a byte-order
- * mismatch visible without relying on the in-game console. */
+/* Emit a bounded preview and statistics for decoded PCM. Stream counters
+ * belong to each stream slot so an early movie MP3 cannot consume the probe
+ * budget for later music or dialogue streams. */
 static void ps3a_trace_pcm_preview(const char *stage, const char *name,
                                    const byte *data, int bytes, int width,
-                                   int channels, bool hostNative)
+                                   int channels, bool hostNative,
+                                   unsigned int *probeCount, unsigned int probeLimit)
 {
-    static unsigned int voiceCount = 0;
-    static unsigned int streamCount = 0;
-    unsigned int *count = (strstr(stage, "stream") != NULL) ? &streamCount : &voiceCount;
     int sample[4] = {0, 0, 0, 0};
     int swapped[4] = {0, 0, 0, 0};
-    int i, available;
+    int i, available, totalSamples, minSample = 32767, maxSample = -32768;
+    int peak = 0;
+    unsigned int nearFullScale = 0;
+    double sumsq = 0.0;
 
-    if (!data || bytes <= 0 || channels < 1 || channels > 2 || (*count)++ >= 12) {
+    if (!probeCount || !data || bytes <= 0 || channels < 1 || channels > 2 ||
+        (width != 1 && width != 2) || (*probeCount)++ >= probeLimit) {
         return;
     }
-    available = bytes / width;
-    if (available > 4) available = 4;
-    if (width == 2) {
-        for (i = 0; i < available; i++) {
+
+    totalSamples = bytes / width;
+    available = totalSamples > 4 ? 4 : totalSamples;
+    for (i = 0; i < totalSamples; i++) {
+        int value;
+        if (width == 2) {
             short nativeSample;
-            const int offset = i * 2;
             if (hostNative) {
-                memcpy(&nativeSample, data + offset, sizeof(nativeSample));
-                sample[i] = (int)nativeSample;
-                swapped[i] = (short)(((unsigned int)data[offset + 1] << 8) | data[offset]);
+                memcpy(&nativeSample, data + i * 2, sizeof(nativeSample));
+                value = (int)nativeSample;
             } else {
-                sample[i] = (short)((unsigned int)data[offset] |
-                                    ((unsigned int)data[offset + 1] << 8));
-                swapped[i] = (short)((unsigned int)data[offset + 1] |
-                                     ((unsigned int)data[offset] << 8));
+                value = (short)((unsigned int)data[i * 2] |
+                                ((unsigned int)data[i * 2 + 1] << 8));
+            }
+        } else {
+            value = ((int)data[i] - 128) << 8;
+        }
+
+        if (value < minSample) minSample = value;
+        if (value > maxSample) maxSample = value;
+        if (abs(value) > peak) peak = abs(value);
+        if (abs(value) >= 32760) nearFullScale++;
+        sumsq += (double)value * (double)value;
+
+        if (i < available) {
+            if (width == 2) {
+                if (hostNative) {
+                    short nativeSample;
+                    memcpy(&nativeSample, data + i * 2, sizeof(nativeSample));
+                    sample[i] = (int)nativeSample;
+                    swapped[i] = (short)(((unsigned int)data[i * 2 + 1] << 8) | data[i * 2]);
+                } else {
+                    sample[i] = (short)((unsigned int)data[i * 2] |
+                                        ((unsigned int)data[i * 2 + 1] << 8));
+                    swapped[i] = (short)((unsigned int)data[i * 2 + 1] |
+                                         ((unsigned int)data[i * 2] << 8));
+                }
+            } else {
+                sample[i] = (int)data[i] - 128;
+                swapped[i] = sample[i];
             }
         }
-    } else if (width == 1) {
-        for (i = 0; i < available; i++) {
-            sample[i] = (int)data[i] - 128;
-            swapped[i] = sample[i];
-        }
-    } else {
-        return;
     }
 
-    PS3_BootTracef("PS3AUDIO: PCM probe stage=%s file=%s width=%d channels=%d bytes=%d order=%s raw=%02x%02x%02x%02x%02x%02x%02x%02x sample=%d,%d,%d,%d swapped=%d,%d,%d,%d",
-                   stage, name ? name : "(unknown)", width, channels, bytes,
+    PS3_BootTracef("PS3AUDIO: PCM probe stage=%s file=%s width=%d channels=%d bytes=%d samples=%d order=%s min=%d max=%d peak=%d rms=%.1f near_full_scale=%u raw=%02x%02x%02x%02x%02x%02x%02x%02x sample=%d,%d,%d,%d swapped=%d,%d,%d,%d",
+                   stage, name ? name : "(unknown)", width, channels, bytes, totalSamples,
                    hostNative ? "host-native" : "file-little-endian",
+                   minSample, maxSample, peak,
+                   totalSamples ? sqrt(sumsq / (double)totalSamples) : 0.0,
+                   nearFullScale,
                    (unsigned)data[0], (unsigned)(bytes > 1 ? data[1] : 0),
                    (unsigned)(bytes > 2 ? data[2] : 0), (unsigned)(bytes > 3 ? data[3] : 0),
                    (unsigned)(bytes > 4 ? data[4] : 0), (unsigned)(bytes > 5 ? data[5] : 0),
@@ -607,7 +667,8 @@ static bool ps3a_setup_voice(ps3a_voice_t *v, int sfxHandle, float pitch)
     }
     if (sfx->info.format == 1) {
         ps3a_trace_pcm_preview("voice-source-file-le", sfx->name, src, bytes,
-                               (int)w, sfx->info.channels, false);
+                               (int)w, sfx->info.channels, false,
+                               &g_voice_pcm_probe_count, 12);
     }
 
     v->own = NULL;
@@ -624,7 +685,8 @@ static bool ps3a_setup_voice(ps3a_voice_t *v, int sfxHandle, float pitch)
         v->frames = n;
         v->width  = 2;
         ps3a_trace_pcm_preview("voice-adpcm-decoded-le", sfx->name, buf,
-                               n * 2, 2, 1, false);
+                               n * 2, 2, 1, false,
+                               &g_voice_pcm_probe_count, 12);
         {
             static unsigned int adpcmTraceCount;
             if (adpcmTraceCount < 8) {
@@ -1004,7 +1066,7 @@ static void ps3a_stream_refill(int slot)
             continue;
         }
         ps3a_trace_pcm_preview("stream-decoder-native", s->filename, raw, got,
-                               width, chans, true);
+                               width, chans, true, &s->probeChunks, 2);
         frames = got / (width * chans);
         if (frames <= 0) return;
         if (frames > (int)capacity) frames = (int)capacity;
@@ -1127,6 +1189,11 @@ qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
     int rate=0,width=0,chans=0;
     if(!g_up || ps3a_is_synthetic_mode() ||
        slot<0 || slot>=PS3A_STREAM_COUNT || !filename || !filename[0]) return qfalse;
+    if (!ps3a_stream_allowed_by_mode(filename)) {
+        PS3_BootTracef("PS3AUDIO: stream filtered by isolation mode=%s file=%s",
+                       ps3a_mix_mode_name(), filename);
+        return qfalse;
+    }
     ps3a_stream_stop(slot);
     d=ps3a_stream_open_decoder(filename,&rate,&width,&chans,offsetFrames);
     if(!d) { PS3_BootTracef("PS3AUDIO: could not open stream slot=%d file=%s",slot,filename); return qfalse; }
@@ -1233,7 +1300,7 @@ static void ps3a_mix_block(float *out)
         g_mix_blocks_total++;
         g_mix_blocks_testtone++;
     } else {
-        if (g_ps3_mix_mode == PS3A_MIX_STREAMS) {
+        if (ps3a_is_stream_isolation_mode()) {
             memset(out, 0, (size_t)PS3A_BLOCK * 2 * sizeof(float));
             g_mix_blocks_total++;
         } else {
@@ -1253,7 +1320,7 @@ static void ps3a_mix_block(float *out)
             g_mix_blocks_ppu++;
 #endif
         }
-        if (g_ps3_mix_mode != PS3A_MIX_VOICES) {
+        if (!ps3a_is_voice_isolation_mode()) {
             ps3a_mix_streams(out);
         } else {
             ps3a_limit_voice_mix(out);
