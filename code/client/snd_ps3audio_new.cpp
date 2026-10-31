@@ -85,7 +85,7 @@ static ps3a_voice_t g_voice[PS3A_MAX_VOICES];
 #define PS3A_STREAM_CHUNK_FRAMES 2048
 
 typedef struct {
-    bool active, paused, eof, isLoopFx, seen, local;
+    bool active, paused, eof, isLoopFx, seen, local, follow;
     snd_stream_t *decoder;
     char filename[MAX_QPATH];
     uint64_t writeFrame;
@@ -1049,7 +1049,8 @@ void S_PS3AUDIO_StartSound(
         entnum &= ~S_FLAG_DO_CALLBACK;
         if (entnum < 0 || entnum >= MAX_GENTITIES) entnum = 0;
         local = (entchannel == CHAN_MENU || entchannel == CHAN_LOCAL
-                 || (entnum == s_iListenerNumber && entnum != 0));
+                 || (entnum == s_iListenerNumber && entnum != 0)
+                 || (!origin && entnum == 0));
         if (origin) VectorCopy(origin, streamOrigin);
         else VectorCopy(s_entity[entnum].position, streamOrigin);
         ps3a_lock();
@@ -1085,6 +1086,7 @@ void S_PS3AUDIO_StartSound(
                                        entnum, entchannel, md, xd)) {
                 ps3a_lock();
                 g_streams[slot].sfxHandle = sfxHandle;
+                g_streams[slot].follow = (!origin && entnum != 0) ? true : false;
                 ps3a_unlock();
             }
         }
@@ -1344,6 +1346,9 @@ void S_PS3AUDIO_Update()
     for (i = PS3A_STREAM_FIRST_SFX; i < PS3A_STREAM_COUNT; i++) {
         if (g_streams[i].active && g_streams[i].isLoopFx && !g_streams[i].seen)
             g_streams[i].active = false;
+        if (g_streams[i].active && g_streams[i].follow
+            && g_streams[i].entnum >= 0 && g_streams[i].entnum < MAX_GENTITIES)
+            VectorCopy(s_entity[g_streams[i].entnum].position, g_streams[i].origin);
     }
     ps3a_unlock();
 
