@@ -258,6 +258,13 @@ static float PS3_AimSensitivity(void)
     return value;
 }
 
+/* A small horizontal-only lift keeps left/right aiming from feeling slower
+ * than vertical aiming without changing the archived base sensitivity. */
+static float PS3_AimSensitivityX(void)
+{
+    return PS3_AimSensitivity() * 1.10f;
+}
+
 static void Mouse_Init(void)
 {
     ioMouseInit(2);
@@ -331,9 +338,10 @@ static void Mouse_Frame(qboolean syncOnly)
         /* Reduce in-game aiming only. The menu cursor remains 1:1. Fractional
          * deltas are accumulated so half sensitivity does not drop every other
          * one-pixel mouse movement. */
-        float scale = PS3_AimSensitivity();
-        s_mouse_aim_accum_x += (float)dx * scale;
-        s_mouse_aim_accum_y += (float)dy * scale;
+        float scaleX = PS3_AimSensitivityX();
+        float scaleY = PS3_AimSensitivity();
+        s_mouse_aim_accum_x += (float)dx * scaleX;
+        s_mouse_aim_accum_y += (float)dy * scaleY;
         dx = (int)s_mouse_aim_accum_x;
         dy = (int)s_mouse_aim_accum_y;
         s_mouse_aim_accum_x -= (float)dx;
@@ -797,7 +805,7 @@ void PS3_Input_Frame(void)
         /* scaled to the engine's +/-32K joystick axis range */
         axis[0] = lx * 256;
         axis[1] = ly * 256;
-        axis[2] = (int)((float)rx * 256.0f * PS3_AimSensitivity());
+        axis[2] = (int)((float)rx * 256.0f * PS3_AimSensitivityX());
         axis[3] = (int)((float)ry * 256.0f * PS3_AimSensitivity());
         for (b = 0; b < 4; b++) {
             if (axis[b] != ps3_axis_prev[b]) {
@@ -858,8 +866,8 @@ void IN_Init(void *windowData)
     {
         char aim_log[160];
         snprintf(aim_log, sizeof(aim_log),
-                 "IN_Init: PS3 input initialized; DS3 axes left=0/1 right=yaw4/pitch3; aim scale=%.2f (ps3_aim_sensitivity)",
-                 PS3_AimSensitivity());
+                 "IN_Init: PS3 input initialized; DS3 axes left=0/1 right=yaw4/pitch3; aim scale x=%.2f y=%.2f (ps3_aim_sensitivity)",
+                 PS3_AimSensitivityX(), PS3_AimSensitivity());
         ps3_log(aim_log);
     }
 }
