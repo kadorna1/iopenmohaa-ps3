@@ -33,6 +33,13 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // includes for the MP3 codec
 #include "mad.h"
 
+#if defined(__PS3__)
+#include "../sys/ps3_log.h"
+#define MP3_TRACE(...) PS3_BootTracef(__VA_ARGS__)
+#else
+#define MP3_TRACE(...) ((void)0)
+#endif
+
 #define MP3_SAMPLE_WIDTH		2
 #define MP3_PCMSAMPLES_PERSLICE		32
 
@@ -71,6 +78,11 @@ struct snd_codec_mp3_info
     byte* dest;			// copy decoded data here.
     int destlen;			// amount of already copied data.
     int destsize;			// amount of bytes we must decode.
+
+    char filename[MAX_QPATH];
+    unsigned int refillCount;
+    unsigned int recoverableErrors;
+    unsigned int decodeErrors;
 };
 
 /*************** MP3 utility functions ***************/
@@ -85,29 +97,58 @@ S_MP3_ReadData
 int S_MP3_ReadData(snd_stream_t* stream, struct mad_stream* madstream, byte* encbuf, unsigned long encbufsize)
 {
     unsigned long retval;
-    unsigned long leftover;
+    unsigned long leftover = 0;
+    struct snd_codec_mp3_info *mp3info;
 
-    if (!stream)
+    if (!stream || !madstream || !encbuf || encbufsize == 0)
         return -1;
 
-    leftover = madstream->bufend - madstream->next_frame;
+    /*
+     * libmad leaves next_frame at the first unconsumed byte. this_frame is
+     * the beginning of the frame currently being decoded and may point before
+     * next_frame. Copying from this_frame while using a length measured from
+     * next_frame replays consumed frame data at every compressed-buffer refill.
+     */
+    if (madstream->next_frame && madstream->bufend) {
+        if (madstream->next_frame > madstream->bufend) {
+            MP3_TRACE("PS3AUDIO: MP3 invalid refill pointers file=%s next_after_end=1",
+                      stream->ptr ? ((struct snd_codec_mp3_info *)stream->ptr)->filename : "(scan)");
+            return -1;
+        }
+        leftover = (unsigned long)(madstream->bufend - madstream->next_frame);
+    } else if (madstream->next_frame || madstream->bufend) {
+        MP3_TRACE("PS3AUDIO: MP3 invalid refill pointers file=%s next_or_end_null=1",
+                  stream->ptr ? ((struct snd_codec_mp3_info *)stream->ptr)->filename : "(scan)");
+        return -1;
+    }
+
+    if (leftover > encbufsize) {
+        MP3_TRACE("PS3AUDIO: MP3 refill overflow file=%s leftover=%lu capacity=%lu",
+                  stream->ptr ? ((struct snd_codec_mp3_info *)stream->ptr)->filename : "(scan)",
+                  leftover, encbufsize);
+        return -1;
+    }
+
     if (leftover > 0)
-        memmove(encbuf, madstream->this_frame, leftover);
+        memmove(encbuf, madstream->next_frame, leftover);
 
-
-    // Fill the buffer right to the end
-
+    // Fill the remaining buffer space with compressed input.
     retval = FS_Read(&encbuf[leftover], encbufsize - leftover, stream->file);
 
-    if (retval <= 0)
-    {
+    mp3info = (struct snd_codec_mp3_info *)stream->ptr;
+    if (mp3info && ++mp3info->refillCount <= 12) {
+        MP3_TRACE("PS3AUDIO: MP3 refill file=%s count=%u leftover=%lu read=%lu capacity=%lu",
+                  mp3info->filename, mp3info->refillCount, leftover, retval, encbufsize);
+    }
+
+    if (retval <= 0) {
         // EOF reached, that's ok.
         return 0;
     }
 
     mad_stream_buffer(madstream, encbuf, retval + leftover);
 
-    return retval;
+    return (int)retval;
 }
 
 
@@ -432,22 +473,53 @@ int S_MP3_Decode(snd_stream_t* stream)
 
     if (mad_frame_decode(madframe, madstream))
     {
-        if (madstream->error == MAD_ERROR_BUFLEN)
+        const enum mad_error error = madstream->error;
+
+        if (error == MAD_ERROR_BUFLEN)
         {
-            // we need more data. Read another chunk.
+            // The compressed input buffer is exhausted; preserve next_frame
+            // and refill before attempting the frame again.
             retval = S_MP3_ReadData(stream, madstream, mp3info->encbuf, sizeof(mp3info->encbuf));
 
-            // call myself again now that buffer is full.
             if (retval > 0)
                 retval = S_MP3_Decode(stream);
+            else if (retval < 0) {
+                mp3info->decodeErrors++;
+                if (mp3info->decodeErrors <= 8) {
+                    MP3_TRACE("PS3AUDIO: MP3 refill failed file=%s error=%d count=%u",
+                              mp3info->filename, (int)error, mp3info->decodeErrors);
+                }
+            }
         }
-        else if (MAD_RECOVERABLE(madstream->error))
+        else if (MAD_RECOVERABLE(error))
         {
+            mp3info->recoverableErrors++;
+            if (mp3info->recoverableErrors <= 16) {
+                MP3_TRACE("PS3AUDIO: MP3 recoverable decode error file=%s error=%d skip=%lu count=%u",
+                          mp3info->filename, (int)error, madstream->skiplen,
+                          mp3info->recoverableErrors);
+            }
+
+            if (madstream->skiplen == 0) {
+                mp3info->decodeErrors++;
+                if (mp3info->decodeErrors <= 8) {
+                    MP3_TRACE("PS3AUDIO: MP3 recoverable error has no skip length file=%s error=%d",
+                              mp3info->filename, (int)error);
+                }
+                return -1;
+            }
+
             mad_stream_skip(madstream, madstream->skiplen);
             return S_MP3_Decode(stream);
         }
-        else
+        else {
+            mp3info->decodeErrors++;
+            if (mp3info->decodeErrors <= 8) {
+                MP3_TRACE("PS3AUDIO: MP3 fatal decode error file=%s error=%d count=%u",
+                          mp3info->filename, (int)error, mp3info->decodeErrors);
+            }
             retval = -1;
+        }
 
         return retval;
     }
@@ -556,6 +628,8 @@ snd_stream_t* S_MP3_CodecOpenStream(const char* filename)
         return NULL;
     }
 
+    memset(mp3info, 0, sizeof(*mp3info));
+    Q_strncpyz(mp3info->filename, filename, sizeof(mp3info->filename));
     stream->ptr = mp3info;
 
     // initialize the libmad control structures.
