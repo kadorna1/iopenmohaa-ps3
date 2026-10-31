@@ -854,6 +854,22 @@ static void ps3a_stream_refill(int slot)
     }
 }
 
+static void ps3a_limit_voice_mix(float *out)
+{
+    int k;
+    for(k=0;k<PS3A_BLOCK;k++) {
+        float left=out[k*2];
+        float right=out[k*2+1];
+        ps3a_diag_add(&g_audio_diag_combined,left,right);
+        if(left>1.0f) left=1.0f;
+        else if(left< -1.0f) left= -1.0f;
+        if(right>1.0f) right=1.0f;
+        else if(right< -1.0f) right= -1.0f;
+        out[k*2]=left;
+        out[k*2+1]=right;
+    }
+}
+
 static void ps3a_mix_streams(float *out)
 {
     float master=(s_volume?s_volume->value:0.9f)*PS3A_MIX_HEADROOM;
@@ -1017,6 +1033,8 @@ static void ps3a_mix_block(float *out)
         }
         if (g_ps3_mix_mode != PS3A_MIX_VOICES) {
             ps3a_mix_streams(out);
+        } else {
+            ps3a_limit_voice_mix(out);
         }
     }
 
