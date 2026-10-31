@@ -145,7 +145,9 @@ typedef enum {
     PS3A_MIX_VOICES = 1,
     PS3A_MIX_STREAMS = 2,
     PS3A_MIX_PCM_VOICE_TEST = 3,
-    PS3A_MIX_PCM_STREAM_TEST = 4
+    PS3A_MIX_PCM_STREAM_TEST = 4,
+    PS3A_MIX_PCM_VOICE_22K_TEST = 5,
+    PS3A_MIX_PCM_STREAM_22K_TEST = 6
 } ps3a_mix_mode_t;
 
 typedef struct {
@@ -200,6 +202,8 @@ static const char *ps3a_mix_mode_name(void)
     case PS3A_MIX_STREAMS: return "streams";
     case PS3A_MIX_PCM_VOICE_TEST: return "pcm-voice";
     case PS3A_MIX_PCM_STREAM_TEST: return "pcm-stream";
+    case PS3A_MIX_PCM_VOICE_22K_TEST: return "pcm-voice22k";
+    case PS3A_MIX_PCM_STREAM_22K_TEST: return "pcm-stream22k";
     default: return "normal";
     }
 }
@@ -213,7 +217,11 @@ static void ps3a_load_mix_mode(void)
         fclose(f);
     }
 
-    if (!strncmp(mode, "pcm-voice", 9)) {
+    if (!strncmp(mode, "pcm-voice22k", 12)) {
+        g_ps3_mix_mode = PS3A_MIX_PCM_VOICE_22K_TEST;
+    } else if (!strncmp(mode, "pcm-stream22k", 13)) {
+        g_ps3_mix_mode = PS3A_MIX_PCM_STREAM_22K_TEST;
+    } else if (!strncmp(mode, "pcm-voice", 9)) {
         g_ps3_mix_mode = PS3A_MIX_PCM_VOICE_TEST;
     } else if (!strncmp(mode, "pcm-stream", 10)) {
         g_ps3_mix_mode = PS3A_MIX_PCM_STREAM_TEST;
@@ -299,31 +307,43 @@ static inline void ps3a_store_s16_le(byte *dst, int sample)
 static void ps3a_init_pcm_test_source(void)
 {
     const double tau = 6.28318530717958647692;
+    const qboolean fractional22k =
+        (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_22K_TEST ||
+         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_22K_TEST) ? qtrue : qfalse;
+    const int sourceRate = fractional22k ? 22050 : (int)PS3A_OUT_RATE;
+    const double step = (double)sourceRate / PS3A_OUT_RATE;
+    const int voiceFrames = fractional22k ? PS3A_STREAM_RING_FRAMES : PS3A_SYNTH_TEST_FRAMES;
     int i;
 
-    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST) {
+    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
+        g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_22K_TEST) {
         ps3a_voice_t *v = &g_voice[0];
-        for (i = 0; i < PS3A_SYNTH_TEST_FRAMES; i++) {
-            const double phase = tau * (double)(i % 128) / 128.0;
+        for (i = 0; i < voiceFrames; i++) {
+            const double phase = fractional22k
+                ? tau * 320.0 * (double)i / (double)PS3A_STREAM_RING_FRAMES
+                : tau * (double)(i % 128) / 128.0;
             const int sample = (int)(sinf((float)phase) * 12000.0f);
             ps3a_store_s16_le(g_ps3_synth_voice_pcm + (size_t)i * 2, sample);
         }
         memset(v, 0, sizeof(*v));
         v->pcm = g_ps3_synth_voice_pcm;
-        v->frames = PS3A_SYNTH_TEST_FRAMES;
+        v->frames = voiceFrames;
         v->width = 2;
         v->chans = 1;
-        v->step = 1.0;
+        v->step = step;
         v->volume = 1.0f;
         v->minDist = 1.0f;
         v->maxDist = 1.0f;
         v->local = true;
         v->loop = true;
         v->active = true;
-    } else if (g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) {
+    } else if (g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST ||
+               g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_22K_TEST) {
         ps3a_stream_t *s = &g_streams[0];
         for (i = 0; i < PS3A_STREAM_RING_FRAMES; i++) {
-            const double phase = tau * (double)(i % 128) / 128.0;
+            const double phase = fractional22k
+                ? tau * 320.0 * (double)i / (double)PS3A_STREAM_RING_FRAMES
+                : tau * (double)(i % 128) / 128.0;
             const short sample = (short)(sinf((float)phase) * 12000.0f);
             g_stream_ring[0][i * 2] = sample;
             g_stream_ring[0][i * 2 + 1] = sample;
@@ -333,8 +353,8 @@ static void ps3a_init_pcm_test_source(void)
         s->local = true;
         s->width = 2;
         s->chans = 2;
-        s->rate = (int)PS3A_OUT_RATE;
-        s->step = 1.0f;
+        s->rate = sourceRate;
+        s->step = (float)step;
         s->pitch = 1.0f;
         s->volume = 1.0f;
         s->minDist = 1.0f;
@@ -342,8 +362,9 @@ static void ps3a_init_pcm_test_source(void)
         s->writeFrame = 0xFFFFFFFFFFFFFFFFULL;
     }
 
-    PS3_BootTracef("PS3AUDIO: synthetic PCM source initialized mode=%s frequency=375Hz rate=48000 amplitude=12000",
-                   ps3a_mix_mode_name());
+    PS3_BootTracef("PS3AUDIO: synthetic PCM source initialized mode=%s source_rate=%d output_rate=48000 step=%.6f tone_hz=%.6f amplitude=12000",
+                   ps3a_mix_mode_name(), sourceRate, step,
+                   fractional22k ? (320.0 * (double)sourceRate / (double)PS3A_STREAM_RING_FRAMES) : 375.0);
 }
 
 /* Decodes into a malloc'd little-endian 16-bit PCM buffer. Returns the frame count. */
@@ -999,7 +1020,7 @@ qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
     ps3a_stream_t *s;
     snd_stream_t *d;
     int rate=0,width=0,chans=0;
-    if(!g_up || g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+    if(!g_up ||         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST ||
        slot<0 || slot>=PS3A_STREAM_COUNT || !filename || !filename[0]) return qfalse;
     ps3a_stream_stop(slot);
@@ -1033,20 +1054,20 @@ qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
 
 void S_PS3AUDIO_StopStream(int slot)
 {
-    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) return;
     ps3a_stream_stop(slot);
 }
 void S_PS3AUDIO_PauseStream(int slot,qboolean pause)
 {
-    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) return;
     if(slot<0 || slot>=PS3A_STREAM_COUNT) return;
     ps3a_lock(); g_streams[slot].paused=pause?qtrue:qfalse; ps3a_unlock();
 }
 void S_PS3AUDIO_SetStreamVolume(int slot,float volume)
 {
-    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) return;
     if(slot<0 || slot>=PS3A_STREAM_COUNT) return;
     ps3a_lock(); g_streams[slot].volume=volume<0.0f?0.0f:volume; ps3a_unlock();
@@ -1076,19 +1097,23 @@ static void ps3a_mix_block(float *out)
      * Reassert the deterministic diagnostic source before every audio block
      * if a lifecycle callback has cleared it. No game sound callback can
      * mutate these sources while a synthetic test mode is selected. */
-    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST &&
+    if ((g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+         g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_22K_TEST) &&
         (!g_voice[0].active || g_voice[0].pcm != g_ps3_synth_voice_pcm)) {
         ps3a_init_pcm_test_source();
-    } else if (g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST &&
+    } else if ((g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST ||
+                g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_22K_TEST) &&
                (!g_streams[0].active || g_streams[0].writeFrame == 0)) {
         ps3a_init_pcm_test_source();
     }
 
-    if (g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) {
+    if (g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST ||
+        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_22K_TEST) {
         memset(out, 0, (size_t)PS3A_BLOCK * 2 * sizeof(float));
         g_mix_blocks_total++;
         ps3a_mix_streams(out);
-    } else if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST) {
+    } else if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+               g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_22K_TEST) {
         ps3a_mix_block_ppu(out);
         g_mix_blocks_total++;
         g_mix_blocks_ppu++;
@@ -1272,7 +1297,7 @@ qboolean S_PS3AUDIO_Init()
 
     memset(g_voice, 0, sizeof(g_voice));
     memset(g_streams, 0, sizeof(g_streams));
-    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) {
         ps3a_init_pcm_test_source();
     }
@@ -1408,7 +1433,7 @@ void S_PS3AUDIO_Shutdown()
     /* Keep synthetic test sources alive across the engine's sound-system
      * shutdown/restart cycle. The libaudio producer is intentionally persistent
      * and the selected test mode remains immutable for the life of this EBOOT. */
-    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) {
         g_up = false;
         PS3_BootTracef("PS3AUDIO: preserved synthetic source through sound shutdown mode=%s",
@@ -1438,7 +1463,7 @@ void S_PS3AUDIO_StartSound(
     ps3a_voice_t *v;
     sfx_t        *sfx;
 
-    if (!g_up || g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+    if (!g_up ||         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST ||
         sfxHandle <= 0 || sfxHandle >= s_numSfx) {
         return;
@@ -1560,7 +1585,7 @@ void S_PS3AUDIO_AddLoopingSound(
     int           i;
 
     (void)velocity;
-    if (!g_up || g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+    if (!g_up ||         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST ||
         sfxHandle <= 0 || sfxHandle >= s_numSfx) {
         return;
@@ -1683,7 +1708,7 @@ void S_PS3AUDIO_StopSound(int entnum, int channel)
 {
     int i;
 
-    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) return;
     if (!g_up) {
         return;
@@ -1706,7 +1731,7 @@ void S_PS3AUDIO_StopSound(int entnum, int channel)
 void S_PS3AUDIO_StopAllSounds(qboolean stop_music)
 {
     int i;
-    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+    if (        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST
         g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) return;
     for (i = PS3A_STREAM_FIRST_SFX; i < PS3A_STREAM_COUNT; i++) ps3a_stream_stop(i);
     ps3a_stream_stop(2);
