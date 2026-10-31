@@ -162,7 +162,7 @@ static void ps3a_testtone_cmd()
     if (Cmd_Argc() > 1) {
         g_ps3_test_tone = atoi(Cmd_Argv(1)) ? 1 : 0;
     }
-    Com_Printf("PS3 audio test tone: %s (ps3audiotest 1|0)\\n",
+    Com_Printf("PS3 audio test tone: %s (ps3audiotest 1|0)\n",
                g_ps3_test_tone ? "ON" : "OFF");
 }
 
