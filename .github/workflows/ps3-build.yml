@@ -27,8 +27,14 @@ env:
 
 jobs:
   build-ps3:
-    name: Build OpenMoHAA for PS3 (PSL1GHT)
+    name: Build OpenMoHAA for PS3 (PSL1GHT; ${{ matrix.audio_test_tone && 'TEST TONE ON' || 'NORMAL AUDIO' }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # The experimental audio branch produces both diagnostic package variants.
+        # All other pushes and PR builds retain the normal mixer-only package.
+        audio_test_tone: ${{ github.ref == 'refs/heads/experimental/rsxkit-spukit-audio-checkpoint-trace' && fromJSON('[false,true]') || fromJSON('[false]') }}
     timeout-minutes: 120
 
     steps:
@@ -215,6 +221,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/openmohaa-ps3-install" \
             -DOPENMOHAA_PS3_APPID="$OPENMOHAA_PS3_APPID" \
             -DOPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO="${{ inputs.experimental_spu_audio == true }}" \
+            -DOPENMOHAA_PS3_AUDIO_TEST_TONE="${{ matrix.audio_test_tone }}" \
             -DBUILD_SERVER=OFF \
             -DBUILD_CLIENT=ON \
             -DBUILD_RENDERER_GL2=OFF \
@@ -262,10 +269,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
+          if [[ "${{ matrix.audio_test_tone }}" == "true" ]]; then
+            pkg_name="OpenMoHAA-PS3-OMOHAA020-AUDIO-TEST-TONE-ON"
+            pkg_title="OpenMoHAA (440 Hz Audio Test)"
+          else
+            pkg_name="OpenMoHAA-PS3-OMOHAA020-NORMAL-AUDIO"
+            pkg_title="OpenMoHAA (Normal Audio)"
+          fi
           pkg_args=(
             --build-dir build-ps3
             --out-dir dist
-            --name OpenMoHAA-PS3-OMOHAA020
+            --name "$pkg_name"
+            --title "$pkg_title"
           )
           bash make_ps3_pkg.sh "${pkg_args[@]}" 2>&1 | tee ps3-package.log
           find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print
@@ -281,7 +296,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: OpenMoHAA-PS3-OMOHAA020-${{ github.run_number }}
+          name: OpenMoHAA-PS3-OMOHAA020-${{ github.run_number }}-${{ matrix.audio_test_tone && 'TEST-TONE-ON' || 'NORMAL-AUDIO' }}
           if-no-files-found: warn
           retention-days: 14
           compression-level: 0

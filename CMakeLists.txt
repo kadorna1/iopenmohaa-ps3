@@ -17,6 +17,7 @@ option(BUILD_RENDERER_GL1 "Build GL1 renderer" ON)
 option(BUILD_RENDERER_GL2 "Build GL2 renderer" OFF)
 option(BUILD_GAME_LIBRARIES "Build game module libraries" ON)
 option(BUILD_GAME_QVMS "Build game module qvms" ON)
+option(OPENMOHAA_PS3_AUDIO_TEST_TONE "Start PS3 audio with a 440 Hz diagnostic tone" OFF)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "PS3")
     # PS3 has no runtime SDL/ELF module loading in the port. The game modules

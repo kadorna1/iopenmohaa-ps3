@@ -123,7 +123,10 @@ static uint32_t g_mix_blocks_spu      = 0;
 static uint32_t g_mix_blocks_ppu      = 0;
 static uint32_t g_mix_blocks_fallback = 0;
 static uint32_t g_mix_blocks_testtone = 0;
-static volatile int g_ps3_test_tone = 0;
+#ifndef OPENMOHAA_PS3_AUDIO_TEST_TONE
+#define OPENMOHAA_PS3_AUDIO_TEST_TONE 0
+#endif
+static volatile int g_ps3_test_tone = OPENMOHAA_PS3_AUDIO_TEST_TONE ? 1 : 0;
 static double g_ps3_test_phase = 0.0;
 static double g_audio_diag_sumsq = 0.0;
 static float g_audio_diag_peak = 0.0f;
@@ -846,7 +849,7 @@ static void ps3a_mix_block(float *out)
     if (g_ps3_test_tone) {
         const double phaseStep = 6.28318530717958647692 * 440.0 / PS3A_OUT_RATE;
         for (k = 0; k < PS3A_BLOCK; k++) {
-            const float sample = (float)(sinf((float)g_ps3_test_phase) * 0.08f);
+            const float sample = (float)(sinf((float)g_ps3_test_phase) * 0.20f);
             out[k * 2] = sample;
             out[k * 2 + 1] = sample;
             g_ps3_test_phase += phaseStep;
@@ -1108,6 +1111,7 @@ qboolean S_PS3AUDIO_Init()
     g_inited = true;
     g_up     = true;
     PS3_BootTracef("PS3AUDIO: up (48 kHz stereo, %u blocks)", (unsigned)g_cfg.numBlocks);
+    PS3_BootTracef("PS3AUDIO: startup mode=%s", g_ps3_test_tone ? "440Hz test tone" : "normal game mix");
     PS3_CompatAudioInit();
     Cmd_AddCommand("ps3audiotest", ps3a_testtone_cmd);
     return qtrue;
