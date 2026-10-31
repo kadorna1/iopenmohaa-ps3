@@ -47,6 +47,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define MP3_SAMPLE_WIDTH       2
 #define MP3_DATA_BUFSIZ        (128 * 1024)
+/* Keep >=10 frames while re-filling: minimp3 needs look-ahead to sync safely. */
+#define MP3_SYNC_LOOKAHEAD_BYTES (16 * 1024)
 #define MP3_PCM_BUFFER_BYTES   (MINIMP3_MAX_SAMPLES_PER_FRAME * MP3_SAMPLE_WIDTH)
 
 snd_codec_t mp3_codec =
@@ -229,12 +231,42 @@ static int S_MP3_NextFrame(snd_stream_t *stream,
         }
 
         if (frameInfo->frame_bytes > 0) {
-            S_MP3_ConsumeInput(mp3info, frameInfo->frame_bytes);
-
             if (samples <= 0) {
+                int discardBytes = frameInfo->frame_bytes;
+
+                /*
+                 * minimp3 reports bytes skipped while looking for a sync word.
+                 * A sync/header/frame may straddle an input refill boundary.
+                 * Until EOF, retain a 16 KiB suffix so the next call can inspect
+                 * that boundary with the recommended 10-frame look-ahead.
+                 * This also lets arbitrarily large ID3 tags be skipped in chunks.
+                 */
+                if (!mp3info->eof) {
+                    if (discardBytes > MP3_SYNC_LOOKAHEAD_BYTES)
+                        discardBytes -= MP3_SYNC_LOOKAHEAD_BYTES;
+                    else
+                        discardBytes = 0;
+                }
+
+                if (discardBytes > 0) {
+                    S_MP3_ConsumeInput(mp3info, discardBytes);
+                    mp3info->skippedBytes += (unsigned int)discardBytes;
+                    continue;
+                }
+
+                if (!mp3info->eof) {
+                    if (S_MP3_ReadMore(stream, mp3info, 0) < 0)
+                        return -1;
+                    continue;
+                }
+
+                /* At EOF there is no later refill; discard the final junk. */
+                S_MP3_ConsumeInput(mp3info, frameInfo->frame_bytes);
                 mp3info->skippedBytes += (unsigned int)frameInfo->frame_bytes;
                 continue;
             }
+
+            S_MP3_ConsumeInput(mp3info, frameInfo->frame_bytes);
 
             if (frameInfo->layer != 3 ||
                 frameInfo->channels < 1 || frameInfo->channels > 2 ||
