@@ -1074,11 +1074,15 @@ SV_ServerLoaded
 void SV_ServerLoaded( void ) {
 	const char	*p;
 
+	PS3_TRACEF("SAVE SV_ServerLoaded enter running=%d state=%d map=%s autosave=%d time=%d",
+		(int)com_sv_running->integer, (int)sv.state, svs.rawServerName, (int)svs.autosave, svs.time);
 	if( !com_sv_running->integer ) {
+		PS3_TRACEF("SAVE SV_ServerLoaded early return: server not running");
 		return;
 	}
 
 	if( sv.state == SS_GAME ) {
+		PS3_TRACEF("SAVE SV_ServerLoaded early return: state already SS_GAME");
 		return;
 	}
 
@@ -1095,9 +1099,14 @@ void SV_ServerLoaded( void ) {
 	svs.serverLagTime = svs.time;
 	ge->SetTime( svs.startTime, svs.time );
 	SV_FinishSvsTimeFixups();
+	PS3_TRACEF("SAVE SV_ServerLoaded after time fixups startTime=%d serverTime=%d", svs.startTime, svs.time);
+	PS3_TRACEMEM("SV_ServerLoaded before ServerSpawned");
 
 	// notify the game dll
+	PS3_TRACEF("SAVE SV_ServerLoaded before ge->ServerSpawned");
 	ge->ServerSpawned();
+	PS3_TRACEF("SAVE SV_ServerLoaded after ge->ServerSpawned");
+	PS3_TRACEMEM("SV_ServerLoaded after ServerSpawned");
 
 	p = ge->errorMessage;
 	if( p )
@@ -1108,10 +1117,20 @@ void SV_ServerLoaded( void ) {
 
 	if( svs.autosave )
 	{
+		PS3_TRACEF("SAVE SV_ServerLoaded autosave branch map=%s", svs.rawServerName);
 		if(Q_stricmp( svs.rawServerName, "credits" ) ) {
+			PS3_TRACEMEM("SV_ServerLoaded before SV_Autosavegame_f");
+			PS3_TRACEF("SAVE SV_ServerLoaded before SV_Autosavegame_f");
 			SV_Autosavegame_f();
+			PS3_TRACEF("SAVE SV_ServerLoaded after SV_Autosavegame_f");
+			PS3_TRACEMEM("SV_ServerLoaded after SV_Autosavegame_f");
+		} else {
+			PS3_TRACEF("SAVE SV_ServerLoaded autosave skipped for credits map");
 		}
 		svs.autosave = qfalse;
+		PS3_TRACEF("SAVE SV_ServerLoaded autosave flag cleared");
+	} else {
+		PS3_TRACEF("SAVE SV_ServerLoaded no autosave pending");
 	}
 }
 

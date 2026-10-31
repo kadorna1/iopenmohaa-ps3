@@ -224,9 +224,14 @@ void MemArchiver::ArchiveWriteRaw(const void *buffer, size_t size)
     }
 
     if (size + this->bufferSize > this->allocatedSize) {
+        size_t oldAllocatedSize = this->allocatedSize;
+        PS3_TRACEF("SAVE MEMARCHIVE grow enter used=%u request=%u capacity=%u",
+                   (unsigned)this->bufferSize, (unsigned)size, (unsigned)this->allocatedSize);
         if (!this->allocatedSize) {
             this->allocatedSize = 1024;
-            this->buffer        = (byte *)cgi.Malloc(this->allocatedSize);
+            PS3_TRACEF("SAVE MEMARCHIVE first allocation before bytes=%u", (unsigned)this->allocatedSize);
+            this->buffer = (byte *)cgi.Malloc(this->allocatedSize);
+            PS3_TRACEF("SAVE MEMARCHIVE first allocation after ptr=%p", this->buffer);
         } else {
             byte *newBuffer;
 
@@ -234,6 +239,8 @@ void MemArchiver::ArchiveWriteRaw(const void *buffer, size_t size)
                 this->allocatedSize *= 2;
             } while (size + this->bufferSize > this->allocatedSize);
 
+            PS3_TRACEF("SAVE MEMARCHIVE realloc before old=%u new=%u used=%u",
+                       (unsigned)oldAllocatedSize, (unsigned)this->allocatedSize, (unsigned)this->bufferSize);
             newBuffer = (byte *)cgi.Malloc(this->allocatedSize);
 #if defined(__PS3__)
             PS3_STEPF("SAVE MEMARCH allocation result=%p capacity=%lu", (void *)newBuffer, (unsigned long)this->allocatedSize);
@@ -243,8 +250,11 @@ void MemArchiver::ArchiveWriteRaw(const void *buffer, size_t size)
                 return;
             }
             memcpy(newBuffer, this->buffer, this->bufferSize);
+            PS3_TRACEF("SAVE MEMARCHIVE copy-old after");
             cgi.Free(this->buffer);
             this->buffer = newBuffer;
+            PS3_TRACEF("SAVE MEMARCHIVE old buffer freed; current=%p capacity=%u",
+                       this->buffer, (unsigned)this->allocatedSize);
         }
     }
 

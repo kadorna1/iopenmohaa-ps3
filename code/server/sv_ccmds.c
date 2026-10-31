@@ -2231,7 +2231,11 @@ qboolean SV_ArchiveLevelFile(qboolean loading, qboolean autosave)
 	soundsystemsavegame_t SSsave;
 
 	Com_DPrintf("SV_ArchiveLevelFile()\n");
+	PS3_TRACEF("SAVE SV_ArchiveLevelFile enter loading=%d autosave=%d gameName=%s",
+		(int)loading, (int)autosave, svs.gameName);
+	PS3_TRACEMEM("SV_ArchiveLevelFile enter");
 	name = Com_GetArchiveFileName(svs.gameName, "sav");
+	PS3_TRACEF("SAVE SV_ArchiveLevelFile target=%s", name);
 	if (loading) {
 		if (!ge->ReadLevel(name, (byte **)&cls.savedCgameState, &cls.savedCgameStateSize)) {
 			return qfalse;
@@ -2294,6 +2298,7 @@ qboolean SV_ArchiveLevelFile(qboolean loading, qboolean autosave)
 #endif
 	}
 
+	PS3_TRACEF("SAVE SV_ArchiveLevelFile done loading=%d autosave=%d", (int)loading, (int)autosave);
 	return qtrue;
 #else
 	return qfalse;
@@ -2347,7 +2352,9 @@ qboolean SV_ArchiveServerFile(qboolean loading, qboolean autosave)
 	name = Com_GetArchiveFileName(svs.gameName, "ssv");
 
 	if (!loading) {
+		PS3_TRACEF("SAVE SV_ArchiveServerFile before open name=%s", name);
 		f = FS_FOpenFileWrite_HomeData(name);
+		PS3_TRACEF("SAVE SV_ArchiveServerFile after open handle=%d", (int)f);
 		if (!f) {
 			Com_Printf("Couldn't write %s\n", name);
 			return qfalse;
@@ -2398,14 +2405,24 @@ qboolean SV_ArchiveServerFile(qboolean loading, qboolean autosave)
 		}
 
 		Com_SwapSaveStruct(&save);
+		PS3_TRACEF("SAVE SV_ArchiveServerFile before metadata FS_Write size=%u", (unsigned)sizeof(savegamestruct_t));
 		FS_Write(&save, sizeof(savegamestruct_t), f);
+		PS3_TRACEF("SAVE SV_ArchiveServerFile after metadata FS_Write");
+		PS3_TRACEF("SAVE SV_ArchiveServerFile before S_Save");
 		S_Save(f);
+		PS3_TRACEF("SAVE SV_ArchiveServerFile after S_Save");
+		PS3_TRACEF("SAVE SV_ArchiveServerFile before CM_WritePortalState");
 		CM_WritePortalState(f);
+		PS3_TRACEF("SAVE SV_ArchiveServerFile after CM_WritePortalState");
+		PS3_TRACEF("SAVE SV_ArchiveServerFile before close handle=%d", (int)f);
 		FS_FCloseFile(f);
+		PS3_TRACEF("SAVE SV_ArchiveServerFile after close");
 
 		name = Com_GetArchiveFileName(svs.gameName, "tga");
 		Com_sprintf(cmdString, sizeof(cmdString), "saveshot %s 256 256\n", name);
+		PS3_TRACEF("SAVE SV_ArchiveServerFile before queue screenshot command=%s", cmdString);
 		Cbuf_ExecuteText(svs.autosave ? EXEC_INSERT : EXEC_NOW, cmdString);
+		PS3_TRACEF("SAVE SV_ArchiveServerFile after queue screenshot");
 	} else {
 		FS_FOpenFileRead(name, &f, qfalse, qtrue);
 		if (!f) {
@@ -2431,6 +2448,7 @@ qboolean SV_ArchiveServerFile(qboolean loading, qboolean autosave)
 		FS_FCloseFile(f);
 	}
 
+	PS3_TRACEF("SAVE SV_ArchiveServerFile done");
 	return qtrue;
 #else
 	return qfalse;
@@ -2639,21 +2657,30 @@ void SV_SaveGame(const char *gamename, qboolean autosave)
 	} else {
 		Com_Printf("...\n");
 	}
+	PS3_TRACEF("SAVE SV_SaveGame begin name=%s map=%s autosave=%d", name, svs.mapName, (int)autosave);
+	PS3_TRACEMEM("SV_SaveGame before level archive");
 
 	Q_strncpyz(svs.gameName, name, sizeof(svs.gameName));
 
+	PS3_TRACEF("SAVE SV_SaveGame before SV_ArchiveLevelFile");
 	if (!SV_ArchiveLevelFile(qfalse, autosave)) {
 		if (cls.savedCgameState) {
 			Z_Free(cls.savedCgameState);
 			cls.savedCgameState = 0;
 		}
 	}
-
+	PS3_TRACEF("SAVE SV_SaveGame after SV_ArchiveLevelFile");
+	PS3_TRACEMEM("SV_SaveGame after level archive");
+	PS3_TRACEF("SAVE SV_SaveGame before SV_ArchiveServerFile");
+	PS3_TRACEMEM("SV_SaveGame before server archive");
 	SV_ArchiveServerFile(qfalse, autosave);
+	PS3_TRACEF("SAVE SV_SaveGame after SV_ArchiveServerFile");
+	PS3_TRACEMEM("SV_SaveGame after server archive");
 
 	Com_Printf("Done.\n");
 
 	Q_strncpyz(svs.gameName, "current", sizeof(svs.gameName));
+	PS3_TRACEF("SAVE SV_SaveGame done name=%s", name);
 #endif
 }
 

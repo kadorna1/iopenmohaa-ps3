@@ -375,19 +375,39 @@ static void PS3_ExceptionHandler(u64 cause, sys_ppu_thread_t tid, u64 dar)
             (unsigned long long)ctx.gpr[29], (unsigned long long)ctx.gpr[30], (unsigned long long)ctx.gpr[31]);
         /* PPC64 ELF: 0(sp) = back chain; a function's return address is saved at 16(back chain). */
         sp = ctx.gpr[1];
+        PS3_BootTracef("EXCEPTION stack walk start sp=0x%llx", (unsigned long long)sp);
         for (i = 0; i < 24; ++i) {
             u64 prev;
             u64 ret;
 
-            if (!ps3_exc_addr_ok(sp) || (sp & 7)) {
+            if (!ps3_exc_addr_ok(sp)) {
+                PS3_BootTracef("EXCEPTION stack walk stop: invalid sp=0x%llx at frame=%d", (unsigned long long)sp, i);
+                break;
+            }
+            if (sp & 7) {
+                PS3_BootTracef("EXCEPTION stack walk stop: unaligned sp=0x%llx at frame=%d", (unsigned long long)sp, i);
                 break;
             }
             prev = *(const u64 *)(uintptr_t)sp;
-            if (!ps3_exc_addr_ok(prev) || (prev & 7) || prev <= sp || !ps3_exc_addr_ok(prev + 16)) {
+            if (!ps3_exc_addr_ok(prev)) {
+                PS3_BootTracef("EXCEPTION stack walk stop: invalid back-chain=0x%llx at frame=%d", (unsigned long long)prev, i);
+                break;
+            }
+            if (prev & 7) {
+                PS3_BootTracef("EXCEPTION stack walk stop: unaligned back-chain=0x%llx at frame=%d", (unsigned long long)prev, i);
+                break;
+            }
+            if (prev <= sp) {
+                PS3_BootTracef("EXCEPTION stack walk stop: non-ascending back-chain sp=0x%llx prev=0x%llx", (unsigned long long)sp, (unsigned long long)prev);
+                break;
+            }
+            if (!ps3_exc_addr_ok(prev + 16)) {
+                PS3_BootTracef("EXCEPTION stack walk stop: invalid return-slot=0x%llx at frame=%d", (unsigned long long)(prev + 16), i);
                 break;
             }
             ret = *(const u64 *)(uintptr_t)(prev + 16);
-            PS3_BootTracef("EXCEPTION bt%d sp=0x%llx ret=0x%llx", i, (unsigned long long)sp, (unsigned long long)ret);
+            PS3_BootTracef("EXCEPTION bt%d sp=0x%llx prev=0x%llx ret=0x%llx",
+                i, (unsigned long long)sp, (unsigned long long)prev, (unsigned long long)ret);
             sp = prev;
         }
     }
@@ -444,7 +464,7 @@ void Sys_PlatformInit(void)
     PS3_LogInit();
     PS3_BootTracef("Sys_PlatformInit: PS3_LogInit returned");
     PS3_Logf("OpenMoHAA PS3 platform init (%s)", PS3_USRDIR);
-    PS3_Logf("PS3 build stamp: %s %s (trace19: native audio driver, 720p default, cgame crumbs)", __DATE__, __TIME__);
+    PS3_Logf("PS3 build stamp: %s %s (trace24: granular client-game autosave tracing)", __DATE__, __TIME__);
     PS3_BootTracef("Sys_PlatformInit: trace level %d (create USRDIR/trace_level.txt containing 2 for full tracing)", PS3_TraceLevel());
     ps3_register_exception_handler();
 }

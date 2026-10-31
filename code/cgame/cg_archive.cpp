@@ -25,12 +25,18 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cg_commands.h"
 #include "memarchiver.h"
 #include "../corepp/tiki.h"
+#include "../sys/ps3_step.h"
 
 void CG_ArchiveStuff(MemArchiver& archiver, int svsTime)
 {
+	PS3_TRACEF("SAVE CG_ArchiveStuff enter svsTime=%d", svsTime);
 	archiver.SetBaseTime(svsTime);
+	PS3_TRACEF("SAVE CG_ArchiveStuff before commandManager.ArchiveToMemory");
 	commandManager.ArchiveToMemory(archiver);
+	PS3_TRACEF("SAVE CG_ArchiveStuff after commandManager.ArchiveToMemory");
+	PS3_TRACEF("SAVE CG_ArchiveStuff before CG_ArchiveVSSGlobals");
 	CG_ArchiveVSSGlobals(archiver);
+	PS3_TRACEF("SAVE CG_ArchiveStuff after CG_ArchiveVSSGlobals");
 }
 
 size_t CG_SaveStateToBuffer(void** out, int svsTime)
@@ -38,13 +44,24 @@ size_t CG_SaveStateToBuffer(void** out, int svsTime)
 	MemArchiver archiver;
 	size_t size;
 
+	PS3_TRACEF("SAVE CG_SaveStateToBuffer begin svsTime=%d out=%p", svsTime, out);
+	PS3_TRACEMEM("CG_SaveStateToBuffer begin");
+	PS3_TRACEF("SAVE CG_SaveStateToBuffer before SetupForWriting capacity=2097152");
 	archiver.SetupForWriting(0x200000);
+	PS3_TRACEF("SAVE CG_SaveStateToBuffer after SetupForWriting");
+	PS3_TRACEF("SAVE CG_SaveStateToBuffer before CG_ArchiveStuff");
 	CG_ArchiveStuff(archiver, svsTime);
+	PS3_TRACEF("SAVE CG_SaveStateToBuffer after CG_ArchiveStuff");
 	size = archiver.BufferSize();
+	PS3_TRACEF("SAVE CG_SaveStateToBuffer BufferSize=%u", (unsigned)size);
 	if (size && out) {
+		PS3_TRACEF("SAVE CG_SaveStateToBuffer before ConfiscateBuffer");
 		*out = archiver.ConfiscateBuffer();
+		PS3_TRACEF("SAVE CG_SaveStateToBuffer after ConfiscateBuffer ptr=%p", *out);
 	}
 
+	PS3_TRACEF("SAVE CG_SaveStateToBuffer done bytes=%u", (unsigned)size);
+	PS3_TRACEMEM("CG_SaveStateToBuffer done");
 	return size;
 }
 

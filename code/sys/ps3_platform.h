@@ -92,8 +92,8 @@ static inline int mprotect(void *addr, size_t len, int prot) {
  * 1536 sndBuffers of 2064 bytes on this ABI: 6 -> 18.1 MB. */
 #define PS3_MAX_COMSOUNDMEGS 6
 
-/* Default screen fit (percent of the TV picture used): TVs crop the edges. */
-#define PS3_DEFAULT_SCREENFIT "88"
+/* Default to the full output canvas. Lower this only to compensate for TV overscan. */
+#define PS3_DEFAULT_SCREENFIT "100"
 
 /* ---- Frame profiler (ps3_prof.c) ------------------------------------------
  * Time spent per phase of each frame, reported in the log with the [fps]

@@ -43,8 +43,8 @@ Event EV_SFX_EffectDelay
 (
     "effectdelay",
     EV_DEFAULT,
-    "iivvvvv",
-    "iEffect iCurrEmitter vPos vAngles vAxisA vAxisB vAxisC",
+    "iivvvvvi",
+    "iEffect iCurrEmitter vPos vAngles vAxisA vAxisB vAxisC iGeneration",
     "Resumes the execution of iEffect effect from its iCurrEmitter emitter."
 );
 
@@ -78,26 +78,37 @@ specialeffectcommand_t *specialeffect_t::AddNewCommand()
 
 ClientSpecialEffectsManager::ClientSpecialEffectsManager()
 {
-    m_bEffectsLoaded    = 0;
-    m_iNumPendingEvents = 0;
+    m_bEffectsLoaded       = 0;
+    m_iNumPendingEvents    = 0;
+    m_iGameStateGeneration = 0;
 }
 
 void ClientSpecialEffectsManager::ResetForGameState()
 {
     int i, j;
 
-    PS3_CGF("SFX reset begin loaded=%d pending=%d", (int)m_bEffectsLoaded, m_iNumPendingEvents);
+    PS3_CGF("SFX reset begin loaded=%d outstanding=%d generation=%d",
+            (int)m_bEffectsLoaded, m_iNumPendingEvents, m_iGameStateGeneration);
 
-    /* This manager is part of the statically linked CGame image on PS3, so
-     * its Listener queue survives CL_ShutdownCGame(). Delayed effects from the
-     * old map must not run against the next map's effect table. */
-    CancelEventsOfType(EV_SFX_EffectDelay);
+    /* Do not scan the shared Listener event queue during a map transition.
+     * Delayed callbacks are tagged with a generation and discarded safely when
+     * dispatched, rather than being removed by a global queue traversal. */
+    ++m_iGameStateGeneration;
+    if (m_iGameStateGeneration <= 0) {
+        m_iGameStateGeneration = 1;
+    }
+    PS3_CGF("SFX reset invalidated prior generation current=%d outstanding=%d",
+            m_iGameStateGeneration, m_iNumPendingEvents);
+
+    PS3_CGF("SFX reset before commandManager.ResetPendingEvents");
     commandManager.ResetPendingEvents();
-    commandManager.ClearCurrentSFX();
+    PS3_CGF("SFX reset after commandManager.ResetPendingEvents");
 
+    commandManager.ClearCurrentSFX();
     current_entity = NULL;
     current_tiki = NULL;
 
+    PS3_CGF("SFX reset before command table cleanup count=%d", SFX_COUNT);
     for (i = 0; i < SFX_COUNT; ++i) {
         int count = m_effects[i].m_iCommandCount;
 
@@ -114,13 +125,19 @@ void ClientSpecialEffectsManager::ResetForGameState()
             m_effects[i].m_commands[j] = NULL;
         }
         m_effects[i].m_iCommandCount = 0;
+
+        if ((i & 15) == 15) {
+            PS3_STEPF("SFX reset table progress=%d/%d generation=%d",
+                      i + 1, SFX_COUNT, m_iGameStateGeneration);
+        }
     }
 
-    m_iNumPendingEvents = 0;
+    /* Old-generation callbacks remain queued until dispatched. They decrement
+     * the outstanding count, but cannot execute effects against this map. */
     m_bEffectsLoaded = qfalse;
-    PS3_CGF("SFX reset done");
+    PS3_CGF("SFX reset done generation=%d outstanding=%d",
+            m_iGameStateGeneration, m_iNumPendingEvents);
 }
-
 void ClientSpecialEffectsManager::LoadEffects()
 {
     int              i, j, k;
@@ -496,6 +513,25 @@ void ClientSpecialEffectsManager::ContinueEffectExecution(Event *ev)
 {
     Vector norm;
     float  axis[3][3];
+    int    eventGeneration;
+
+    eventGeneration = ev->GetInteger(8);
+    if (m_iNumPendingEvents > 0) {
+        --m_iNumPendingEvents;
+    } else {
+        PS3_CGF("SFX delayed callback count underflow generation=%d eventGeneration=%d",
+                m_iGameStateGeneration, eventGeneration);
+        m_iNumPendingEvents = 0;
+    }
+
+    if (eventGeneration != m_iGameStateGeneration) {
+        PS3_CGF("SFX dropping stale delayed callback eventGeneration=%d currentGeneration=%d outstanding=%d",
+                eventGeneration, m_iGameStateGeneration, m_iNumPendingEvents);
+        return;
+    }
+
+    PS3_CGF("SFX resuming delayed callback generation=%d outstanding=%d",
+            eventGeneration, m_iNumPendingEvents);
 
     norm = ev->GetVector(5);
     VectorCopy(norm, axis[0]);
@@ -508,7 +544,6 @@ void ClientSpecialEffectsManager::ContinueEffectExecution(Event *ev)
 
     ExecuteEffect(ev->GetInteger(1), ev->GetInteger(2), ev->GetVector(3), ev->GetVector(4), axis);
 }
-
 void ClientSpecialEffectsManager::ExecuteEffect(
     int iEffect, int iStartCommand, Vector vPos, Vector vAngles, float axis[3][3]
 )
@@ -582,9 +617,12 @@ void ClientSpecialEffectsManager::ExecuteEffect(
                 ev1.AddVector(axis[0]);
                 ev1.AddVector(axis[1]);
                 ev1.AddVector(axis[2]);
+                ev1.AddInteger(m_iGameStateGeneration);
 
                 PostEvent(ev1, pCommand->fCommandTime - fStartCommandTime);
                 m_iNumPendingEvents++;
+                PS3_CGF("SFX execute scheduled delay effect=%d cmd=%d generation=%d outstanding=%d",
+                        iEffect, i, m_iGameStateGeneration, m_iNumPendingEvents);
 
                 break;
             }

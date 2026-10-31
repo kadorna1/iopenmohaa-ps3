@@ -30,6 +30,27 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../sys/ps3_step.h"
 
+/* Capture the first client-frame/snapshot handoff after each connection-state
+ * transition without filling the trace with every ordinary gameplay frame. */
+#if defined(__PS3__)
+static int ps3_cgtime_last_state = -1;
+static int ps3_cgtime_trace_budget = 0;
+#define PS3_CGTIME_TRACE(...) do { \
+    int ps3_cgtime_state_now = (int)clc.state; \
+    if (ps3_cgtime_state_now != ps3_cgtime_last_state) { \
+        ps3_cgtime_last_state = ps3_cgtime_state_now; \
+        ps3_cgtime_trace_budget = 40; \
+        PS3_BootTracef("CGTIME state transition=%d", ps3_cgtime_state_now); \
+    } \
+    if (ps3_cgtime_trace_budget > 0) { \
+        PS3_BootTracef("CGTIME " __VA_ARGS__); \
+        --ps3_cgtime_trace_budget; \
+    } \
+} while (0)
+#else
+#define PS3_CGTIME_TRACE(...) ((void)0)
+#endif
+
 extern qboolean loadCamera(const char *name);
 extern void startCamera(int time);
 extern qboolean getCameraInfo(int time, vec3_t *origin, vec3_t *angles);
@@ -1142,9 +1163,11 @@ void CL_FirstSnapshot( void ) {
 #endif
 	// ignore snapshots that don't have entities
 	if ( cl.snap.snapFlags & SNAPFLAG_NOT_ACTIVE ) {
+		PS3_CGTIME_TRACE("CL_FirstSnapshot ignored SNAPFLAG_NOT_ACTIVE flags=0x%x", (unsigned)cl.snap.snapFlags);
 		return;
 	}
 	clc.state = CA_ACTIVE;
+	PS3_CGTIME_TRACE("CL_FirstSnapshot switched to CA_ACTIVE serverTime=%d", cl.snap.serverTime);
 
 	// notify the UI
 #if defined(__PS3__)
@@ -1160,6 +1183,7 @@ void CL_FirstSnapshot( void ) {
 	cl.serverTimeDelta = cl.snap.serverTime - cls.realtime;
 
 	clc.timeDemoBaseTime = cl.snap.serverTime;
+	PS3_CGTIME_TRACE("CL_FirstSnapshot clocks initialized start=%d delta=%d", cl.serverStartTime, cl.serverTimeDelta);
 
 	// if this is the first frame of active play,
 	// execute the contents of activeAction now
@@ -1205,6 +1229,8 @@ void CL_FirstSnapshot( void ) {
 		Com_Memset(clc.voipTargets, ~0, sizeof(clc.voipTargets));
 	}
 #endif
+	PS3_CGTIME_TRACE("CL_FirstSnapshot done state=%d activeActionPending=%d", (int)clc.state,
+		(int)(cl_activeAction && cl_activeAction->string[0]));
 }
 
 static int lastSnapFlags;
@@ -1223,11 +1249,17 @@ CL_SetCGameTime
 ==================
 */
 void CL_SetCGameTime( void ) {
+	PS3_CGTIME_TRACE("CL_SetCGameTime enter state=%d newSnapshots=%d snapValid=%d snapFlags=0x%x snapTime=%d oldFrame=%d realtime=%d",
+		(int)clc.state, (int)cl.newSnapshots, (int)cl.snap.valid, (unsigned)cl.snap.snapFlags,
+		cl.snap.serverTime, cl.oldFrameServerTime, cls.realtime);
 	// getting a valid frame message ends the connection process
 	if ( clc.state != CA_ACTIVE ) {
+		PS3_CGTIME_TRACE("CL_SetCGameTime non-active state=%d", (int)clc.state);
 		if ( clc.state != CA_PRIMED ) {
+			PS3_CGTIME_TRACE("CL_SetCGameTime return: state is not CA_PRIMED");
 			return;
 		}
+		PS3_CGTIME_TRACE("CL_SetCGameTime CA_PRIMED demoplaying=%d newSnapshots=%d", (int)clc.demoplaying, (int)cl.newSnapshots);
 		if ( clc.demoplaying ) {
 			// we shouldn't get the first snapshot on the same frame
 			// as the gamestate, because it causes a bad time skip
@@ -1235,7 +1267,9 @@ void CL_SetCGameTime( void ) {
 				clc.firstDemoFrameSkipped = qtrue;
 				return;
 			}
+			PS3_CGTIME_TRACE("CL_SetCGameTime before initial CL_ReadDemoMessage");
 			CL_ReadDemoMessage();
+			PS3_CGTIME_TRACE("CL_SetCGameTime after initial CL_ReadDemoMessage state=%d", (int)clc.state);
 		}
 		if ( cl.newSnapshots ) {
 			cl.newSnapshots = qfalse;
@@ -1248,18 +1282,23 @@ void CL_SetCGameTime( void ) {
 #endif
 		}
 		if ( clc.state != CA_ACTIVE ) {
+			PS3_CGTIME_TRACE("CL_SetCGameTime return: first snapshot did not activate client state=%d", (int)clc.state);
 			return;
 		}
 	}
 
 	// if we have gotten to this point, cl.snap is guaranteed to be valid
+	PS3_CGTIME_TRACE("CL_SetCGameTime validating active snapshot valid=%d", (int)cl.snap.valid);
 	if ( !cl.snap.valid ) {
+		PS3_CGTIME_TRACE("CL_SetCGameTime ERROR: active client has invalid snapshot");
 		assert( 0 );
 		Com_Error( ERR_DROP, "CL_SetCGameTime: !cl.snap.valid" );
 	}
+	PS3_CGTIME_TRACE("CL_SetCGameTime snapshot valid serverTime=%d oldServerTime=%d", cl.snap.serverTime, cl.oldServerTime);
 
 	// allow pause in single player
 	if ( paused->integer && com_sv_running->integer ) {
+		PS3_CGTIME_TRACE("CL_SetCGameTime paused single-player path before return");
 		// paused
 		//CL_AdjustTimeDelta();
 		// Fixed in OPM
@@ -1270,17 +1309,21 @@ void CL_SetCGameTime( void ) {
 		return;
 	}
 
+	PS3_CGTIME_TRACE("CL_SetCGameTime checking servercount current=0x%x previous=0x%x", (unsigned)cl.snap.snapFlags, (unsigned)lastSnapFlags);
 	if( ( cl.snap.snapFlags ^ lastSnapFlags ) & SNAPFLAG_SERVERCOUNT ) {
+		PS3_CGTIME_TRACE("CL_SetCGameTime before CL_ServerRestarted");
 		CL_ServerRestarted();
+		PS3_CGTIME_TRACE("CL_SetCGameTime after CL_ServerRestarted");
 	} else {
 		if( cl.snap.serverTime < cl.oldFrameServerTime ) {
+			PS3_CGTIME_TRACE("CL_SetCGameTime ERROR: snapshot time moved backwards current=%d old=%d", cl.snap.serverTime, cl.oldFrameServerTime);
 			assert( 0 );
 			Com_Error( ERR_DROP, "cl.snap.serverTime < cl.oldFrameServerTime" );
 		}
 	}
 
 	cl.oldFrameServerTime = cl.snap.serverTime;
-
+	PS3_CGTIME_TRACE("CL_SetCGameTime restart/time-order checks complete oldFrame=%d", cl.oldFrameServerTime);
 
 	// get our current view of time
 
@@ -1293,6 +1336,7 @@ void CL_SetCGameTime( void ) {
 		// smoothness or better responsiveness.
 		int tn;
 
+		PS3_CGTIME_TRACE("CL_SetCGameTime before time calculation delta=%d realtime=%d", cl.serverTimeDelta, cls.realtime);
 		tn = cl_timeNudge->integer;
 		if (tn<-30) {
 			tn = -30;
@@ -1313,16 +1357,20 @@ void CL_SetCGameTime( void ) {
 		if ( cls.realtime + cl.serverTimeDelta >= cl.snap.serverTime - 5 ) {
 			cl.extrapolatedSnapshot = qtrue;
 		}
+		PS3_CGTIME_TRACE("CL_SetCGameTime time calculated serverTime=%d delta=%d nudge=%d", cl.serverTime, cl.serverTimeDelta, tn);
 	}
 
 	// if we have gotten new snapshots, drift serverTimeDelta
 	// don't do this every frame, or a period of packet loss would
 	// make a huge adjustment
 	if ( cl.newSnapshots ) {
+		PS3_CGTIME_TRACE("CL_SetCGameTime before CL_AdjustTimeDelta snapTime=%d realtime=%d delta=%d", cl.snap.serverTime, cls.realtime, cl.serverTimeDelta);
 		CL_AdjustTimeDelta();
+		PS3_CGTIME_TRACE("CL_SetCGameTime after CL_AdjustTimeDelta delta=%d newSnapshots=%d", cl.serverTimeDelta, (int)cl.newSnapshots);
 	}
 
 	if ( !clc.demoplaying ) {
+		PS3_CGTIME_TRACE("CL_SetCGameTime done non-demo serverTime=%d", cl.serverTime);
 		return;
 	}
 
@@ -1369,13 +1417,17 @@ void CL_SetCGameTime( void ) {
 	}
 
 	while ( cl.serverTime >= cl.snap.serverTime ) {
+		PS3_CGTIME_TRACE("CL_SetCGameTime demo read loop serverTime=%d snapTime=%d", cl.serverTime, cl.snap.serverTime);
 		// feed another messag, which should change
 		// the contents of cl.snap
 		CL_ReadDemoMessage();
+		PS3_CGTIME_TRACE("CL_SetCGameTime after demo message state=%d snapTime=%d", (int)clc.state, cl.snap.serverTime);
 		if ( clc.state != CA_ACTIVE ) {
+			PS3_CGTIME_TRACE("CL_SetCGameTime demo ended");
 			return;		// end of demo
 		}
 	}
+	PS3_CGTIME_TRACE("CL_SetCGameTime done demo serverTime=%d snapTime=%d", cl.serverTime, cl.snap.serverTime);
 
 }
 
