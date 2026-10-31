@@ -318,7 +318,7 @@ if [ -z "$SND0" ] && [ -f "$XMB_DIR/SND0.AT3" ]; then SND0="$XMB_DIR/SND0.AT3"; 
 
 fit_png() {   # fit_png SRC DST WxH
     local src="$1" dst="$2" size="$3" w h
-    w="\${size%x*}"; h="\${size#*x}"
+    w="${size%x*}"; h="${size#*x}"
     if command -v magick >/dev/null 2>&1; then
         magick "$src" -resize "$size" -background none -gravity center -extent "$size" "PNG32:$dst"
     elif command -v convert >/dev/null 2>&1; then
