@@ -1158,8 +1158,9 @@ CL_FirstSnapshot
 ==================
 */
 void CL_FirstSnapshot( void ) {
-	PS3_CGTIME_TRACE("CL_FirstSnapshot enter state=%d snapValid=%d snapFlags=0x%x newSnapshots=%d serverTime=%d",
-		(int)clc.state, (int)cl.snap.valid, (unsigned)cl.snap.snapFlags, (int)cl.newSnapshots, cl.snap.serverTime);
+#if defined(__PS3__)
+	PS3_BootTraceFastf("MAPLOAD FIRSTSNAP enter map=%s flags=%d", cl.mapname, cl.snap.snapFlags);
+#endif
 	// ignore snapshots that don't have entities
 	if ( cl.snap.snapFlags & SNAPFLAG_NOT_ACTIVE ) {
 		PS3_CGTIME_TRACE("CL_FirstSnapshot ignored SNAPFLAG_NOT_ACTIVE flags=0x%x", (unsigned)cl.snap.snapFlags);
@@ -1169,9 +1170,13 @@ void CL_FirstSnapshot( void ) {
 	PS3_CGTIME_TRACE("CL_FirstSnapshot switched to CA_ACTIVE serverTime=%d", cl.snap.serverTime);
 
 	// notify the UI
-	PS3_CGTIME_TRACE("CL_FirstSnapshot before UI_ServerLoaded server_loading=%d", (int)server_loading);
+#if defined(__PS3__)
+	PS3_BootTraceFastf("MAPLOAD FIRSTSNAP before UI_ServerLoaded map=%s", cl.mapname);
+#endif
 	UI_ServerLoaded();
-	PS3_CGTIME_TRACE("CL_FirstSnapshot after UI_ServerLoaded");
+#if defined(__PS3__)
+	PS3_BootTraceFastf("MAPLOAD FIRSTSNAP after UI_ServerLoaded map=%s", cl.mapname);
+#endif
 
 	// set the timedelta so we are exactly on this first frame
 	cl.serverStartTime = cl.snap.serverTime;
@@ -1268,11 +1273,13 @@ void CL_SetCGameTime( void ) {
 		}
 		if ( cl.newSnapshots ) {
 			cl.newSnapshots = qfalse;
-			PS3_CGTIME_TRACE("CL_SetCGameTime before CL_FirstSnapshot");
+#if defined(__PS3__)
+			PS3_BootTraceFastf("MAPLOAD CGTIME before CL_FirstSnapshot map=%s state=%d snapValid=%d", cl.mapname, (int)clc.state, (int)cl.snap.valid);
+#endif
 			CL_FirstSnapshot();
-			PS3_CGTIME_TRACE("CL_SetCGameTime after CL_FirstSnapshot state=%d", (int)clc.state);
-		} else {
-			PS3_CGTIME_TRACE("CL_SetCGameTime no new snapshot yet");
+#if defined(__PS3__)
+			PS3_BootTraceFastf("MAPLOAD CGTIME after CL_FirstSnapshot map=%s state=%d", cl.mapname, (int)clc.state);
+#endif
 		}
 		if ( clc.state != CA_ACTIVE ) {
 			PS3_CGTIME_TRACE("CL_SetCGameTime return: first snapshot did not activate client state=%d", (int)clc.state);

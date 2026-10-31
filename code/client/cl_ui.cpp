@@ -30,6 +30,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "cl_ui.h"
 #include "cl_uigamespy.h"
+#include "../sys/ps3_step.h"
 
 #include "../sys/ps3_step.h"
 
@@ -3988,6 +3989,12 @@ void UI_FinishLoadingScreen_f(void)
     UI_ActivateView3D();
 }
 
+#if defined(__PS3__)
+#define PS3_ULTRACE(stage) PS3_BootTraceFastf("MAPLOAD UI %s map=%s soundsNeedLoad=%d", stage, cl.mapname[0] ? cl.mapname : "(empty)", (int)svs.soundsNeedLoad)
+#else
+#define PS3_ULTRACE(stage) ((void)0)
+#endif
+
 /*
 ====================
 S_ServerLoaded
@@ -3995,21 +4002,32 @@ S_ServerLoaded
 */
 void S_ServerLoaded(void)
 {
+    PS3_ULTRACE("S_ServerLoaded enter");
     if (!svs.soundsNeedLoad) {
+        PS3_ULTRACE("S_ServerLoaded no sound restore needed");
         return;
     }
     svs.soundsNeedLoad = qfalse;
 
     Com_DPrintf("Loading Previous Sound State.\n");
+    PS3_ULTRACE("before S_StopAllSounds2");
     S_StopAllSounds2(qfalse);
+    PS3_ULTRACE("after S_StopAllSounds2");
 
+    PS3_ULTRACE("before S_TriggeredMusic_Stop");
     S_TriggeredMusic_Stop();
+    PS3_ULTRACE("after S_TriggeredMusic_Stop");
     s_bSoundPaused = qtrue;
+    PS3_ULTRACE("before S_ReLoad");
     S_ReLoad(&svs.soundSystem);
+    PS3_ULTRACE("after S_ReLoad");
 
     if (svs.tm_filename[0]) {
+        PS3_ULTRACE("before S_TriggeredMusic_SetupHandle");
         S_TriggeredMusic_SetupHandle(svs.tm_filename, svs.tm_loopcount, svs.tm_offset, 0);
+        PS3_ULTRACE("after S_TriggeredMusic_SetupHandle");
     }
+    PS3_ULTRACE("S_ServerLoaded exit");
 }
 
 /*
@@ -4023,34 +4041,27 @@ void UI_ServerLoaded(void)
     cvar_t *pMaxClients;
     Event  *event;
 
-    PS3_TRACEF("UI_SERVER_LOADED enter server_loading=%d loadingMenu=%p",
-               (int)server_loading, (void *)ui_pLoadingMenu);
-
-    PS3_TRACEF("UI_SERVER_LOADED before CL_UpdateSnapFlags");
+    PS3_ULTRACE("UI_ServerLoaded enter");
     CL_UpdateSnapFlags();
-    PS3_TRACEF("UI_SERVER_LOADED after CL_UpdateSnapFlags");
-
-    PS3_TRACEF("UI_SERVER_LOADED before SV_ServerLoaded");
+    PS3_ULTRACE("after CL_UpdateSnapFlags");
+    PS3_ULTRACE("before SV_ServerLoaded");
     SV_ServerLoaded();
-    PS3_TRACEF("UI_SERVER_LOADED after SV_ServerLoaded");
-
-    PS3_TRACEF("UI_SERVER_LOADED before S_FadeSound");
+    PS3_ULTRACE("after SV_ServerLoaded");
+    PS3_ULTRACE("before S_FadeSound");
     S_FadeSound(0);
-    PS3_TRACEF("UI_SERVER_LOADED after S_FadeSound");
-
-    PS3_TRACEF("UI_SERVER_LOADED before S_ServerLoaded");
+    PS3_ULTRACE("after S_FadeSound");
+    PS3_ULTRACE("before S_ServerLoaded");
     S_ServerLoaded();
-    PS3_TRACEF("UI_SERVER_LOADED after S_ServerLoaded");
+    PS3_ULTRACE("after S_ServerLoaded");
 
     if (!server_loading) {
-        PS3_TRACEF("UI_SERVER_LOADED return: server_loading=0");
+        PS3_ULTRACE("UI_ServerLoaded exit server_loading=0");
         return;
     }
 
-    PS3_TRACEF("UI_SERVER_LOADED before UI_EndLoad");
+    PS3_ULTRACE("before UI_EndLoad");
     UI_EndLoad();
-    PS3_TRACEF("UI_SERVER_LOADED after UI_EndLoad");
-
+    PS3_ULTRACE("after UI_EndLoad");
     pMaxClients = Cvar_Get("sv_maxclients", "1", 0);
     PS3_TRACEF("UI_SERVER_LOADED maxclients=%d serverRunning=%d",
                pMaxClients ? pMaxClients->integer : -1, (int)com_sv_running->integer);
@@ -4061,9 +4072,9 @@ void UI_ServerLoaded(void)
         PS3_TRACEF("UI_SERVER_LOADED after SV_Heartbeat_f");
     }
 
-    PS3_TRACEF("UI_SERVER_LOADED before showCursor");
+    PS3_ULTRACE("before showCursor");
     uWinMan.showCursor(true);
-    PS3_TRACEF("UI_SERVER_LOADED after showCursor");
+    PS3_ULTRACE("after showCursor");
 
     if (!ui_pLoadingMenu) {
         PS3_TRACEF("UI_SERVER_LOADED no loading menu; before UI_FinishLoadingScreen_f");
@@ -4096,6 +4107,7 @@ void UI_ServerLoaded(void)
     }
 
     server_loading_waiting = qtrue;
+    PS3_ULTRACE("before loading Continue widget activation");
 
     PS3_TRACEF("UI_SERVER_LOADED before enable continuebutton");
     event = new Event(EV_Widget_Enable);
@@ -4122,10 +4134,12 @@ void UI_ServerLoaded(void)
     ui_pLoadingMenu->PassEventToWidget("continuebutton", event);
     PS3_TRACEF("UI_SERVER_LOADED after activate continuebutton");
 
-    PS3_TRACEF("UI_SERVER_LOADED before Com_FakePause");
+    PS3_ULTRACE("before Com_FakePause");
     Com_FakePause();
-    PS3_TRACEF("UI_SERVER_LOADED after Com_FakePause");
+    PS3_ULTRACE("after Com_FakePause");
+    PS3_ULTRACE("UI_ServerLoaded exit");
 }
+#undef PS3_ULTRACE
 
 /*
 ====================

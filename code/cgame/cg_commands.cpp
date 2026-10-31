@@ -6306,14 +6306,12 @@ void emitterthing_t::ArchiveToMemory(MemArchiver& archiver)
 
 void cg_common_data::ArchiveToMemory(MemArchiver& archiver)
 {
-#if defined(__PS3__)
-    static unsigned int ps3_cg_common_archive_count = 0;
-    unsigned int ps3_cg_common_archive_id = ++ps3_cg_common_archive_count;
-    int ps3_trace_cg_common = (ps3_cg_common_archive_id <= 4 || (ps3_cg_common_archive_id & 127U) == 0);
-    if (ps3_trace_cg_common) {
-        PS3_TRACEF("SAVE CMD_CG_COMMON enter id=%u", ps3_cg_common_archive_id);
-    }
-#endif
+    /*
+     * This runs for every temp-model slot during a CGame save (the manager
+     * archives MAX_TEMPMODELS entries, including unused slots). Do not put
+     * PS3_TRACEF here: it fsyncs the trace for each line and stalls gameplay.
+     * Add coarse PS3_STEPF timings around the containing archive stages instead.
+     */
     archiver.ArchiveInteger(&life);
     archiver.ArchiveTime(&createTime);
     archiver.ArchiveVector(&origin);

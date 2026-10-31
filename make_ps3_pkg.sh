@@ -53,10 +53,10 @@ Usage: make_ps3_pkg.sh [options]
                       in CMakeCache.txt, else OMOHAA020.
   --title TEXT        Name shown in the XMB (default: OpenMoHAA).
   --icon FILE         ICON0.PNG source; resized to 320x176 when ImageMagick or
-                      Pillow is available (default: misc/openmohaa-text.png).
+                      Pillow is available (default: assets/xmb/ICON0.PNG).
   --pic1 FILE         optional PIC1.PNG (background, 1920x1080).
   --snd0 FILE         optional PS3 XMB hover sound (RIFF ATRAC3/ATRAC3+); copied as SND0.AT3,
-                      SND01.AT3, and SND0_01.AT3.
+                      SND01.AT3, and SND0_01.AT3 (PS3-compatible aliases).
   --extra-usrdir DIR  copy DIR's contents into the package's USRDIR (game data).
                       Not recommended: MOHAA data is large. Copy it over FTP or
                       USB instead.
@@ -305,11 +305,12 @@ if [ -d "$XMB_DIR" ]; then
         cp -a "$item" "$PKGDIR/"
     done < <(find "$XMB_DIR" -mindepth 1 -maxdepth 1 -print0)
 fi
+
 if [ -z "$ICON" ] && [ -f "$XMB_DIR/ICON0.PNG" ]; then ICON="$XMB_DIR/ICON0.PNG"; fi
 if [ -z "$PIC1" ] && [ -f "$XMB_DIR/PIC1.PNG" ]; then PIC1="$XMB_DIR/PIC1.PNG"; fi
 if [ -z "$SND0" ] && [ -f "$XMB_DIR/SND0.AT3" ]; then SND0="$XMB_DIR/SND0.AT3"; fi
 
-fit_png() {
+fit_png() {   # fit_png SRC DST WxH
     local src="$1" dst="$2" size="$3" w h
     w="${size%x*}"; h="${size#*x}"
     if command -v magick >/dev/null 2>&1; then
