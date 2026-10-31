@@ -226,6 +226,14 @@ void          S_PS3AUDIO_StopAllSounds(qboolean);
 void          S_PS3AUDIO_Respatialize(int, const vec3_t, const vec3_t[3]);
 void          S_PS3AUDIO_SetReverb(int, float);
 void          S_PS3AUDIO_Update();
+/* PS3 decoded stream channels: background music, triggered music, movie audio,
+ * and streamed dialogue/effects. Offsets are decoded sample frames. */
+qboolean      S_PS3AUDIO_StartStream(int, const char *, int, unsigned int, float, float, qboolean, const vec3_t, int, int, float, float);
+void          S_PS3AUDIO_StopStream(int);
+void          S_PS3AUDIO_PauseStream(int, qboolean);
+void          S_PS3AUDIO_SetStreamVolume(int, float);
+unsigned int  S_PS3AUDIO_GetStreamPosition(int);
+qboolean      S_PS3AUDIO_IsStreamActive(int);
 const char   *S_PS3AUDIO_GetMusicFilename();
 int           S_PS3AUDIO_GetMusicLoopCount();
 unsigned int  S_PS3AUDIO_GetMusicOffset();
