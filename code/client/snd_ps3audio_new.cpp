@@ -91,7 +91,7 @@ typedef struct {
     double pos;
     int rate, width, chans, loopCount, loopsCompleted;
     int entnum, entchannel, sfxHandle, startTime;
-    float step, volume, minDist, maxDist;
+    float step, pitch, volume, minDist, maxDist;
     vec3_t origin;
 } ps3a_stream_t;
 
@@ -675,7 +675,7 @@ static void ps3a_stream_refill(int slot)
                 ps3a_lock();
                 if (!s->eof && !s->decoder) {
                     s->decoder=nd; s->rate=nr; s->width=nw; s->chans=nc;
-                    s->step=(float)nr/(float)PS3A_OUT_RATE;
+                    s->step=(float)nr*s->pitch/(float)PS3A_OUT_RATE;
                     ps3a_unlock();
                 } else { ps3a_unlock(); S_CodecCloseStream(nd); return; }
             }
@@ -770,7 +770,8 @@ qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
     s->rate=rate; s->width=width; s->chans=chans;
     s->startOffset=offsetFrames;
     s->loopCount=loopCount;
-    s->step=(float)rate*(pitch>0.0f?pitch:1.0f)/(float)PS3A_OUT_RATE;
+    s->pitch=(pitch>0.0f?pitch:1.0f);
+    s->step=(float)rate*s->pitch/(float)PS3A_OUT_RATE;
     s->volume=volume<0.0f?1.0f:volume;
     s->local=local?qtrue:qfalse;
     s->entnum=entnum; s->entchannel=entchannel;
@@ -1156,7 +1157,7 @@ void S_PS3AUDIO_AddLoopingSound(
         return;
     }
     sfx = &s_knownSfx[sfxHandle];
-    if (sfx->iFlags & SFX_FLAG_STREAMED) {
+    if (sfx->iFlags & (SFX_FLAG_STREAMED | SFX_FLAG_MP3)) {
         int slot = -1, i;
         ps3a_lock();
         for (i = PS3A_STREAM_FIRST_SFX; i < PS3A_STREAM_COUNT; i++) {
