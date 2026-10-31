@@ -61,7 +61,7 @@ typedef struct {
     bool           follow;   /* origin follows s_entity[entnum] */
     int            sfxHandle;
     const byte    *pcm;      /* first frame (interleaved if chans == 2) */
-    short         *own;      /* private decoded buffer (ADPCM) or NULL */
+    byte          *own;      /* private ADPCM PCM buffer, stored as little-endian bytes */
     int            frames;
     int            width;    /* bytes per sample: 1 or 2 */
     int            chans;    /* 1 or 2 */
@@ -189,11 +189,20 @@ static inline int ima_clamp_index(int i)
     return i < 0 ? 0 : (i > 88 ? 88 : i);
 }
 
-/* Decodes into a malloc'd 16-bit buffer. Returns the frame count (0 on failure). */
-static int ps3a_decode_ima_mono(const byte *src, int bytes, int blockAlign, short **outBuf)
+/* Store decoded ADPCM as little-endian PCM bytes. The same representation is
+ * consumed by both the PPU and SPU mixers, independent of their native endian. */
+static inline void ps3a_store_s16_le(byte *dst, int sample)
+{
+    const uint16_t value = (uint16_t)sample;
+    dst[0] = (byte)(value & 0xffu);
+    dst[1] = (byte)(value >> 8);
+}
+
+/* Decodes into a malloc'd little-endian 16-bit PCM buffer. Returns the frame count. */
+static int ps3a_decode_ima_mono(const byte *src, int bytes, int blockAlign, byte **outBuf)
 {
     int maxSamples, written = 0;
-    short *out;
+    byte *out;
 
     *outBuf = NULL;
     if (blockAlign < 8 || bytes <= 0) {
@@ -201,7 +210,7 @@ static int ps3a_decode_ima_mono(const byte *src, int bytes, int blockAlign, shor
     }
 
     maxSamples = ((bytes / blockAlign) + 1) * ((blockAlign - 4) * 2 + 1);
-    out        = (short *)malloc((size_t)maxSamples * sizeof(short));
+    out        = (byte *)malloc((size_t)maxSamples * sizeof(short));
     if (!out) {
         return 0;
     }
@@ -212,7 +221,8 @@ static int ps3a_decode_ima_mono(const byte *src, int bytes, int blockAlign, shor
         int       index = ima_clamp_index(src[2]);
         int       i;
 
-        out[written++] = (short)pred;
+        ps3a_store_s16_le(out + (size_t)written * sizeof(short), pred);
+        written++;
         for (i = 4; i < blk; i++) {
             int b = src[i], n;
 
@@ -232,7 +242,8 @@ static int ps3a_decode_ima_mono(const byte *src, int bytes, int blockAlign, shor
                 index = ima_clamp_index(index + ima_index_adj[code]);
 
                 if (written < maxSamples) {
-                    out[written++] = (short)pred;
+                    ps3a_store_s16_le(out + (size_t)written * sizeof(short), pred);
+                    written++;
                 }
             }
         }
@@ -332,16 +343,24 @@ static bool ps3a_setup_voice(ps3a_voice_t *v, int sfxHandle, float pitch)
     v->own = NULL;
     if (sfx->info.format == 17 || w == 0.5f) {
         const int blockAlign = (sfx->info.dataalign > 1) ? (sfx->info.dataalign - 1) / 2 + 4 : 0;
-        short    *buf;
+        byte     *buf;
         const int n = (sfx->info.channels == 1) ? ps3a_decode_ima_mono(src, bytes, blockAlign, &buf) : 0;
 
         if (n <= 0) {
             return false;
         }
         v->own    = buf;
-        v->pcm    = (const byte *)buf;
+        v->pcm    = buf;
         v->frames = n;
         v->width  = 2;
+        {
+            static unsigned int adpcmTraceCount;
+            if (adpcmTraceCount < 8) {
+                PS3_BootTracef("PS3AUDIO: ADPCM voice decoded name=%s frames=%d pcm_storage=little-endian",
+                               sfx->name, n);
+                adpcmTraceCount++;
+            }
+        }
         v->chans  = 1;
         v->pos    = 0.0;
         v->step   = (double)sfx->info.rate * (double)pitch / PS3A_OUT_RATE;
@@ -367,12 +386,14 @@ static bool ps3a_setup_voice(ps3a_voice_t *v, int sfxHandle, float pitch)
    Mixing (audio thread)
 --------------------------------------------------------------------------- */
 
+/* Non-streamed WAV PCM remains in the little-endian byte order used on disk.
+ * ADPCM is explicitly normalized to the same representation above. */
 static inline float ps3a_sample(const ps3a_voice_t *v, int frame, int ch)
 {
     const byte *p = v->pcm + ((size_t)frame * v->chans + (ch < v->chans ? ch : 0)) * v->width;
 
     if (v->width == 2) {
-        return (float)(short)(p[0] | (p[1] << 8)) * (1.0f / 32768.0f);
+        return (float)(short)(p[0] | ((unsigned int)p[1] << 8)) * (1.0f / 32768.0f);
     }
     return (float)((int)p[0] - 128) * (1.0f / 128.0f);
 }
@@ -716,8 +737,19 @@ static void ps3a_stream_refill(int slot)
             int l,r;
             if(width==2) {
                 int o=i*chans*2;
-                l=(short)((unsigned int)raw[o]|((unsigned int)raw[o+1]<<8));
-                r=chans==2?(short)((unsigned int)raw[o+2]|((unsigned int)raw[o+3]<<8)):l;
+                short leftSample, rightSample;
+                /* Codec read functions return host-native 16-bit PCM:
+                 * WAV swaps on big-endian, MP3/Vorbis request big-endian,
+                 * and Opus writes native opus_int16 samples. Copy rather than
+                 * assembling little-endian bytes before storing in the short ring. */
+                memcpy(&leftSample, raw + o, sizeof(leftSample));
+                l = (int)leftSample;
+                if(chans==2) {
+                    memcpy(&rightSample, raw + o + 2, sizeof(rightSample));
+                    r = (int)rightSample;
+                } else {
+                    r = l;
+                }
             } else {
                 int o=i*chans;
                 l=((int)raw[o]-128)<<8;
@@ -808,6 +840,8 @@ qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
     if(origin) VectorCopy(origin,s->origin); else VectorClear(s->origin);
     ps3a_unlock();
     ps3a_stream_refill(slot);
+    PS3_BootTracef("PS3AUDIO: stream PCM decoder=%s rate=%d width=%d channels=%d input_order=host-native ring=host-native",
+                   filename, rate, width, chans);
     ps3a_lock();
     s->active=s->writeFrame>0;
     ps3a_unlock();
