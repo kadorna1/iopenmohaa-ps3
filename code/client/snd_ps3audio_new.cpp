@@ -133,6 +133,89 @@ static double g_audio_diag_sumsq = 0.0;
 static float g_audio_diag_peak = 0.0f;
 static uint32_t g_audio_diag_samples = 0;
 
+/* Selectable source isolation is read from USRDIR/audio-mode.txt at startup:
+ * "normal" (default), "voices" (decoded in-memory sounds only), or
+ * "streams" (WAV/MP3/Vorbis/Opus and RoQ streams only). This avoids requiring
+ * the in-game console while diagnosing noisy normal-mix output. */
+typedef enum {
+    PS3A_MIX_NORMAL = 0,
+    PS3A_MIX_VOICES = 1,
+    PS3A_MIX_STREAMS = 2
+} ps3a_mix_mode_t;
+
+typedef struct {
+    double sumsq;
+    float peak;
+    uint32_t samples;
+    uint32_t over_range;
+    uint32_t invalid;
+} ps3a_mix_diag_t;
+
+static ps3a_mix_mode_t g_ps3_mix_mode = PS3A_MIX_NORMAL;
+static ps3a_mix_diag_t g_audio_diag_voices;
+static ps3a_mix_diag_t g_audio_diag_streams;
+static ps3a_mix_diag_t g_audio_diag_combined;
+static uint32_t g_audio_diag_active_voices = 0;
+static uint32_t g_audio_diag_active_streams = 0;
+
+static inline void ps3a_diag_add(ps3a_mix_diag_t *diag, float left, float right)
+{
+    const float samples[2] = {left, right};
+    int i;
+    for (i = 0; i < 2; i++) {
+        const float sample = samples[i];
+        float magnitude;
+        if (!(sample == sample) || sample > 1.0e20f || sample < -1.0e20f) {
+            diag->invalid++;
+            continue;
+        }
+        magnitude = fabsf(sample);
+        if (magnitude > diag->peak) diag->peak = magnitude;
+        if (magnitude > 1.0f) diag->over_range++;
+        diag->sumsq += (double)sample * (double)sample;
+        diag->samples++;
+    }
+}
+
+static inline double ps3a_diag_rms(const ps3a_mix_diag_t *diag)
+{
+    return diag->samples
+        ? sqrt(diag->sumsq / (double)diag->samples) : 0.0;
+}
+
+static void ps3a_diag_reset(ps3a_mix_diag_t *diag)
+{
+    memset(diag, 0, sizeof(*diag));
+}
+
+static const char *ps3a_mix_mode_name(void)
+{
+    switch (g_ps3_mix_mode) {
+    case PS3A_MIX_VOICES: return "voices";
+    case PS3A_MIX_STREAMS: return "streams";
+    default: return "normal";
+    }
+}
+
+static void ps3a_load_mix_mode(void)
+{
+    char mode[32] = {0};
+    FILE *f = fopen(PS3_USRDIR "/audio-mode.txt", "rb");
+    if (f) {
+        (void)fread(mode, 1, sizeof(mode) - 1, f);
+        fclose(f);
+    }
+
+    if (!strncmp(mode, "voices", 6)) {
+        g_ps3_mix_mode = PS3A_MIX_VOICES;
+    } else if (!strncmp(mode, "streams", 7)) {
+        g_ps3_mix_mode = PS3A_MIX_STREAMS;
+    } else {
+        g_ps3_mix_mode = PS3A_MIX_NORMAL;
+    }
+    PS3_BootTracef("PS3AUDIO: source isolation mode=%s (USRDIR/audio-mode.txt; default=normal)",
+                   ps3a_mix_mode_name());
+}
 
 static vec3_t g_lpos  = {0, 0, 0};
 static vec3_t g_laxis[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
@@ -435,7 +518,7 @@ static void ps3a_mix_block_ppu(float *out)
 {
     float  mixL[PS3A_BLOCK], mixR[PS3A_BLOCK];
     float  master = (s_volume ? s_volume->value : 0.9f) * PS3A_MIX_HEADROOM;
-    int    i, k;
+    int    i, k, activeVoices = 0;
 
     memset(mixL, 0, sizeof(mixL));
     memset(mixR, 0, sizeof(mixR));
@@ -448,6 +531,7 @@ static void ps3a_mix_block_ppu(float *out)
         if (!v->active) {
             continue;
         }
+        activeVoices++;
 
         ps3a_target_gains(v, master, &tL, &tR);
         if (!v->gainsValid) {
@@ -501,9 +585,10 @@ static void ps3a_mix_block_ppu(float *out)
     }
     ps3a_unlock();
 
-    /* Do not clip the dry voice mix here: streams are added afterwards.
-     * Apply the output limit once, after every source has been summed. */
+    /* Record dry in-memory voice output before any stream is added or limited. */
+    g_audio_diag_active_voices += (uint32_t)activeVoices;
     for (k = 0; k < PS3A_BLOCK; k++) {
+        ps3a_diag_add(&g_audio_diag_voices, mixL[k], mixR[k]);
         out[k * 2]     = mixL[k];
         out[k * 2 + 1] = mixR[k];
     }
@@ -772,13 +857,17 @@ static void ps3a_stream_refill(int slot)
 static void ps3a_mix_streams(float *out)
 {
     float master=(s_volume?s_volume->value:0.9f)*PS3A_MIX_HEADROOM;
-    int slot,k;
+    float streamL[PS3A_BLOCK], streamR[PS3A_BLOCK];
+    int slot,k,activeStreams=0;
+    memset(streamL,0,sizeof(streamL));
+    memset(streamR,0,sizeof(streamR));
     ps3a_lock();
     for(slot=0;slot<PS3A_STREAM_COUNT;slot++) {
         ps3a_stream_t *s=&g_streams[slot];
         ps3a_voice_t v;
         float gl,gr;
         if(!s->active || s->paused) continue;
+        activeStreams++;
         memset(&v,0,sizeof(v));
         v.local=s->local; v.volume=s->volume; v.minDist=s->minDist; v.maxDist=s->maxDist;
         VectorCopy(s->origin,v.origin);
@@ -799,15 +888,27 @@ static void ps3a_mix_streams(float *out)
             r0=(float)g_stream_ring[slot][i0*2+1]*(1.0f/32768.0f);
             l1=(float)g_stream_ring[slot][i1*2]*(1.0f/32768.0f);
             r1=(float)g_stream_ring[slot][i1*2+1]*(1.0f/32768.0f);
-            out[k*2]+=(l0+(l1-l0)*frac)*gl;
-            out[k*2+1]+=(r0+(r1-r0)*frac)*gr;
+            streamL[k]+=(l0+(l1-l0)*frac)*gl;
+            streamR[k]+=(r0+(r1-r0)*frac)*gr;
             s->pos+=(double)s->step;
         }
     }
     ps3a_unlock();
-    for(k=0;k<PS3A_BLOCK*2;k++) {
-        if(out[k]>1.0f) out[k]=1.0f;
-        else if(out[k]<-1.0f) out[k]=-1.0f;
+
+    /* Measure streams independently, then measure the combined signal before
+     * the final limiter. The source split is diagnostic; summation is unchanged. */
+    g_audio_diag_active_streams += (uint32_t)activeStreams;
+    for(k=0;k<PS3A_BLOCK;k++) {
+        float left=out[k*2]+streamL[k];
+        float right=out[k*2+1]+streamR[k];
+        ps3a_diag_add(&g_audio_diag_streams,streamL[k],streamR[k]);
+        ps3a_diag_add(&g_audio_diag_combined,left,right);
+        if(left>1.0f) left=1.0f;
+        else if(left< -1.0f) left= -1.0f;
+        if(right>1.0f) right=1.0f;
+        else if(right< -1.0f) right= -1.0f;
+        out[k*2]=left;
+        out[k*2+1]=right;
     }
 }
 
@@ -894,22 +995,29 @@ static void ps3a_mix_block(float *out)
         g_mix_blocks_total++;
         g_mix_blocks_testtone++;
     } else {
-#ifdef OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO
-        if (ps3a_mix_block_spu(out)) {
+        if (g_ps3_mix_mode == PS3A_MIX_STREAMS) {
+            memset(out, 0, (size_t)PS3A_BLOCK * 2 * sizeof(float));
             g_mix_blocks_total++;
-            g_mix_blocks_spu++;
         } else {
-            g_mix_blocks_fallback++;
+#ifdef OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO
+            if (ps3a_mix_block_spu(out)) {
+                g_mix_blocks_total++;
+                g_mix_blocks_spu++;
+            } else {
+                g_mix_blocks_fallback++;
+                ps3a_mix_block_ppu(out);
+                g_mix_blocks_total++;
+                g_mix_blocks_ppu++;
+            }
+#else
             ps3a_mix_block_ppu(out);
             g_mix_blocks_total++;
             g_mix_blocks_ppu++;
-        }
-#else
-        ps3a_mix_block_ppu(out);
-        g_mix_blocks_total++;
-        g_mix_blocks_ppu++;
 #endif
-        ps3a_mix_streams(out);
+        }
+        if (g_ps3_mix_mode != PS3A_MIX_VOICES) {
+            ps3a_mix_streams(out);
+        }
     }
 
     /* Measure the actual float samples written into libaudio's ring. */
@@ -925,6 +1033,22 @@ static void ps3a_mix_block(float *out)
     if ((g_mix_blocks_total & 1023u) == 0) {
         const double rms = g_audio_diag_samples
             ? sqrt(g_audio_diag_sumsq / (double)g_audio_diag_samples) : 0.0;
+        PS3_BootTraceFastf(
+            "PS3AUDIO: source diag mode=%s voices_active=%u voice_peak=%.4f voice_rms=%.4f voice_over=%u voice_invalid=%u streams_active=%u stream_peak=%.4f stream_rms=%.4f stream_over=%u stream_invalid=%u combined_prelimit_peak=%.4f combined_prelimit_rms=%.4f combined_over=%u combined_invalid=%u",
+            ps3a_mix_mode_name(),
+            (unsigned)g_audio_diag_active_voices,
+            (double)g_audio_diag_voices.peak, ps3a_diag_rms(&g_audio_diag_voices),
+            (unsigned)g_audio_diag_voices.over_range, (unsigned)g_audio_diag_voices.invalid,
+            (unsigned)g_audio_diag_active_streams,
+            (double)g_audio_diag_streams.peak, ps3a_diag_rms(&g_audio_diag_streams),
+            (unsigned)g_audio_diag_streams.over_range, (unsigned)g_audio_diag_streams.invalid,
+            (double)g_audio_diag_combined.peak, ps3a_diag_rms(&g_audio_diag_combined),
+            (unsigned)g_audio_diag_combined.over_range, (unsigned)g_audio_diag_combined.invalid);
+        ps3a_diag_reset(&g_audio_diag_voices);
+        ps3a_diag_reset(&g_audio_diag_streams);
+        ps3a_diag_reset(&g_audio_diag_combined);
+        g_audio_diag_active_voices = 0;
+        g_audio_diag_active_streams = 0;
         PS3_BootTraceFastf(
             "PS3AUDIO: mix blocks total=%u spu=%u ppu=%u fallback=%u tone=%u peak=%.4f rms=%.4f ring=%llu late=%llu",
             (unsigned)g_mix_blocks_total,
@@ -1013,6 +1137,8 @@ qboolean S_PS3AUDIO_Init()
             return qfalse;
         }
     }
+
+    ps3a_load_mix_mode();
 
     if (!g_codecs_inited) {
         S_CodecInit();
