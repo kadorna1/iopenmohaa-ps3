@@ -1,7 +1,8 @@
 # PS3 XMB presentation assets
 
-This directory is the source location for optional PS3 XMB presentation assets.
+This directory is the source location for PS3 XMB presentation assets.
 
+- `ICON0.PNG`: 320x176 RGBA item icon. The OpenMoHAA wordmark is shown without its charcoal panel or decorative frame; the surrounding canvas is transparent.
 - `PIC1.PNG`: Game-column background image. The workflow scales it to 1920x1080 RGBA PNG.
 - `SND0.AT3`: pre-converted PS3 XMB hover audio. Use the canonical Sony filename exactly; do not check in an MP3 and do not generate aliases such as `SND01.AT3` or `SND0_01.AT3`.
 
@@ -26,4 +27,4 @@ ffprobe -v error -select_streams a:0 \
 
 Commit the resulting binary at `assets/xmb/SND0.AT3`. The build no longer clones or compiles an ATRAC3 encoder and therefore does not need the source MP3 at CI time.
 
-The package builder places `PIC1.PNG` and `SND0.AT3` at the package content root, beside `PARAM.SFO` and `ICON0.PNG`, not under `USRDIR`. If either asset is absent, the build warns and continues without that custom XMB media.
+The package builder places `ICON0.PNG`, `PIC1.PNG`, and `SND0.AT3` at the package content root, beside `PARAM.SFO`, not under `USRDIR`. The icon is included by default from this directory, and the builder preserves its alpha channel when fitting images.
