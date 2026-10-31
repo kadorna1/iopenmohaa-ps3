@@ -245,6 +245,18 @@ static void KB_Frame(qboolean syncOnly)
 static mouseInfo s_mouse_info;
 static qboolean  s_mouse_connected = qfalse;
 static u8        s_mouse_btns_prev = 0;
+static cvar_t   *s_ps3_aim_sensitivity;
+static float     s_mouse_aim_accum_x, s_mouse_aim_accum_y;
+
+/* One archived scale controls both USB-mouse and DS3 right-stick aiming.
+ * Keep the stock/menu navigation response untouched. */
+static float PS3_AimSensitivity(void)
+{
+    float value = s_ps3_aim_sensitivity ? s_ps3_aim_sensitivity->value : 0.5f;
+    if (!isfinite(value) || value < 0.05f) value = 0.05f;
+    if (value > 2.0f) value = 2.0f;
+    return value;
+}
 
 static void Mouse_Init(void)
 {
@@ -313,6 +325,21 @@ static void Mouse_Frame(qboolean syncOnly)
         } else {
             s_mouse_btns_prev = md->buttons;
         }
+    }
+
+    if (!syncOnly && !in_guimouse) {
+        /* Reduce in-game aiming only. The menu cursor remains 1:1. Fractional
+         * deltas are accumulated so half sensitivity does not drop every other
+         * one-pixel mouse movement. */
+        float scale = PS3_AimSensitivity();
+        s_mouse_aim_accum_x += (float)dx * scale;
+        s_mouse_aim_accum_y += (float)dy * scale;
+        dx = (int)s_mouse_aim_accum_x;
+        dy = (int)s_mouse_aim_accum_y;
+        s_mouse_aim_accum_x -= (float)dx;
+        s_mouse_aim_accum_y -= (float)dy;
+    } else if (in_guimouse) {
+        s_mouse_aim_accum_x = s_mouse_aim_accum_y = 0.0f;
     }
 
     if (!syncOnly && (dx != 0 || dy != 0))
@@ -770,8 +797,8 @@ void PS3_Input_Frame(void)
         /* scaled to the engine's +/-32K joystick axis range */
         axis[0] = lx * 256;
         axis[1] = ly * 256;
-        axis[2] = rx * 256;
-        axis[3] = ry * 256;
+        axis[2] = (int)((float)rx * 256.0f * PS3_AimSensitivity());
+        axis[3] = (int)((float)ry * 256.0f * PS3_AimSensitivity());
         for (b = 0; b < 4; b++) {
             if (axis[b] != ps3_axis_prev[b]) {
                 /* Bounded trace: enough to verify raw-to-engine axis routing
@@ -813,6 +840,9 @@ void IN_Init(void *windowData)
     PS3_SetDefaultBind(K_JOY14, "weapprev");         /* D-pad left */
     PS3_SetDefaultBind(K_JOY15, "weapnext");         /* D-pad right */
 
+    s_ps3_aim_sensitivity = Cvar_Get("ps3_aim_sensitivity", "0.5", CVAR_ARCHIVE);
+    s_mouse_aim_accum_x = s_mouse_aim_accum_y = 0.0f;
+
     Cvar_Set("in_joystick", "1");
     Cvar_Set("j_pitch_axis", "3");
     Cvar_Set("j_yaw_axis", "4");
@@ -825,7 +855,7 @@ void IN_Init(void *windowData)
 
     PS3_OSK_Init();
     PS3_Input_Init();
-    ps3_log("IN_Init: PS3 input initialized; DS3 axes left=0/1 right=yaw4/pitch3; default binds filled only when empty");
+    ps3_log("IN_Init: PS3 input initialized; DS3 axes left=0/1 right=yaw4/pitch3; aim scale=%.2f (ps3_aim_sensitivity)", PS3_AimSensitivity());
 }
 
 void IN_Frame(void)
