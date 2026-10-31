@@ -24,6 +24,7 @@ refuses to start with it.
 */
 
 #include "snd_local.h"
+#include "snd_codec.h"
 
 #include <audio/audio.h>
 #include <sys/mutex.h>
@@ -76,6 +77,29 @@ typedef struct {
 } ps3a_voice_t;
 
 static ps3a_voice_t g_voice[PS3A_MAX_VOICES];
+
+#define PS3A_STREAM_COUNT 11
+#define PS3A_STREAM_FIRST_SFX 3
+#define PS3A_STREAM_RING_FRAMES 16384
+#define PS3A_STREAM_CHUNK_FRAMES 2048
+
+typedef struct {
+    bool active, paused, eof, isLoopFx, seen, local;
+    snd_stream_t *decoder;
+    char filename[MAX_QPATH];
+    uint64_t writeFrame;
+    double pos;
+    int rate, width, chans, loopCount, loopsCompleted;
+    int entnum, entchannel, sfxHandle, startTime;
+    float step, volume, minDist, maxDist;
+    vec3_t origin;
+} ps3a_stream_t;
+
+static ps3a_stream_t g_streams[PS3A_STREAM_COUNT];
+static short g_stream_ring[PS3A_STREAM_COUNT][PS3A_STREAM_RING_FRAMES * 2]
+    __attribute__((aligned(128)));
+static bool g_codecs_inited = false;
+
 static sys_mutex_t  g_lock;
 static bool         g_lockMade   = false;
 static bool         g_inited     = false; /* audio port + thread exist (kept for the whole run) */
@@ -557,6 +581,239 @@ ppu_fallback:
 }
 #endif
 
+
+static snd_stream_t *ps3a_stream_open_decoder(const char *filename, int *rate, int *width,
+                                               int *chans, unsigned int offsetFrames)
+{
+    snd_stream_t *d = S_CodecOpenStream(filename);
+    byte discard[4096];
+    uint64_t skip, done = 0;
+    int frameBytes;
+    if (!d) return NULL;
+    if (d->info.rate <= 0 || d->info.channels < 1 || d->info.channels > 2
+        || (d->info.width != 1.0f && d->info.width != 2.0f)) {
+        PS3_BootTracef("PS3AUDIO: unsupported stream format %s rate=%d width=%.1f channels=%d",
+                       filename, d->info.rate, d->info.width, d->info.channels);
+        S_CodecCloseStream(d);
+        return NULL;
+    }
+    *rate = d->info.rate;
+    *width = (int)d->info.width;
+    *chans = d->info.channels;
+    frameBytes = *width * *chans;
+    skip = (uint64_t)offsetFrames * (uint64_t)frameBytes;
+    while (done < skip) {
+        int req = (int)((skip - done) < sizeof(discard) ? skip - done : sizeof(discard));
+        int got = S_CodecReadStream(d, req, discard);
+        if (got <= 0) break;
+        done += (uint64_t)got;
+    }
+    return d;
+}
+
+static void ps3a_stream_stop(int slot)
+{
+    snd_stream_t *d;
+    if (slot < 0 || slot >= PS3A_STREAM_COUNT) return;
+    ps3a_lock();
+    d = g_streams[slot].decoder;
+    g_streams[slot].decoder = NULL;
+    g_streams[slot].active = false;
+    g_streams[slot].paused = false;
+    g_streams[slot].eof = true;
+    g_streams[slot].isLoopFx = false;
+    g_streams[slot].seen = false;
+    g_streams[slot].filename[0] = '\0';
+    ps3a_unlock();
+    if (d) S_CodecCloseStream(d);
+}
+
+static void ps3a_stream_refill(int slot)
+{
+    ps3a_stream_t *s;
+    byte raw[PS3A_STREAM_CHUNK_FRAMES * 4];
+    short pcm[PS3A_STREAM_CHUNK_FRAMES * 2];
+    int attempts = 0;
+    if (slot < 0 || slot >= PS3A_STREAM_COUNT) return;
+    s = &g_streams[slot];
+
+    while (attempts++ < 3) {
+        snd_stream_t *d;
+        uint64_t readFrame, available, capacity;
+        int width, chans, request, got, frames, i;
+        ps3a_lock();
+        d = s->decoder;
+        if (!d || s->paused || s->eof) { ps3a_unlock(); return; }
+        readFrame = (uint64_t)s->pos;
+        available = s->writeFrame > readFrame ? s->writeFrame - readFrame : 0;
+        capacity = PS3A_STREAM_RING_FRAMES - available - 1;
+        width = s->width;
+        chans = s->chans;
+        ps3a_unlock();
+        if (available >= PS3A_STREAM_RING_FRAMES / 2 || !capacity) return;
+        if (capacity > PS3A_STREAM_CHUNK_FRAMES) capacity = PS3A_STREAM_CHUNK_FRAMES;
+        request = (int)(capacity * (uint64_t)width * (uint64_t)chans);
+        got = S_CodecReadStream(d, request, raw);
+        if (got <= 0) {
+            snd_stream_t *old = NULL;
+            bool again = false;
+            ps3a_lock();
+            if (s->decoder == d) {
+                old = s->decoder;
+                s->decoder = NULL;
+                s->loopsCompleted++;
+                again = (s->loopCount == 0 || s->loopsCompleted < s->loopCount);
+                if (!again) s->eof = true;
+            }
+            ps3a_unlock();
+            if (old) S_CodecCloseStream(old);
+            if (!again) return;
+            {
+                int nr=0,nw=0,nc=0;
+                snd_stream_t *nd=ps3a_stream_open_decoder(s->filename,&nr,&nw,&nc,0);
+                if (!nd) { ps3a_lock(); s->eof=true; ps3a_unlock(); return; }
+                ps3a_lock();
+                if (!s->eof && !s->decoder) {
+                    s->decoder=nd; s->rate=nr; s->width=nw; s->chans=nc;
+                    s->step=(float)nr/(float)PS3A_OUT_RATE;
+                    ps3a_unlock();
+                } else { ps3a_unlock(); S_CodecCloseStream(nd); return; }
+            }
+            continue;
+        }
+        frames = got / (width * chans);
+        if (frames <= 0) return;
+        if (frames > (int)capacity) frames = (int)capacity;
+        for (i=0;i<frames;i++) {
+            int l,r;
+            if(width==2) {
+                int o=i*chans*2;
+                l=(short)((unsigned int)raw[o]|((unsigned int)raw[o+1]<<8));
+                r=chans==2?(short)((unsigned int)raw[o+2]|((unsigned int)raw[o+3]<<8)):l;
+            } else {
+                int o=i*chans;
+                l=((int)raw[o]-128)<<8;
+                r=chans==2?(((int)raw[o+1]-128)<<8):l;
+            }
+            pcm[i*2]=(short)l; pcm[i*2+1]=(short)r;
+        }
+        ps3a_lock();
+        if(s->decoder!=d || s->eof) { ps3a_unlock(); return; }
+        for(i=0;i<frames;i++) {
+            uint32_t dst=(uint32_t)((s->writeFrame+(uint64_t)i)%PS3A_STREAM_RING_FRAMES);
+            g_stream_ring[slot][dst*2]=pcm[i*2];
+            g_stream_ring[slot][dst*2+1]=pcm[i*2+1];
+        }
+        s->writeFrame+=(uint64_t)frames;
+        ps3a_unlock();
+    }
+}
+
+static void ps3a_mix_streams(float *out)
+{
+    float master=s_volume?s_volume->value:0.9f;
+    int slot,k;
+    ps3a_lock();
+    for(slot=0;slot<PS3A_STREAM_COUNT;slot++) {
+        ps3a_stream_t *s=&g_streams[slot];
+        ps3a_voice_t v;
+        float gl,gr;
+        if(!s->active || s->paused) continue;
+        memset(&v,0,sizeof(v));
+        v.local=s->local; v.volume=s->volume; v.minDist=s->minDist; v.maxDist=s->maxDist;
+        VectorCopy(s->origin,v.origin);
+        ps3a_target_gains(&v,master,&gl,&gr);
+        for(k=0;k<PS3A_BLOCK;k++) {
+            uint64_t f0=(uint64_t)s->pos, f1;
+            uint32_t i0,i1;
+            float frac,l0,r0,l1,r1;
+            if(f0>=s->writeFrame) {
+                if(s->eof) s->active=false;
+                break;
+            }
+            f1=(f0+1<s->writeFrame)?f0+1:f0;
+            i0=(uint32_t)(f0%PS3A_STREAM_RING_FRAMES);
+            i1=(uint32_t)(f1%PS3A_STREAM_RING_FRAMES);
+            frac=(float)(s->pos-(double)f0);
+            l0=(float)g_stream_ring[slot][i0*2]*(1.0f/32768.0f);
+            r0=(float)g_stream_ring[slot][i0*2+1]*(1.0f/32768.0f);
+            l1=(float)g_stream_ring[slot][i1*2]*(1.0f/32768.0f);
+            r1=(float)g_stream_ring[slot][i1*2+1]*(1.0f/32768.0f);
+            out[k*2]+=(l0+(l1-l0)*frac)*gl;
+            out[k*2+1]+=(r0+(r1-r0)*frac)*gr;
+            s->pos+=(double)s->step;
+        }
+    }
+    ps3a_unlock();
+    for(k=0;k<PS3A_BLOCK*2;k++) {
+        if(out[k]>1.0f) out[k]=1.0f;
+        else if(out[k]<-1.0f) out[k]=-1.0f;
+    }
+}
+
+qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
+    unsigned int offsetFrames,float volume,float pitch,qboolean local,
+    const vec3_t origin,int entnum,int entchannel,float minDist,float maxDist)
+{
+    ps3a_stream_t *s;
+    snd_stream_t *d;
+    int rate=0,width=0,chans=0;
+    if(!g_up || slot<0 || slot>=PS3A_STREAM_COUNT || !filename || !filename[0]) return qfalse;
+    ps3a_stream_stop(slot);
+    d=ps3a_stream_open_decoder(filename,&rate,&width,&chans,offsetFrames);
+    if(!d) { PS3_BootTracef("PS3AUDIO: could not open stream slot=%d file=%s",slot,filename); return qfalse; }
+    s=&g_streams[slot];
+    ps3a_lock();
+    memset(s,0,sizeof(*s));
+    s->decoder=d;
+    Q_strncpyz(s->filename,filename,sizeof(s->filename));
+    s->rate=rate; s->width=width; s->chans=chans;
+    s->startOffset=offsetFrames;
+    s->loopCount=loopCount;
+    s->step=(float)rate*(pitch>0.0f?pitch:1.0f)/(float)PS3A_OUT_RATE;
+    s->volume=volume<0.0f?1.0f:volume;
+    s->local=local?qtrue:qfalse;
+    s->entnum=entnum; s->entchannel=entchannel;
+    s->minDist=minDist>1.0f?minDist:200.0f;
+    s->maxDist=maxDist>=s->minDist?maxDist:12800.0f;
+    s->startTime=++g_tick;
+    if(origin) VectorCopy(origin,s->origin); else VectorClear(s->origin);
+    ps3a_unlock();
+    ps3a_stream_refill(slot);
+    ps3a_lock();
+    s->active=s->writeFrame>0;
+    ps3a_unlock();
+    return s->active?qtrue:qfalse;
+}
+
+void S_PS3AUDIO_StopStream(int slot) { ps3a_stream_stop(slot); }
+void S_PS3AUDIO_PauseStream(int slot,qboolean pause)
+{
+    if(slot<0 || slot>=PS3A_STREAM_COUNT) return;
+    ps3a_lock(); g_streams[slot].paused=pause?qtrue:qfalse; ps3a_unlock();
+}
+void S_PS3AUDIO_SetStreamVolume(int slot,float volume)
+{
+    if(slot<0 || slot>=PS3A_STREAM_COUNT) return;
+    ps3a_lock(); g_streams[slot].volume=volume<0.0f?0.0f:volume; ps3a_unlock();
+}
+unsigned int S_PS3AUDIO_GetStreamPosition(int slot)
+{
+    unsigned int ms=0;
+    if(slot<0 || slot>=PS3A_STREAM_COUNT) return 0;
+    ps3a_lock();
+    if(g_streams[slot].rate>0) ms=(unsigned int)(g_streams[slot].pos*1000.0/(double)g_streams[slot].rate);
+    ps3a_unlock();
+    return ms;
+}
+qboolean S_PS3AUDIO_IsStreamActive(int slot)
+{
+    qboolean active;
+    if(slot<0 || slot>=PS3A_STREAM_COUNT) return qfalse;
+    ps3a_lock(); active=g_streams[slot].active?qtrue:qfalse; ps3a_unlock();
+    return active;
+}
+
 static void ps3a_mix_block(float *out)
 {
 #ifdef OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO
@@ -574,6 +831,8 @@ static void ps3a_mix_block(float *out)
     g_mix_blocks_total++;
     g_mix_blocks_ppu++;
 #endif
+
+    ps3a_mix_streams(out);
 
     /* One diagnostic every 1024 output blocks (~5.5 s at 48 kHz). */
     if ((g_mix_blocks_total & 1023u) == 0) {
@@ -639,6 +898,12 @@ qboolean S_PS3AUDIO_Init()
             PS3_BootTracef("PS3AUDIO: disabled by USRDIR/sound.txt");
             return qfalse;
         }
+    }
+
+    if (!g_codecs_inited) {
+        S_CodecInit();
+        g_codecs_inited = true;
+        PS3_BootTracef("PS3AUDIO: registered WAV/MP3/Vorbis/Opus stream decoders");
     }
 
     if (g_inited) {
