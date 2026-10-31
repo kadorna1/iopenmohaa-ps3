@@ -30,6 +30,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../corepp/tiki.h"
 #include "cg_archive.h"
 #include "memarchiver.h"
+#include "../sys/ps3_step.h"
 
 refEntity_t *current_entity        = NULL;
 int          current_entity_number = -1;
@@ -6266,6 +6267,12 @@ void emitterthing_t::ArchiveToMemory(MemArchiver& archiver)
 
 void cg_common_data::ArchiveToMemory(MemArchiver& archiver)
 {
+    /*
+     * This runs for every temp-model slot during a CGame save (the manager
+     * archives MAX_TEMPMODELS entries, including unused slots). Do not put
+     * PS3_TRACEF here: it fsyncs the trace for each line and stalls gameplay.
+     * Add coarse PS3_STEPF timings around the containing archive stages instead.
+     */
     archiver.ArchiveInteger(&life);
     archiver.ArchiveTime(&createTime);
     archiver.ArchiveVector(&origin);

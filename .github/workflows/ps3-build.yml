@@ -6,13 +6,19 @@ on:
       - '**'
   pull_request:
   workflow_dispatch:
+    inputs:
+      experimental_spu_audio:
+        description: "Build the experimental SPU audio mixer (hardware testing required)"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   PS3DEV_ARCHIVE_URL: https://github.com/ps3dev/ps3dev/releases/download/nightly-2026-10-12/ps3dev-linux-X64.tar.gz
@@ -28,6 +34,9 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
 
 
       # Cache downloaded .deb packages. apt indexes are refreshed each run,
@@ -233,6 +242,7 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/openmohaa-ps3-install" \
             -DOPENMOHAA_PS3_APPID="$OPENMOHAA_PS3_APPID" \
+            -DOPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO="${{ inputs.experimental_spu_audio || startsWith(github.head_ref || github.ref_name, 'experimental/rsxkit-spukit-audio') }}" \
             -DBUILD_SERVER=OFF \
             -DBUILD_CLIENT=ON \
             -DBUILD_RENDERER_GL2=OFF \
@@ -267,7 +277,6 @@ jobs:
           find build-ps3 \( -type f -name '*.elf' -o -type f -name 'openmohaa' \) -print | sort > ps3-build-outputs.txt
           cat ps3-build-outputs.txt
 
-      # ATRAC3 encoder source and its compiled binary are cached separately.
       - name: Stage optional XMB assets
         shell: bash
         run: |
