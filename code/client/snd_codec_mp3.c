@@ -83,6 +83,7 @@ struct snd_codec_mp3_info
     unsigned int refillCount;
     unsigned int recoverableErrors;
     unsigned int decodeErrors;
+    unsigned int fixedProbeFrames;
 };
 
 /*************** MP3 utility functions ***************/
@@ -533,6 +534,45 @@ int S_MP3_Decode(snd_stream_t* stream)
     mad_synth_frame(madsynth, madframe);
 
     pcm = &madsynth->pcm;
+
+#if defined(__PS3__)
+    /* Capture fixed-point decoder output before S_MP3_Scale converts it to
+     * signed 16-bit PCM. Compare this with the post-conversion stream probe
+     * to distinguish a libmad synthesis/math problem from PCM packing. */
+    if (mp3info->fixedProbeFrames < 2 && pcm->length > 0 &&
+        pcm->channels >= 1 && pcm->channels <= 2) {
+        int minFixed = 2147483647;
+        int maxFixed = (-2147483647 - 1);
+        int firstL[4] = {0, 0, 0, 0};
+        int firstR[4] = {0, 0, 0, 0};
+        double sumsq = 0.0;
+        unsigned int sampleCount = 0;
+        unsigned int ch, i;
+        for (ch = 0; ch < (unsigned int)pcm->channels; ++ch) {
+            for (i = 0; i < (unsigned int)pcm->length; ++i) {
+                const int value = (int)pcm->samples[ch][i];
+                if (value < minFixed) minFixed = value;
+                if (value > maxFixed) maxFixed = value;
+                sumsq += (double)value * (double)value;
+                sampleCount++;
+                if (i < 4) {
+                    if (ch == 0) firstL[i] = value;
+                    else firstR[i] = value;
+                }
+            }
+        }
+        PS3_BootTracef(
+            "PS3AUDIO: MP3 fixed PCM file=%s frame=%u rate=%u channels=%u length=%u fracbits=%d scale_bits=%d one=%d min=%d max=%d rms_normalized=%.6f firstL=%d,%d,%d,%d firstR=%d,%d,%d,%d",
+            mp3info->filename, mp3info->fixedProbeFrames + 1,
+            pcm->samplerate, pcm->channels, pcm->length,
+            MAD_F_FRACBITS, MAD_F_SCALEBITS, MAD_F_ONE,
+            minFixed, maxFixed,
+            sampleCount ? sqrt(sumsq / (double)sampleCount) / (double)MAD_F_ONE : 0.0,
+            firstL[0], firstL[1], firstL[2], firstL[3],
+            firstR[0], firstR[1], firstR[2], firstR[3]);
+        mp3info->fixedProbeFrames++;
+    }
+#endif
 
     // perform a few checks to see whether something changed that shouldn't.
 
