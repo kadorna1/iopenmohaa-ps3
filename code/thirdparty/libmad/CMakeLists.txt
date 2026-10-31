@@ -97,7 +97,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "PS3")
   # Cell PPU uses a 32-bit C int. A cross build cannot execute the
   # CheckTypeSize probe on the host, so provide the PS3 ABI fact directly.
   set(SIZEOF_INT 4 CACHE INTERNAL "Size of C int on PS3 PPU" FORCE)
-  set(FPM_PPC ON CACHE BOOL "PowerPC fixed point math" FORCE)
+  # Diagnostic variant: bypass libmad's PowerPC inline-assembly multiply /
+  # scale path and use its portable int64_t fixed-point implementation.
+  # If this removes PS3 MP3 static, the optimized FPM_PPC arithmetic is suspect.
+  set(FPM_64BIT ON CACHE BOOL "64 bit fixed point math" FORCE)
+  set(FPM_PPC OFF CACHE BOOL "PowerPC fixed point math" FORCE)
+  message(STATUS "PS3 libmad: using generic 64-bit fixed-point math (FPM_64BIT)")
 else()
   check_type_size(int SIZEOF_INT BUILTIN_TYPES_ONLY LANGUAGE C)
 endif()
