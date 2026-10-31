@@ -40,7 +40,9 @@ static void PS3_MusicApplyVolume(void)
 {
     float base = s_musicVolume ? s_musicVolume->value : 0.9f;
     float ambient = s_ambientVolume ? s_ambientVolume->value : 1.0f;
-    if (ps3_music_song >= 0 && ps3_music_song < ps3_music_num_songs) {
+    if (ps3_music_manual_stream) {
+        S_PS3AUDIO_SetStreamVolume(0, ps3_music_volume * base);
+    } else if (ps3_music_song >= 0 && ps3_music_song < ps3_music_num_songs) {
         S_PS3AUDIO_SetStreamVolume(0,
             ps3_music_songs[ps3_music_song].volume * ps3_music_volume * base * ambient);
     } else {
