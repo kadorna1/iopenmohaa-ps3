@@ -171,44 +171,24 @@ jobs:
           find build-ps3 \( -type f -name '*.elf' -o -type f -name 'openmohaa' \) -print | sort > ps3-build-outputs.txt
           cat ps3-build-outputs.txt
 
-      - name: Prepare XMB background and hover sound
+      - name: Stage optional XMB assets
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist
-          test -s assets/xmb/PIC1.PNG
-          test -s assets/xmb/SND0.AT3
-
-          # Emit the 1920x1080 RGBA background used by the PS3 XMB.
-          ffmpeg -y -v error -i assets/xmb/PIC1.PNG -frames:v 1 \
-            -vf "scale=1920:1080:flags=lanczos,format=rgba" dist/PIC1.PNG
-          test -s dist/PIC1.PNG
-          dimensions="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 dist/PIC1.PNG)"
-          if [[ "$dimensions" != "1920x1080" ]]; then
-            echo "::error::dist/PIC1.PNG must be 1920x1080, got '$dimensions'"
-            exit 1
+          mkdir -p assets/xmb dist
+          if [[ -d assets/xmb ]]; then
+            find assets/xmb -mindepth 1 -maxdepth 1 ! -name README.md -print
           fi
-
-          # The committed SND0.AT3 is already PS3-ready. Preserve it exactly;
-          # do not re-encode, remux, trim, or impose an arbitrary size cap.
-          install -D -m 0644 assets/xmb/SND0.AT3 dist/SND0.AT3
-          cmp assets/xmb/SND0.AT3 dist/SND0.AT3
-          sha256sum assets/xmb/SND0.AT3 dist/SND0.AT3 | tee dist/SND0-sha256.txt
-          test -s dist/SND0.AT3
 
       - name: Package installable PKG files
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
-          test -s dist/PIC1.PNG
-          test -s dist/SND0.AT3
           pkg_args=(
             --build-dir build-ps3
             --out-dir dist
             --name OpenMoHAA-PS3-OMOHAA020
-            --pic1 dist/PIC1.PNG
-            --snd0 dist/SND0.AT3
           )
           bash make_ps3_pkg.sh "${pkg_args[@]}" 2>&1 | tee ps3-package.log
           find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print
@@ -227,10 +207,7 @@ jobs:
             build-ps3/bin/openmohaa
             build-ps3/**/*.elf
             dist/*.pkg
-            dist/PIC1.PNG
-            dist/SND0.AT3
-            dist/SND01.AT3
-            dist/SND0_01.AT3
+            dist/*
             ps3-sdk-info.txt
             ps3-build-outputs.txt
             ps3-configure.log
