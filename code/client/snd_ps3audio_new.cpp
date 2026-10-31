@@ -14,8 +14,9 @@ silent PS3NULL driver behind the engine's S_Driver_* interface:
   - Looping sounds are refreshed every frame by AddLoopingSound and dropped by
     Update() when they stop being refreshed.
 
-Not implemented (silent): streamed sounds, MP3, music, movie audio, reverb and
-the "wait till sound done" callbacks.
+Implemented through the decoder-backed stream ring: streamed WAV/MP3/Vorbis/Opus
+sounds, soundtrack music, triggered music and RoQ companion audio. Reverb and
+the "wait till sound done" callbacks remain unimplemented.
 
 Safety: every libaudio call is logged to the early trace *before* it is made.
 Create USRDIR/sound.txt containing 0 to disable the driver, e.g. if the console
@@ -637,7 +638,7 @@ static void ps3a_stream_refill(int slot)
     if (slot < 0 || slot >= PS3A_STREAM_COUNT) return;
     s = &g_streams[slot];
 
-    while (attempts++ < 3) {
+    while (attempts++ < 6) {
         snd_stream_t *d;
         uint64_t readFrame, available, capacity;
         int width, chans, request, got, frames, i;
