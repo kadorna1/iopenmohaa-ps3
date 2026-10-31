@@ -1072,6 +1072,18 @@ static void ps3a_mix_block(float *out)
 {
     int k;
 
+    /* The game may stop/restart its sound system while libaudio remains open.
+     * Reassert the deterministic diagnostic source before every audio block
+     * if a lifecycle callback has cleared it. No game sound callback can
+     * mutate these sources while a synthetic test mode is selected. */
+    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST &&
+        (!g_voice[0].active || g_voice[0].pcm != g_ps3_synth_voice_pcm)) {
+        ps3a_init_pcm_test_source();
+    } else if (g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST &&
+               (!g_streams[0].active || g_streams[0].writeFrame == 0)) {
+        ps3a_init_pcm_test_source();
+    }
+
     if (g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) {
         memset(out, 0, (size_t)PS3A_BLOCK * 2 * sizeof(float));
         g_mix_blocks_total++;
@@ -1393,6 +1405,16 @@ qboolean S_PS3AUDIO_Init()
 void S_PS3AUDIO_Shutdown()
 {
     int i;
+    /* Keep synthetic test sources alive across the engine's sound-system
+     * shutdown/restart cycle. The libaudio producer is intentionally persistent
+     * and the selected test mode remains immutable for the life of this EBOOT. */
+    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) {
+        g_up = false;
+        PS3_BootTracef("PS3AUDIO: preserved synthetic source through sound shutdown mode=%s",
+                       ps3a_mix_mode_name());
+        return;
+    }
     /* Keep libaudio alive over map changes, but release every decoded stream. */
     for (i = 0; i < PS3A_STREAM_COUNT; i++) ps3a_stream_stop(i);
     ps3a_lock();
