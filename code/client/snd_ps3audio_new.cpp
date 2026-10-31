@@ -455,6 +455,21 @@ static void ps3a_free_voice(ps3a_voice_t *v)
     v->pcm = NULL;
 }
 
+/* GetWavinfo stores PCM datasize as the data-chunk length, not an
+ * absolute end offset. It also updates samples when DownSampleWav rebuilds
+ * the WAV, so samples*width is the consistent PCM payload size in both cases.
+ * IMA ADPCM retains an absolute end offset in datasize. */
+static int ps3a_voice_source_bytes(const sfx_t *sfx)
+{
+    if (!sfx) {
+        return 0;
+    }
+    if (sfx->info.format == 1) {
+        return (int)((float)sfx->info.samples * sfx->info.width + 0.5f);
+    }
+    return sfx->info.datasize - sfx->info.dataofs;
+}
+
 static bool ps3a_sfx_usable(const sfx_t *sfx)
 {
     if (!sfx || !sfx->data) {
@@ -464,7 +479,62 @@ static bool ps3a_sfx_usable(const sfx_t *sfx)
         return false;
     }
     return sfx->info.channels >= 1 && sfx->info.channels <= 2 && sfx->info.rate >= 4000.0f
-        && sfx->info.datasize > sfx->info.dataofs;
+        && ps3a_voice_source_bytes(sfx) > 0;
+}
+
+/* Emit a bounded preview of real decoder input. On PS3 the file-backed voice
+ * payload is little-endian, while codec stream decoders are expected to return
+ * host-native samples. Logging both byte interpretations makes a byte-order
+ * mismatch visible without relying on the in-game console. */
+static void ps3a_trace_pcm_preview(const char *stage, const char *name,
+                                   const byte *data, int bytes, int width,
+                                   int channels, bool hostNative)
+{
+    static unsigned int voiceCount = 0;
+    static unsigned int streamCount = 0;
+    unsigned int *count = (strstr(stage, "stream") != NULL) ? &streamCount : &voiceCount;
+    int sample[4] = {0, 0, 0, 0};
+    int swapped[4] = {0, 0, 0, 0};
+    int i, available;
+
+    if (!data || bytes <= 0 || channels < 1 || channels > 2 || (*count)++ >= 12) {
+        return;
+    }
+    available = bytes / width;
+    if (available > 4) available = 4;
+    if (width == 2) {
+        for (i = 0; i < available; i++) {
+            short nativeSample;
+            const int offset = i * 2;
+            if (hostNative) {
+                memcpy(&nativeSample, data + offset, sizeof(nativeSample));
+                sample[i] = (int)nativeSample;
+                swapped[i] = (short)(((unsigned int)data[offset + 1] << 8) | data[offset]);
+            } else {
+                sample[i] = (short)((unsigned int)data[offset] |
+                                    ((unsigned int)data[offset + 1] << 8));
+                swapped[i] = (short)((unsigned int)data[offset + 1] |
+                                     ((unsigned int)data[offset] << 8));
+            }
+        }
+    } else if (width == 1) {
+        for (i = 0; i < available; i++) {
+            sample[i] = (int)data[i] - 128;
+            swapped[i] = sample[i];
+        }
+    } else {
+        return;
+    }
+
+    PS3_BootTracef("PS3AUDIO: PCM probe stage=%s file=%s width=%d channels=%d bytes=%d order=%s raw=%02x%02x%02x%02x%02x%02x%02x%02x sample=%d,%d,%d,%d swapped=%d,%d,%d,%d",
+                   stage, name ? name : "(unknown)", width, channels, bytes,
+                   hostNative ? "host-native" : "file-little-endian",
+                   (unsigned)data[0], (unsigned)(bytes > 1 ? data[1] : 0),
+                   (unsigned)(bytes > 2 ? data[2] : 0), (unsigned)(bytes > 3 ? data[3] : 0),
+                   (unsigned)(bytes > 4 ? data[4] : 0), (unsigned)(bytes > 5 ? data[5] : 0),
+                   (unsigned)(bytes > 6 ? data[6] : 0), (unsigned)(bytes > 7 ? data[7] : 0),
+                   sample[0], sample[1], sample[2], sample[3],
+                   swapped[0], swapped[1], swapped[2], swapped[3]);
 }
 
 static ps3a_voice_t *ps3a_pick_voice(int sfxHandle, int entnum, int entchannel, bool loopFx)
@@ -522,8 +592,23 @@ static bool ps3a_setup_voice(ps3a_voice_t *v, int sfxHandle, float pitch)
 {
     sfx_t       *sfx = &s_knownSfx[sfxHandle];
     const byte  *src = sfx->data + sfx->info.dataofs;
-    const int    bytes = sfx->info.datasize - sfx->info.dataofs;
+    const int    bytes = ps3a_voice_source_bytes(sfx);
     const float  w = sfx->info.width;
+
+    {
+        static unsigned int voiceMetaCount;
+        if (voiceMetaCount < 12) {
+            PS3_BootTracef("PS3AUDIO: voice source name=%s format=%d rate=%.1f width=%.1f channels=%d samples=%d dataofs=%d datasize=%d payload_bytes=%d",
+                           sfx->name, sfx->info.format, (double)sfx->info.rate,
+                           (double)w, sfx->info.channels, sfx->info.samples,
+                           sfx->info.dataofs, sfx->info.datasize, bytes);
+            voiceMetaCount++;
+        }
+    }
+    if (sfx->info.format == 1) {
+        ps3a_trace_pcm_preview("voice-source-file-le", sfx->name, src, bytes,
+                               (int)w, sfx->info.channels, false);
+    }
 
     v->own = NULL;
     if (sfx->info.format == 17 || w == 0.5f) {
@@ -538,6 +623,8 @@ static bool ps3a_setup_voice(ps3a_voice_t *v, int sfxHandle, float pitch)
         v->pcm    = buf;
         v->frames = n;
         v->width  = 2;
+        ps3a_trace_pcm_preview("voice-adpcm-decoded-le", sfx->name, buf,
+                               n * 2, 2, 1, false);
         {
             static unsigned int adpcmTraceCount;
             if (adpcmTraceCount < 8) {
@@ -916,6 +1003,8 @@ static void ps3a_stream_refill(int slot)
             }
             continue;
         }
+        ps3a_trace_pcm_preview("stream-decoder-native", s->filename, raw, got,
+                               width, chans, true);
         frames = got / (width * chans);
         if (frames <= 0) return;
         if (frames > (int)capacity) frames = (int)capacity;
