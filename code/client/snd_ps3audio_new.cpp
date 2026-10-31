@@ -887,6 +887,7 @@ static void ps3a_thread(void *arg)
 extern "C" {
 
 void PS3_CompatMusicUpdate(void);
+void PS3_CompatAudioInit(void);
 
 qboolean S_PS3AUDIO_Init()
 {
@@ -911,6 +912,7 @@ qboolean S_PS3AUDIO_Init()
 
     if (g_inited) {
         g_up = true; /* the port and the thread live for the whole run */
+        PS3_CompatAudioInit();
         return qtrue;
     }
 
@@ -1006,6 +1008,7 @@ qboolean S_PS3AUDIO_Init()
     g_inited = true;
     g_up     = true;
     PS3_BootTracef("PS3AUDIO: up (48 kHz stereo, %u blocks)", (unsigned)g_cfg.numBlocks);
+    PS3_CompatAudioInit();
     return qtrue;
 }
 
