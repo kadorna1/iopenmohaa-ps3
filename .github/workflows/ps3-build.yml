@@ -37,20 +37,6 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Fetch canonical XMB assets
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p assets/xmb
-          for asset in PIC1.PNG SND0.AT3; do
-            url="https://raw.githubusercontent.com/kadorna1/iopenmohaa-ps3/main/assets/xmb/${asset}"
-            curl --fail --location --retry 4 --retry-all-errors --connect-timeout 30 "$url" -o "$RUNNER_TEMP/$asset"
-            test -s "$RUNNER_TEMP/$asset"
-            install -m 0644 "$RUNNER_TEMP/$asset" "assets/xmb/$asset"
-          done
-
-      # Cache downloaded .deb packages. apt indexes are refreshed each run,
-      # but already-cached dependency archives do not need to be downloaded again.
       - name: Restore host dependency package cache
         uses: actions/cache@v4
         with:
