@@ -368,9 +368,7 @@ if not (fmt_ok and data_ok):
     raise SystemExit(f"error: {p} is missing a supported ATRAC fmt/data chunk")
 PY
     cp "$SND0" "$PKGDIR/SND0.AT3"
-    cp "$SND0" "$PKGDIR/SND01.AT3"
-    cp "$SND0" "$PKGDIR/SND0_01.AT3"
-    info "copied validated XMB sound to SND0.AT3, SND01.AT3, and SND0_01.AT3"
+    info "copied validated XMB sound to SND0.AT3"
 fi
 
 # 5. optional payload
