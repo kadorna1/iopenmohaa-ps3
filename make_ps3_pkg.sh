@@ -55,7 +55,7 @@ Usage: make_ps3_pkg.sh [options]
   --icon FILE         ICON0.PNG source; resized to 320x176 when ImageMagick or
                       Pillow is available (default: misc/openmohaa-text.png).
   --pic1 FILE         optional PIC1.PNG (background, 1920x1080).
-  --snd0 FILE         optional PS3 XMB hover sound (RIFF ATRAC3/ATRAC3+); copied as SND0.AT3,
+  --snd0 FILE         optional PS3 XMB hover sound (RIFF ATRAC3/ATRAC3+); copied as SND0.AT3 only.
                       SND01.AT3, and SND0_01.AT3.
   --extra-usrdir DIR  copy DIR's contents into the package's USRDIR (game data).
                       Not recommended: MOHAA data is large. Copy it over FTP or
