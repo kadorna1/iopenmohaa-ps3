@@ -14,8 +14,9 @@ silent PS3NULL driver behind the engine's S_Driver_* interface:
   - Looping sounds are refreshed every frame by AddLoopingSound and dropped by
     Update() when they stop being refreshed.
 
-Not implemented (silent): streamed sounds, MP3, music, movie audio, reverb and
-the "wait till sound done" callbacks.
+Implemented through the decoder-backed stream ring: streamed WAV/MP3/Vorbis/Opus
+sounds, soundtrack music, triggered music and RoQ companion audio. Reverb and
+the "wait till sound done" callbacks remain unimplemented.
 
 Safety: every libaudio call is logged to the early trace *before* it is made.
 Create USRDIR/sound.txt containing 0 to disable the driver, e.g. if the console
@@ -24,9 +25,11 @@ refuses to start with it.
 */
 
 #include "snd_local.h"
+#include "snd_codec.h"
 
 #include <audio/audio.h>
 #include <sys/mutex.h>
+#include <sys/event_queue.h>
 #include <sys/thread.h>
 
 #include <malloc.h>
@@ -48,6 +51,7 @@ extern const u8 ps3_spukit_mix_bin[];
 #define PS3A_OUT_RATE   48000.0
 #define PS3A_BLOCK      AUDIO_BLOCK_SAMPLES /* 256 frames */
 #define PS3A_LEAD       6                   /* blocks kept queued ahead of the reader */
+#define PS3A_MIX_HEADROOM 0.50f              /* reserve 6 dB for overlapping game sounds */
 
 typedef struct {
     bool           active;
@@ -58,7 +62,7 @@ typedef struct {
     bool           follow;   /* origin follows s_entity[entnum] */
     int            sfxHandle;
     const byte    *pcm;      /* first frame (interleaved if chans == 2) */
-    short         *own;      /* private decoded buffer (ADPCM) or NULL */
+    byte          *own;      /* private ADPCM PCM buffer, stored as little-endian bytes */
     int            frames;
     int            width;    /* bytes per sample: 1 or 2 */
     int            chans;    /* 1 or 2 */
@@ -76,6 +80,29 @@ typedef struct {
 } ps3a_voice_t;
 
 static ps3a_voice_t g_voice[PS3A_MAX_VOICES];
+
+#define PS3A_STREAM_COUNT 11
+#define PS3A_STREAM_FIRST_SFX 3
+#define PS3A_STREAM_RING_FRAMES 16384
+#define PS3A_STREAM_CHUNK_FRAMES 2048
+
+typedef struct {
+    bool active, paused, eof, isLoopFx, seen, local, follow;
+    snd_stream_t *decoder;
+    char filename[MAX_QPATH];
+    uint64_t writeFrame;
+    double pos;
+    int rate, width, chans, loopCount, loopsCompleted;
+    int entnum, entchannel, sfxHandle, startTime;
+    float step, pitch, volume, minDist, maxDist;
+    vec3_t origin;
+} ps3a_stream_t;
+
+static ps3a_stream_t g_streams[PS3A_STREAM_COUNT];
+static short g_stream_ring[PS3A_STREAM_COUNT][PS3A_STREAM_RING_FRAMES * 2]
+    __attribute__((aligned(128)));
+static bool g_codecs_inited = false;
+
 static sys_mutex_t  g_lock;
 static bool         g_lockMade   = false;
 static bool         g_inited     = false; /* audio port + thread exist (kept for the whole run) */
@@ -84,6 +111,11 @@ static volatile int g_run        = 0;
 static sys_ppu_thread_t g_thread;
 static u32          g_port       = 0;
 static audioPortConfig g_cfg;
+static sys_event_queue_t g_audio_queue;
+static sys_ipc_key_t g_audio_queue_key;
+static bool g_audio_notify_ready = false;
+static volatile uint64_t g_audio_blocks = 0;
+static volatile uint64_t g_audio_late_blocks = 0;
 static int          g_tick       = 0;
 /* Counters are updated by the single audio producer thread. Periodic snapshots
  * reveal whether audible output is actually being mixed on SPU or PPU. */
@@ -91,6 +123,15 @@ static uint32_t g_mix_blocks_total    = 0;
 static uint32_t g_mix_blocks_spu      = 0;
 static uint32_t g_mix_blocks_ppu      = 0;
 static uint32_t g_mix_blocks_fallback = 0;
+static uint32_t g_mix_blocks_testtone = 0;
+#ifndef OPENMOHAA_PS3_AUDIO_TEST_TONE
+#define OPENMOHAA_PS3_AUDIO_TEST_TONE 0
+#endif
+static volatile int g_ps3_test_tone = OPENMOHAA_PS3_AUDIO_TEST_TONE ? 1 : 0;
+static double g_ps3_test_phase = 0.0;
+static double g_audio_diag_sumsq = 0.0;
+static float g_audio_diag_peak = 0.0f;
+static uint32_t g_audio_diag_samples = 0;
 
 
 static vec3_t g_lpos  = {0, 0, 0};
@@ -117,6 +158,18 @@ static void ps3a_unlock()
     }
 }
 
+/* Diagnostic output path: issue "ps3audiotest 1" in the in-game console
+ * to replace game audio with a quiet 440 Hz tone; use "ps3audiotest 0" to
+ * restore normal mixing. This separates libaudio/ring output from PCM decode. */
+static void ps3a_testtone_cmd()
+{
+    if (Cmd_Argc() > 1) {
+        g_ps3_test_tone = atoi(Cmd_Argv(1)) ? 1 : 0;
+    }
+    Com_Printf("PS3 audio test tone: %s (ps3audiotest 1|0)\n",
+               g_ps3_test_tone ? "ON" : "OFF");
+}
+
 /* ---------------------------------------------------------------------------
    IMA ADPCM (WAVE format 17), mono, block aligned
 --------------------------------------------------------------------------- */
@@ -137,11 +190,20 @@ static inline int ima_clamp_index(int i)
     return i < 0 ? 0 : (i > 88 ? 88 : i);
 }
 
-/* Decodes into a malloc'd 16-bit buffer. Returns the frame count (0 on failure). */
-static int ps3a_decode_ima_mono(const byte *src, int bytes, int blockAlign, short **outBuf)
+/* Store decoded ADPCM as little-endian PCM bytes. The same representation is
+ * consumed by both the PPU and SPU mixers, independent of their native endian. */
+static inline void ps3a_store_s16_le(byte *dst, int sample)
+{
+    const uint16_t value = (uint16_t)sample;
+    dst[0] = (byte)(value & 0xffu);
+    dst[1] = (byte)(value >> 8);
+}
+
+/* Decodes into a malloc'd little-endian 16-bit PCM buffer. Returns the frame count. */
+static int ps3a_decode_ima_mono(const byte *src, int bytes, int blockAlign, byte **outBuf)
 {
     int maxSamples, written = 0;
-    short *out;
+    byte *out;
 
     *outBuf = NULL;
     if (blockAlign < 8 || bytes <= 0) {
@@ -149,7 +211,7 @@ static int ps3a_decode_ima_mono(const byte *src, int bytes, int blockAlign, shor
     }
 
     maxSamples = ((bytes / blockAlign) + 1) * ((blockAlign - 4) * 2 + 1);
-    out        = (short *)malloc((size_t)maxSamples * sizeof(short));
+    out        = (byte *)malloc((size_t)maxSamples * sizeof(short));
     if (!out) {
         return 0;
     }
@@ -160,7 +222,8 @@ static int ps3a_decode_ima_mono(const byte *src, int bytes, int blockAlign, shor
         int       index = ima_clamp_index(src[2]);
         int       i;
 
-        out[written++] = (short)pred;
+        ps3a_store_s16_le(out + (size_t)written * sizeof(short), pred);
+        written++;
         for (i = 4; i < blk; i++) {
             int b = src[i], n;
 
@@ -180,7 +243,8 @@ static int ps3a_decode_ima_mono(const byte *src, int bytes, int blockAlign, shor
                 index = ima_clamp_index(index + ima_index_adj[code]);
 
                 if (written < maxSamples) {
-                    out[written++] = (short)pred;
+                    ps3a_store_s16_le(out + (size_t)written * sizeof(short), pred);
+                    written++;
                 }
             }
         }
@@ -280,16 +344,24 @@ static bool ps3a_setup_voice(ps3a_voice_t *v, int sfxHandle, float pitch)
     v->own = NULL;
     if (sfx->info.format == 17 || w == 0.5f) {
         const int blockAlign = (sfx->info.dataalign > 1) ? (sfx->info.dataalign - 1) / 2 + 4 : 0;
-        short    *buf;
+        byte     *buf;
         const int n = (sfx->info.channels == 1) ? ps3a_decode_ima_mono(src, bytes, blockAlign, &buf) : 0;
 
         if (n <= 0) {
             return false;
         }
         v->own    = buf;
-        v->pcm    = (const byte *)buf;
+        v->pcm    = buf;
         v->frames = n;
         v->width  = 2;
+        {
+            static unsigned int adpcmTraceCount;
+            if (adpcmTraceCount < 8) {
+                PS3_BootTracef("PS3AUDIO: ADPCM voice decoded name=%s frames=%d pcm_storage=little-endian",
+                               sfx->name, n);
+                adpcmTraceCount++;
+            }
+        }
         v->chans  = 1;
         v->pos    = 0.0;
         v->step   = (double)sfx->info.rate * (double)pitch / PS3A_OUT_RATE;
@@ -315,12 +387,14 @@ static bool ps3a_setup_voice(ps3a_voice_t *v, int sfxHandle, float pitch)
    Mixing (audio thread)
 --------------------------------------------------------------------------- */
 
+/* Non-streamed WAV PCM remains in the little-endian byte order used on disk.
+ * ADPCM is explicitly normalized to the same representation above. */
 static inline float ps3a_sample(const ps3a_voice_t *v, int frame, int ch)
 {
     const byte *p = v->pcm + ((size_t)frame * v->chans + (ch < v->chans ? ch : 0)) * v->width;
 
     if (v->width == 2) {
-        return (float)(short)(p[0] | (p[1] << 8)) * (1.0f / 32768.0f);
+        return (float)(short)(p[0] | ((unsigned int)p[1] << 8)) * (1.0f / 32768.0f);
     }
     return (float)((int)p[0] - 128) * (1.0f / 128.0f);
 }
@@ -360,7 +434,7 @@ static void ps3a_target_gains(const ps3a_voice_t *v, float master, float *gl, fl
 static void ps3a_mix_block_ppu(float *out)
 {
     float  mixL[PS3A_BLOCK], mixR[PS3A_BLOCK];
-    float  master = (s_volume ? s_volume->value : 0.9f);
+    float  master = (s_volume ? s_volume->value : 0.9f) * PS3A_MIX_HEADROOM;
     int    i, k;
 
     memset(mixL, 0, sizeof(mixL));
@@ -427,13 +501,11 @@ static void ps3a_mix_block_ppu(float *out)
     }
     ps3a_unlock();
 
+    /* Do not clip the dry voice mix here: streams are added afterwards.
+     * Apply the output limit once, after every source has been summed. */
     for (k = 0; k < PS3A_BLOCK; k++) {
-        float l = mixL[k], r = mixR[k];
-
-        if (l > 1.0f) l = 1.0f; else if (l < -1.0f) l = -1.0f;
-        if (r > 1.0f) r = 1.0f; else if (r < -1.0f) r = -1.0f;
-        out[k * 2]     = l;
-        out[k * 2 + 1] = r;
+        out[k * 2]     = mixL[k];
+        out[k * 2 + 1] = mixR[k];
     }
 }
 
@@ -501,7 +573,8 @@ static bool ps3a_mix_block_spu(float *out)
         }
 
         float target_l, target_r;
-        ps3a_target_gains(src, s_volume ? s_volume->value : 0.9f, &target_l, &target_r);
+        ps3a_target_gains(src, (s_volume ? s_volume->value : 0.9f) * PS3A_MIX_HEADROOM,
+                          &target_l, &target_r);
         dst->first_off = base;
         dst->second_off = second_off;
         dst->first_start = start;
@@ -557,32 +630,314 @@ ppu_fallback:
 }
 #endif
 
+
+static snd_stream_t *ps3a_stream_open_decoder(const char *filename, int *rate, int *width,
+                                               int *chans, unsigned int offsetFrames)
+{
+    snd_stream_t *d = S_CodecOpenStream(filename);
+    byte discard[4096];
+    uint64_t skip, done = 0;
+    int frameBytes;
+    if (!d) return NULL;
+    if (d->info.rate <= 0 || d->info.channels < 1 || d->info.channels > 2
+        || (d->info.width != 1.0f && d->info.width != 2.0f)) {
+        PS3_BootTracef("PS3AUDIO: unsupported stream format %s rate=%d width=%.1f channels=%d",
+                       filename, d->info.rate, d->info.width, d->info.channels);
+        S_CodecCloseStream(d);
+        return NULL;
+    }
+    *rate = d->info.rate;
+    *width = (int)d->info.width;
+    *chans = d->info.channels;
+    frameBytes = *width * *chans;
+    skip = (uint64_t)offsetFrames * (uint64_t)frameBytes;
+    while (done < skip) {
+        int req = (int)((skip - done) < sizeof(discard) ? skip - done : sizeof(discard));
+        int got = S_CodecReadStream(d, req, discard);
+        if (got <= 0) break;
+        done += (uint64_t)got;
+    }
+    return d;
+}
+
+static void ps3a_stream_stop(int slot)
+{
+    snd_stream_t *d;
+    if (slot < 0 || slot >= PS3A_STREAM_COUNT) return;
+    ps3a_lock();
+    d = g_streams[slot].decoder;
+    g_streams[slot].decoder = NULL;
+    g_streams[slot].active = false;
+    g_streams[slot].paused = false;
+    g_streams[slot].eof = true;
+    g_streams[slot].isLoopFx = false;
+    g_streams[slot].seen = false;
+    g_streams[slot].filename[0] = '\0';
+    ps3a_unlock();
+    if (d) S_CodecCloseStream(d);
+}
+
+static void ps3a_stream_refill(int slot)
+{
+    ps3a_stream_t *s;
+    byte raw[PS3A_STREAM_CHUNK_FRAMES * 4];
+    short pcm[PS3A_STREAM_CHUNK_FRAMES * 2];
+    int attempts = 0;
+    if (slot < 0 || slot >= PS3A_STREAM_COUNT) return;
+    s = &g_streams[slot];
+
+    while (attempts++ < 6) {
+        snd_stream_t *d;
+        uint64_t readFrame, available, capacity;
+        int width, chans, request, got, frames, i;
+        ps3a_lock();
+        d = s->decoder;
+        if (!d || s->paused || s->eof) { ps3a_unlock(); return; }
+        readFrame = (uint64_t)s->pos;
+        available = s->writeFrame > readFrame ? s->writeFrame - readFrame : 0;
+        capacity = PS3A_STREAM_RING_FRAMES - available - 1;
+        width = s->width;
+        chans = s->chans;
+        ps3a_unlock();
+        if (available >= PS3A_STREAM_RING_FRAMES / 2 || !capacity) return;
+        if (capacity > PS3A_STREAM_CHUNK_FRAMES) capacity = PS3A_STREAM_CHUNK_FRAMES;
+        request = (int)(capacity * (uint64_t)width * (uint64_t)chans);
+        got = S_CodecReadStream(d, request, raw);
+        if (got <= 0) {
+            snd_stream_t *old = NULL;
+            bool again = false;
+            ps3a_lock();
+            if (s->decoder == d) {
+                old = s->decoder;
+                s->decoder = NULL;
+                s->loopsCompleted++;
+                again = (s->loopCount == 0 || s->loopsCompleted < s->loopCount);
+                if (!again) s->eof = true;
+            }
+            ps3a_unlock();
+            if (old) S_CodecCloseStream(old);
+            if (!again) return;
+            {
+                int nr=0,nw=0,nc=0;
+                snd_stream_t *nd=ps3a_stream_open_decoder(s->filename,&nr,&nw,&nc,0);
+                if (!nd) { ps3a_lock(); s->eof=true; ps3a_unlock(); return; }
+                ps3a_lock();
+                if (!s->eof && !s->decoder) {
+                    s->decoder=nd; s->rate=nr; s->width=nw; s->chans=nc;
+                    s->step=(float)nr*s->pitch/(float)PS3A_OUT_RATE;
+                    ps3a_unlock();
+                } else { ps3a_unlock(); S_CodecCloseStream(nd); return; }
+            }
+            continue;
+        }
+        frames = got / (width * chans);
+        if (frames <= 0) return;
+        if (frames > (int)capacity) frames = (int)capacity;
+        for (i=0;i<frames;i++) {
+            int l,r;
+            if(width==2) {
+                int o=i*chans*2;
+                short leftSample, rightSample;
+                /* Codec read functions return host-native 16-bit PCM:
+                 * WAV swaps on big-endian, MP3/Vorbis request big-endian,
+                 * and Opus writes native opus_int16 samples. Copy rather than
+                 * assembling little-endian bytes before storing in the short ring. */
+                memcpy(&leftSample, raw + o, sizeof(leftSample));
+                l = (int)leftSample;
+                if(chans==2) {
+                    memcpy(&rightSample, raw + o + 2, sizeof(rightSample));
+                    r = (int)rightSample;
+                } else {
+                    r = l;
+                }
+            } else {
+                int o=i*chans;
+                l=((int)raw[o]-128)<<8;
+                r=chans==2?(((int)raw[o+1]-128)<<8):l;
+            }
+            pcm[i*2]=(short)l; pcm[i*2+1]=(short)r;
+        }
+        ps3a_lock();
+        if(s->decoder!=d || s->eof) { ps3a_unlock(); return; }
+        for(i=0;i<frames;i++) {
+            uint32_t dst=(uint32_t)((s->writeFrame+(uint64_t)i)%PS3A_STREAM_RING_FRAMES);
+            g_stream_ring[slot][dst*2]=pcm[i*2];
+            g_stream_ring[slot][dst*2+1]=pcm[i*2+1];
+        }
+        s->writeFrame+=(uint64_t)frames;
+        ps3a_unlock();
+    }
+}
+
+static void ps3a_mix_streams(float *out)
+{
+    float master=(s_volume?s_volume->value:0.9f)*PS3A_MIX_HEADROOM;
+    int slot,k;
+    ps3a_lock();
+    for(slot=0;slot<PS3A_STREAM_COUNT;slot++) {
+        ps3a_stream_t *s=&g_streams[slot];
+        ps3a_voice_t v;
+        float gl,gr;
+        if(!s->active || s->paused) continue;
+        memset(&v,0,sizeof(v));
+        v.local=s->local; v.volume=s->volume; v.minDist=s->minDist; v.maxDist=s->maxDist;
+        VectorCopy(s->origin,v.origin);
+        ps3a_target_gains(&v,master,&gl,&gr);
+        for(k=0;k<PS3A_BLOCK;k++) {
+            uint64_t f0=(uint64_t)s->pos, f1;
+            uint32_t i0,i1;
+            float frac,l0,r0,l1,r1;
+            if(f0>=s->writeFrame) {
+                if(s->eof) s->active=false;
+                break;
+            }
+            f1=(f0+1<s->writeFrame)?f0+1:f0;
+            i0=(uint32_t)(f0%PS3A_STREAM_RING_FRAMES);
+            i1=(uint32_t)(f1%PS3A_STREAM_RING_FRAMES);
+            frac=(float)(s->pos-(double)f0);
+            l0=(float)g_stream_ring[slot][i0*2]*(1.0f/32768.0f);
+            r0=(float)g_stream_ring[slot][i0*2+1]*(1.0f/32768.0f);
+            l1=(float)g_stream_ring[slot][i1*2]*(1.0f/32768.0f);
+            r1=(float)g_stream_ring[slot][i1*2+1]*(1.0f/32768.0f);
+            out[k*2]+=(l0+(l1-l0)*frac)*gl;
+            out[k*2+1]+=(r0+(r1-r0)*frac)*gr;
+            s->pos+=(double)s->step;
+        }
+    }
+    ps3a_unlock();
+    for(k=0;k<PS3A_BLOCK*2;k++) {
+        if(out[k]>1.0f) out[k]=1.0f;
+        else if(out[k]<-1.0f) out[k]=-1.0f;
+    }
+}
+
+qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
+    unsigned int offsetFrames,float volume,float pitch,qboolean local,
+    const vec3_t origin,int entnum,int entchannel,float minDist,float maxDist)
+{
+    ps3a_stream_t *s;
+    snd_stream_t *d;
+    int rate=0,width=0,chans=0;
+    if(!g_up || slot<0 || slot>=PS3A_STREAM_COUNT || !filename || !filename[0]) return qfalse;
+    ps3a_stream_stop(slot);
+    d=ps3a_stream_open_decoder(filename,&rate,&width,&chans,offsetFrames);
+    if(!d) { PS3_BootTracef("PS3AUDIO: could not open stream slot=%d file=%s",slot,filename); return qfalse; }
+    s=&g_streams[slot];
+    ps3a_lock();
+    memset(s,0,sizeof(*s));
+    s->decoder=d;
+    Q_strncpyz(s->filename,filename,sizeof(s->filename));
+    s->rate=rate; s->width=width; s->chans=chans;
+    s->loopCount=loopCount;
+    s->pitch=(pitch>0.0f?pitch:1.0f);
+    s->step=(float)rate*s->pitch/(float)PS3A_OUT_RATE;
+    s->volume=volume<0.0f?1.0f:volume;
+    s->local=local?qtrue:qfalse;
+    s->entnum=entnum; s->entchannel=entchannel;
+    s->minDist=minDist>1.0f?minDist:200.0f;
+    s->maxDist=maxDist>=s->minDist?maxDist:12800.0f;
+    s->startTime=++g_tick;
+    if(origin) VectorCopy(origin,s->origin); else VectorClear(s->origin);
+    ps3a_unlock();
+    ps3a_stream_refill(slot);
+    PS3_BootTracef("PS3AUDIO: stream PCM decoder=%s rate=%d width=%d channels=%d input_order=host-native ring=host-native",
+                   filename, rate, width, chans);
+    ps3a_lock();
+    s->active=s->writeFrame>0;
+    ps3a_unlock();
+    return s->active?qtrue:qfalse;
+}
+
+void S_PS3AUDIO_StopStream(int slot) { ps3a_stream_stop(slot); }
+void S_PS3AUDIO_PauseStream(int slot,qboolean pause)
+{
+    if(slot<0 || slot>=PS3A_STREAM_COUNT) return;
+    ps3a_lock(); g_streams[slot].paused=pause?qtrue:qfalse; ps3a_unlock();
+}
+void S_PS3AUDIO_SetStreamVolume(int slot,float volume)
+{
+    if(slot<0 || slot>=PS3A_STREAM_COUNT) return;
+    ps3a_lock(); g_streams[slot].volume=volume<0.0f?0.0f:volume; ps3a_unlock();
+}
+unsigned int S_PS3AUDIO_GetStreamPosition(int slot)
+{
+    unsigned int ms=0;
+    if(slot<0 || slot>=PS3A_STREAM_COUNT) return 0;
+    ps3a_lock();
+    if(g_streams[slot].rate>0) ms=(unsigned int)(g_streams[slot].pos*1000.0/(double)g_streams[slot].rate);
+    ps3a_unlock();
+    return ms;
+}
+qboolean S_PS3AUDIO_IsStreamActive(int slot)
+{
+    qboolean active;
+    if(slot<0 || slot>=PS3A_STREAM_COUNT) return qfalse;
+    ps3a_lock(); active=g_streams[slot].active?qtrue:qfalse; ps3a_unlock();
+    return active;
+}
+
 static void ps3a_mix_block(float *out)
 {
-#ifdef OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO
-    if (ps3a_mix_block_spu(out)) {
+    int k;
+
+    if (g_ps3_test_tone) {
+        const double phaseStep = 6.28318530717958647692 * 440.0 / PS3A_OUT_RATE;
+        for (k = 0; k < PS3A_BLOCK; k++) {
+            const float sample = (float)(sinf((float)g_ps3_test_phase) * 0.20f);
+            out[k * 2] = sample;
+            out[k * 2 + 1] = sample;
+            g_ps3_test_phase += phaseStep;
+            if (g_ps3_test_phase >= 6.28318530717958647692) {
+                g_ps3_test_phase -= 6.28318530717958647692;
+            }
+        }
         g_mix_blocks_total++;
-        g_mix_blocks_spu++;
+        g_mix_blocks_testtone++;
     } else {
-        g_mix_blocks_fallback++;
+#ifdef OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO
+        if (ps3a_mix_block_spu(out)) {
+            g_mix_blocks_total++;
+            g_mix_blocks_spu++;
+        } else {
+            g_mix_blocks_fallback++;
+            ps3a_mix_block_ppu(out);
+            g_mix_blocks_total++;
+            g_mix_blocks_ppu++;
+        }
+#else
         ps3a_mix_block_ppu(out);
         g_mix_blocks_total++;
         g_mix_blocks_ppu++;
-    }
-#else
-    ps3a_mix_block_ppu(out);
-    g_mix_blocks_total++;
-    g_mix_blocks_ppu++;
 #endif
+        ps3a_mix_streams(out);
+    }
+
+    /* Measure the actual float samples written into libaudio's ring. */
+    for (k = 0; k < PS3A_BLOCK * 2; k++) {
+        const float sample = out[k];
+        const float magnitude = fabsf(sample);
+        if (magnitude > g_audio_diag_peak) g_audio_diag_peak = magnitude;
+        g_audio_diag_sumsq += (double)sample * (double)sample;
+    }
+    g_audio_diag_samples += PS3A_BLOCK * 2;
 
     /* One diagnostic every 1024 output blocks (~5.5 s at 48 kHz). */
     if ((g_mix_blocks_total & 1023u) == 0) {
+        const double rms = g_audio_diag_samples
+            ? sqrt(g_audio_diag_sumsq / (double)g_audio_diag_samples) : 0.0;
         PS3_BootTraceFastf(
-            "PS3AUDIO: mix blocks total=%u spu=%u ppu=%u fallback=%u",
+            "PS3AUDIO: mix blocks total=%u spu=%u ppu=%u fallback=%u tone=%u peak=%.4f rms=%.4f ring=%llu late=%llu",
             (unsigned)g_mix_blocks_total,
             (unsigned)g_mix_blocks_spu,
             (unsigned)g_mix_blocks_ppu,
-            (unsigned)g_mix_blocks_fallback);
+            (unsigned)g_mix_blocks_fallback,
+            (unsigned)g_mix_blocks_testtone,
+            (double)g_audio_diag_peak, rms,
+            (unsigned long long)g_audio_blocks,
+            (unsigned long long)g_audio_late_blocks);
+        g_audio_diag_peak = 0.0f;
+        g_audio_diag_sumsq = 0.0;
+        g_audio_diag_samples = 0;
     }
 }
 
@@ -592,29 +947,44 @@ static void ps3a_thread(void *arg)
     float        *ring    = (float *)(uintptr_t)g_cfg.audioDataStart;
     const u32     nb      = (u32)g_cfg.numBlocks;
     const u32     blockFloats = PS3A_BLOCK * 2;
-    u32           lastRd  = (u32)*readPtr % nb;
-    u32           wp      = (lastRd + PS3A_LEAD) % nb;
-    int           lead    = PS3A_LEAD;
+    uint64_t      readAbs = (uint64_t)*readPtr;
+    uint64_t      nextAbs = readAbs + 1;
+    u32           lastRd  = (u32)(readAbs % nb);
 
     (void)arg;
 
     while (g_run) {
-        const u32 rd  = (u32)*readPtr % nb;
-        const int adv = (int)((rd + nb - lastRd) % nb);
+        uint64_t nowAbs;
+        u32 nowMod;
 
-        lastRd = rd;
-        lead -= adv;
-        if (lead < 0) {
-            /* underrun: the reader overtook us; resynchronise just ahead of it */
-            wp   = (rd + 1) % nb;
-            lead = 1;
+        /* libaudio notifies this queue when it consumes a block. This avoids
+         * the old 1.5 ms polling loop, which could be starved by the renderer. */
+        if (g_audio_notify_ready) {
+            sys_event_t event;
+            (void)sysEventQueueReceive(g_audio_queue, &event, 100000);
+        } else {
+            usleep(1000);
         }
-        while (lead < PS3A_LEAD) {
-            ps3a_mix_block(ring + (size_t)wp * blockFloats);
-            wp = (wp + 1) % nb;
-            lead++;
+
+        nowAbs = (uint64_t)*readPtr;
+        nowMod = (u32)(nowAbs % nb);
+        readAbs += (nowMod + nb - lastRd) % nb;
+        lastRd = nowMod;
+
+        if (nextAbs <= readAbs) {
+            /* The reader overtook the producer. Skip consumed blocks, count
+             * the miss, and refill only future blocks (never overwrite audio
+             * currently being scanned out by libaudio). */
+            g_audio_late_blocks++;
+            nextAbs = readAbs + 1;
         }
-        usleep(1500);
+
+        while (nextAbs <= readAbs + PS3A_LEAD) {
+            const u32 block = (u32)(nextAbs % nb);
+            ps3a_mix_block(ring + (size_t)block * blockFloats);
+            nextAbs++;
+            g_audio_blocks++;
+        }
     }
 
     sysThreadExit(0);
@@ -625,6 +995,9 @@ static void ps3a_thread(void *arg)
 --------------------------------------------------------------------------- */
 
 extern "C" {
+
+void PS3_CompatMusicUpdate(void);
+void PS3_CompatAudioInit(void);
 
 qboolean S_PS3AUDIO_Init()
 {
@@ -641,8 +1014,15 @@ qboolean S_PS3AUDIO_Init()
         }
     }
 
+    if (!g_codecs_inited) {
+        S_CodecInit();
+        g_codecs_inited = true;
+        PS3_BootTracef("PS3AUDIO: registered WAV/MP3/Vorbis/Opus stream decoders");
+    }
+
     if (g_inited) {
         g_up = true; /* the port and the thread live for the whole run */
+        PS3_CompatAudioInit();
         return qtrue;
     }
 
@@ -669,10 +1049,9 @@ qboolean S_PS3AUDIO_Init()
     {
         audioPortParam param;
 
-        memset(&param, 0, sizeof(param));
         param.numChannels = AUDIO_PORT_2CH;
-        param.numBlocks   = AUDIO_BLOCK_8;
-        param.attrib      = 0;
+        param.numBlocks   = AUDIO_BLOCK_16;
+        param.attrib      = AUDIO_PORT_INITLEVEL;
         param.level       = 1.0f;
 
         PS3_BootTracef("PS3AUDIO: about to call audioPortOpen");
@@ -696,6 +1075,27 @@ qboolean S_PS3AUDIO_Init()
         return qfalse;
     }
 
+    /* Register the libaudio block notification queue before starting the port.
+     * The producer thread uses this event instead of timer polling. */
+    PS3_BootTracef("PS3AUDIO: about to create block notification queue");
+    rc = audioCreateNotifyEventQueue(&g_audio_queue, &g_audio_queue_key);
+    PS3_BootTracef("PS3AUDIO: audioCreateNotifyEventQueue rc=0x%x", (unsigned)rc);
+    if (rc != 0) {
+        audioPortClose(g_port);
+        audioQuit();
+        return qfalse;
+    }
+    rc = audioSetNotifyEventQueue(g_audio_queue_key);
+    PS3_BootTracef("PS3AUDIO: audioSetNotifyEventQueue rc=0x%x", (unsigned)rc);
+    if (rc != 0) {
+        sysEventQueueDestroy(g_audio_queue, 0);
+        audioPortClose(g_port);
+        audioQuit();
+        return qfalse;
+    }
+    (void)sysEventQueueDrain(g_audio_queue);
+    g_audio_notify_ready = true;
+
     /* start from silence */
     memset((void *)(uintptr_t)g_cfg.audioDataStart, 0,
            (size_t)g_cfg.numBlocks * PS3A_BLOCK * 2 * sizeof(float));
@@ -704,6 +1104,9 @@ qboolean S_PS3AUDIO_Init()
     rc = audioPortStart(g_port);
     PS3_BootTracef("PS3AUDIO: audioPortStart rc=0x%x", (unsigned)rc);
     if (rc != 0) {
+        (void)audioRemoveNotifyEventQueue(g_audio_queue_key);
+        (void)sysEventQueueDestroy(g_audio_queue, 0);
+        g_audio_notify_ready = false;
         audioPortClose(g_port);
         audioQuit();
         return qfalse;
@@ -717,19 +1120,23 @@ qboolean S_PS3AUDIO_Init()
         g_spu_mix_stage = (uint8_t *)memalign(128, PS3A_MAX_VOICES * PS3A_SPU_STAGE_PER_VOICE);
     }
     if (g_spu_mix_stage) {
-        /* worker_start is the actual capability check; failure is non-fatal. */
         (void)spukit_init(1);
         g_spu_mix_worker = spukit_worker_start(ps3_spukit_mix_bin, "mohaa-audio", 0);
     }
     PS3_BootTracef("PS3AUDIO: experimental SPU mixer %s",
                    g_spu_mix_worker ? "available" : "unavailable; PPU fallback");
+#else
+    PS3_BootTracef("PS3AUDIO: using PPU mixer (SPU path disabled for output validation)");
 #endif
 
-    rc = sysThreadCreate(&g_thread, ps3a_thread, NULL, 500, 0x10000, 0, (char *)"ps3audio");
+    rc = sysThreadCreate(&g_thread, ps3a_thread, NULL, 100, 0x10000, 0, (char *)"ps3audio");
     PS3_BootTracef("PS3AUDIO: sysThreadCreate rc=0x%x", (unsigned)rc);
     if (rc != 0) {
         g_run = 0;
         audioPortStop(g_port);
+        (void)audioRemoveNotifyEventQueue(g_audio_queue_key);
+        (void)sysEventQueueDestroy(g_audio_queue, 0);
+        g_audio_notify_ready = false;
         audioPortClose(g_port);
         audioQuit();
         return qfalse;
@@ -738,19 +1145,21 @@ qboolean S_PS3AUDIO_Init()
     g_inited = true;
     g_up     = true;
     PS3_BootTracef("PS3AUDIO: up (48 kHz stereo, %u blocks)", (unsigned)g_cfg.numBlocks);
+    PS3_BootTracef("PS3AUDIO: startup mode=%s", g_ps3_test_tone ? "440Hz test tone" : "normal game mix");
+    PS3_BootTracef("PS3AUDIO: normal mixer headroom=%.2f (%.1f dB)",
+                   (double)PS3A_MIX_HEADROOM, 20.0 * log10((double)PS3A_MIX_HEADROOM));
+    PS3_CompatAudioInit();
+    Cmd_AddCommand("ps3audiotest", ps3a_testtone_cmd);
     return qtrue;
 }
 
 void S_PS3AUDIO_Shutdown()
 {
     int i;
-
-    /* Keep the port and the thread: they cost nothing while no voice is active, and
-     * tearing libaudio down and up again on every map load is needless risk. */
+    /* Keep libaudio alive over map changes, but release every decoded stream. */
+    for (i = 0; i < PS3A_STREAM_COUNT; i++) ps3a_stream_stop(i);
     ps3a_lock();
-    for (i = 0; i < PS3A_MAX_VOICES; i++) {
-        ps3a_free_voice(&g_voice[i]);
-    }
+    for (i = 0; i < PS3A_MAX_VOICES; i++) ps3a_free_voice(&g_voice[i]);
     ps3a_unlock();
     g_up = false;
 }
@@ -770,11 +1179,60 @@ void S_PS3AUDIO_StartSound(
     ps3a_voice_t *v;
     sfx_t        *sfx;
 
-    (void)stream;
     if (!g_up || sfxHandle <= 0 || sfxHandle >= s_numSfx) {
         return;
     }
     sfx = &s_knownSfx[sfxHandle];
+    if (stream || (sfx->iFlags & (SFX_FLAG_STREAMED | SFX_FLAG_MP3))) {
+        int slot = -1, i;
+        vec3_t streamOrigin;
+        bool local;
+        entnum &= ~S_FLAG_DO_CALLBACK;
+        if (entnum < 0 || entnum >= MAX_GENTITIES) entnum = 0;
+        local = (entchannel == CHAN_MENU || entchannel == CHAN_LOCAL
+                 || (entnum == s_iListenerNumber && entnum != 0)
+                 || (!origin && entnum == 0));
+        if (origin) VectorCopy(origin, streamOrigin);
+        else VectorCopy(s_entity[entnum].position, streamOrigin);
+        ps3a_lock();
+        for (i = PS3A_STREAM_FIRST_SFX; i < PS3A_STREAM_COUNT; i++) {
+            if (g_streams[i].active && entchannel != CHAN_AUTO
+                && g_streams[i].entnum == entnum && g_streams[i].entchannel == entchannel) {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0) {
+            for (i = PS3A_STREAM_FIRST_SFX; i < PS3A_STREAM_COUNT; i++) {
+                if (!g_streams[i].active) { slot = i; break; }
+            }
+        }
+        if (slot < 0) {
+            int oldest = 0x7fffffff;
+            for (i = PS3A_STREAM_FIRST_SFX; i < PS3A_STREAM_COUNT; i++) {
+                if (!g_streams[i].isLoopFx && g_streams[i].startTime < oldest) {
+                    oldest = g_streams[i].startTime;
+                    slot = i;
+                }
+            }
+        }
+        ps3a_unlock();
+        if (slot >= 0) {
+            float md = min_dist < 0.0f ? 200.0f : min_dist;
+            float xd = min_dist < 0.0f ? 12800.0f : max_dist;
+            if (volume < 0.0f) volume = 1.0f;
+            if (pitch <= 0.0f) pitch = 1.0f;
+            if (S_PS3AUDIO_StartStream(slot, sfx->name, 1, 0, volume, pitch,
+                                       local ? qtrue : qfalse, streamOrigin,
+                                       entnum, entchannel, md, xd)) {
+                ps3a_lock();
+                g_streams[slot].sfxHandle = sfxHandle;
+                g_streams[slot].follow = (!origin && entnum != 0) ? true : false;
+                ps3a_unlock();
+            }
+        }
+        return;
+    }
     if (!ps3a_sfx_usable(sfx)) {
         return;
     }
@@ -845,6 +1303,45 @@ void S_PS3AUDIO_AddLoopingSound(
         return;
     }
     sfx = &s_knownSfx[sfxHandle];
+    if (sfx->iFlags & (SFX_FLAG_STREAMED | SFX_FLAG_MP3)) {
+        int slot = -1, i;
+        ps3a_lock();
+        for (i = PS3A_STREAM_FIRST_SFX; i < PS3A_STREAM_COUNT; i++) {
+            if (g_streams[i].active && g_streams[i].isLoopFx
+                && g_streams[i].sfxHandle == sfxHandle) {
+                vec3_t delta;
+                VectorSubtract(g_streams[i].origin, origin, delta);
+                if (DotProduct(delta, delta) < 4.0f) {
+                    slot = i;
+                    g_streams[i].seen = true;
+                    g_streams[i].volume = volume;
+                    break;
+                }
+            }
+        }
+        if (slot < 0) {
+            for (i = PS3A_STREAM_FIRST_SFX; i < PS3A_STREAM_COUNT; i++) {
+                if (!g_streams[i].active) { slot = i; break; }
+            }
+        }
+        ps3a_unlock();
+        if (slot >= 0 && !S_PS3AUDIO_IsStreamActive(slot)) {
+            if (min_dist < 0.0f) { min_dist = 200.0f; max_dist = 12800.0f; }
+            if (volume < 0.0f) volume = 1.0f;
+            if (pitch <= 0.0f) pitch = 1.0f;
+            if (S_PS3AUDIO_StartStream(slot, sfx->name, 0, 0, volume,
+                    pitch, qfalse, origin, 0, CHAN_AUTO,
+                    min_dist > 1.0f ? min_dist : 200.0f,
+                    max_dist >= min_dist ? max_dist : 12800.0f)) {
+                ps3a_lock();
+                g_streams[slot].isLoopFx = true;
+                g_streams[slot].seen = true;
+                g_streams[slot].sfxHandle = sfxHandle;
+                ps3a_unlock();
+            }
+        }
+        return;
+    }
     if (!ps3a_sfx_usable(sfx)) {
         return;
     }
@@ -911,9 +1408,10 @@ void S_PS3AUDIO_ClearLoopingSounds()
     }
     ps3a_lock();
     for (i = 0; i < PS3A_MAX_VOICES; i++) {
-        if (g_voice[i].active && g_voice[i].isLoopFx) {
-            g_voice[i].seen = false;
-        }
+        if (g_voice[i].active && g_voice[i].isLoopFx) g_voice[i].seen = false;
+    }
+    for (i = PS3A_STREAM_FIRST_SFX; i < PS3A_STREAM_COUNT; i++) {
+        if (g_streams[i].active && g_streams[i].isLoopFx) g_streams[i].seen = false;
     }
     ps3a_unlock();
 }
@@ -929,10 +1427,13 @@ void S_PS3AUDIO_StopSound(int entnum, int channel)
     ps3a_lock();
     for (i = 0; i < PS3A_MAX_VOICES; i++) {
         ps3a_voice_t *v = &g_voice[i];
-
-        if (v->active && !v->isLoopFx && v->entnum == entnum && (channel == CHAN_AUTO || v->entchannel == channel)) {
+        if (v->active && !v->isLoopFx && v->entnum == entnum && (channel == CHAN_AUTO || v->entchannel == channel))
             ps3a_free_voice(v);
-        }
+    }
+    for (i = PS3A_STREAM_FIRST_SFX; i < PS3A_STREAM_COUNT; i++) {
+        if (g_streams[i].active && !g_streams[i].isLoopFx && g_streams[i].entnum == entnum
+            && (channel == CHAN_AUTO || g_streams[i].entchannel == channel))
+            g_streams[i].active = false;
     }
     ps3a_unlock();
 }
@@ -940,12 +1441,14 @@ void S_PS3AUDIO_StopSound(int entnum, int channel)
 void S_PS3AUDIO_StopAllSounds(qboolean stop_music)
 {
     int i;
-
-    (void)stop_music;
-    ps3a_lock();
-    for (i = 0; i < PS3A_MAX_VOICES; i++) {
-        ps3a_free_voice(&g_voice[i]);
+    for (i = PS3A_STREAM_FIRST_SFX; i < PS3A_STREAM_COUNT; i++) ps3a_stream_stop(i);
+    ps3a_stream_stop(2);
+    if (stop_music) {
+        ps3a_stream_stop(0);
+        ps3a_stream_stop(1);
     }
+    ps3a_lock();
+    for (i = 0; i < PS3A_MAX_VOICES; i++) ps3a_free_voice(&g_voice[i]);
     ps3a_unlock();
 }
 
@@ -968,43 +1471,61 @@ void S_PS3AUDIO_SetReverb(int, float) {}
 void S_PS3AUDIO_Update()
 {
     int i;
+    if (!g_up) return;
 
-    if (!g_up) {
-        return;
-    }
     ps3a_lock();
     for (i = 0; i < PS3A_MAX_VOICES; i++) {
         ps3a_voice_t *v = &g_voice[i];
-
         if (v->active) {
-            if (v->isLoopFx && !v->seen) {
-                ps3a_free_voice(v);
-                continue;
-            }
-            if (v->follow && v->entnum >= 0 && v->entnum < MAX_GENTITIES) {
+            if (v->isLoopFx && !v->seen) { ps3a_free_voice(v); continue; }
+            if (v->follow && v->entnum >= 0 && v->entnum < MAX_GENTITIES)
                 VectorCopy(s_entity[v->entnum].position, v->origin);
-            }
         } else if (v->own) {
-            /* the mixer finished this voice: release its decoded buffer */
             ps3a_free_voice(v);
         }
     }
+    for (i = PS3A_STREAM_FIRST_SFX; i < PS3A_STREAM_COUNT; i++) {
+        if (g_streams[i].active && g_streams[i].isLoopFx && !g_streams[i].seen)
+            g_streams[i].active = false;
+        if (g_streams[i].active && g_streams[i].follow
+            && g_streams[i].entnum >= 0 && g_streams[i].entnum < MAX_GENTITIES)
+            VectorCopy(s_entity[g_streams[i].entnum].position, g_streams[i].origin);
+    }
     ps3a_unlock();
+
+    for (i = 0; i < PS3A_STREAM_COUNT; i++) {
+        snd_stream_t *finished = NULL;
+        ps3a_stream_refill(i);
+        ps3a_lock();
+        if (!g_streams[i].active && g_streams[i].decoder) {
+            finished = g_streams[i].decoder;
+            g_streams[i].decoder = NULL;
+            g_streams[i].filename[0] = '\0';
+            g_streams[i].eof = true;
+        }
+        ps3a_unlock();
+        if (finished) S_CodecCloseStream(finished);
+    }
+    PS3_CompatMusicUpdate();
 }
 
 const char *S_PS3AUDIO_GetMusicFilename()
 {
-    return "";
+    return g_streams[0].filename;
 }
 
 int S_PS3AUDIO_GetMusicLoopCount()
 {
-    return 0;
+    return g_streams[0].loopCount;
 }
 
 unsigned int S_PS3AUDIO_GetMusicOffset()
 {
-    return 0;
+    unsigned int offset;
+    ps3a_lock();
+    offset = (unsigned int)g_streams[0].pos;
+    ps3a_unlock();
+    return offset;
 }
 
 } /* extern "C" */
