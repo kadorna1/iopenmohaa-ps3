@@ -718,10 +718,8 @@ void S_Update()
         return;
     }
 
-    if (server_loading) {
-        return;
-    }
-
+    /* Native PS3 streams are decoded/refilled here. Keep this running during
+     * map loading so streamed dialogue and soundtrack data do not starve. */
     S_Driver_Update();
 }
 
