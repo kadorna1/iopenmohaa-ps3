@@ -101,6 +101,9 @@ typedef struct {
 static ps3a_stream_t g_streams[PS3A_STREAM_COUNT];
 static short g_stream_ring[PS3A_STREAM_COUNT][PS3A_STREAM_RING_FRAMES * 2]
     __attribute__((aligned(128)));
+#define PS3A_SYNTH_TEST_FRAMES 48000
+static byte g_ps3_synth_voice_pcm[PS3A_SYNTH_TEST_FRAMES * 2]
+    __attribute__((aligned(128)));
 static bool g_codecs_inited = false;
 
 static sys_mutex_t  g_lock;
@@ -140,7 +143,9 @@ static uint32_t g_audio_diag_samples = 0;
 typedef enum {
     PS3A_MIX_NORMAL = 0,
     PS3A_MIX_VOICES = 1,
-    PS3A_MIX_STREAMS = 2
+    PS3A_MIX_STREAMS = 2,
+    PS3A_MIX_PCM_VOICE_TEST = 3,
+    PS3A_MIX_PCM_STREAM_TEST = 4
 } ps3a_mix_mode_t;
 
 typedef struct {
@@ -193,6 +198,8 @@ static const char *ps3a_mix_mode_name(void)
     switch (g_ps3_mix_mode) {
     case PS3A_MIX_VOICES: return "voices";
     case PS3A_MIX_STREAMS: return "streams";
+    case PS3A_MIX_PCM_VOICE_TEST: return "pcm-voice";
+    case PS3A_MIX_PCM_STREAM_TEST: return "pcm-stream";
     default: return "normal";
     }
 }
@@ -206,7 +213,11 @@ static void ps3a_load_mix_mode(void)
         fclose(f);
     }
 
-    if (!strncmp(mode, "voices", 6)) {
+    if (!strncmp(mode, "pcm-voice", 9)) {
+        g_ps3_mix_mode = PS3A_MIX_PCM_VOICE_TEST;
+    } else if (!strncmp(mode, "pcm-stream", 10)) {
+        g_ps3_mix_mode = PS3A_MIX_PCM_STREAM_TEST;
+    } else if (!strncmp(mode, "voices", 6)) {
         g_ps3_mix_mode = PS3A_MIX_VOICES;
     } else if (!strncmp(mode, "streams", 7)) {
         g_ps3_mix_mode = PS3A_MIX_STREAMS;
@@ -280,6 +291,59 @@ static inline void ps3a_store_s16_le(byte *dst, int sample)
     const uint16_t value = (uint16_t)sample;
     dst[0] = (byte)(value & 0xffu);
     dst[1] = (byte)(value >> 8);
+}
+
+/* Build deterministic test inputs that bypass game-asset decoding. Both are
+ * the same 375 Hz, 48 kHz waveform and amplitude, but enter through different
+ * mixer input representations: LE bytes for voices, native shorts for streams. */
+static void ps3a_init_pcm_test_source(void)
+{
+    const double tau = 6.28318530717958647692;
+    int i;
+
+    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST) {
+        ps3a_voice_t *v = &g_voice[0];
+        for (i = 0; i < PS3A_SYNTH_TEST_FRAMES; i++) {
+            const double phase = tau * (double)(i % 128) / 128.0;
+            const int sample = (int)(sinf((float)phase) * 12000.0f);
+            ps3a_store_s16_le(g_ps3_synth_voice_pcm + (size_t)i * 2, sample);
+        }
+        memset(v, 0, sizeof(*v));
+        v->pcm = g_ps3_synth_voice_pcm;
+        v->frames = PS3A_SYNTH_TEST_FRAMES;
+        v->width = 2;
+        v->chans = 1;
+        v->step = 1.0;
+        v->volume = 1.0f;
+        v->minDist = 1.0f;
+        v->maxDist = 1.0f;
+        v->local = true;
+        v->loop = true;
+        v->active = true;
+    } else if (g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) {
+        ps3a_stream_t *s = &g_streams[0];
+        for (i = 0; i < PS3A_STREAM_RING_FRAMES; i++) {
+            const double phase = tau * (double)(i % 128) / 128.0;
+            const short sample = (short)(sinf((float)phase) * 12000.0f);
+            g_stream_ring[0][i * 2] = sample;
+            g_stream_ring[0][i * 2 + 1] = sample;
+        }
+        memset(s, 0, sizeof(*s));
+        s->active = true;
+        s->local = true;
+        s->width = 2;
+        s->chans = 2;
+        s->rate = (int)PS3A_OUT_RATE;
+        s->step = 1.0f;
+        s->pitch = 1.0f;
+        s->volume = 1.0f;
+        s->minDist = 1.0f;
+        s->maxDist = 1.0f;
+        s->writeFrame = 0xFFFFFFFFFFFFFFFFULL;
+    }
+
+    PS3_BootTracef("PS3AUDIO: synthetic PCM source initialized mode=%s frequency=375Hz rate=48000 amplitude=12000",
+                   ps3a_mix_mode_name());
 }
 
 /* Decodes into a malloc'd little-endian 16-bit PCM buffer. Returns the frame count. */
@@ -935,7 +999,9 @@ qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
     ps3a_stream_t *s;
     snd_stream_t *d;
     int rate=0,width=0,chans=0;
-    if(!g_up || slot<0 || slot>=PS3A_STREAM_COUNT || !filename || !filename[0]) return qfalse;
+    if(!g_up || g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+       g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST ||
+       slot<0 || slot>=PS3A_STREAM_COUNT || !filename || !filename[0]) return qfalse;
     ps3a_stream_stop(slot);
     d=ps3a_stream_open_decoder(filename,&rate,&width,&chans,offsetFrames);
     if(!d) { PS3_BootTracef("PS3AUDIO: could not open stream slot=%d file=%s",slot,filename); return qfalse; }
@@ -997,7 +1063,16 @@ static void ps3a_mix_block(float *out)
 {
     int k;
 
-    if (g_ps3_test_tone) {
+    if (g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) {
+        memset(out, 0, (size_t)PS3A_BLOCK * 2 * sizeof(float));
+        g_mix_blocks_total++;
+        ps3a_mix_streams(out);
+    } else if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST) {
+        ps3a_mix_block_ppu(out);
+        g_mix_blocks_total++;
+        g_mix_blocks_ppu++;
+        ps3a_limit_voice_mix(out);
+    } else if (g_ps3_test_tone) {
         const double phaseStep = 6.28318530717958647692 * 440.0 / PS3A_OUT_RATE;
         for (k = 0; k < PS3A_BLOCK; k++) {
             const float sample = (float)(sinf((float)g_ps3_test_phase) * 0.20f);
@@ -1175,6 +1250,11 @@ qboolean S_PS3AUDIO_Init()
     }
 
     memset(g_voice, 0, sizeof(g_voice));
+    memset(g_streams, 0, sizeof(g_streams));
+    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) {
+        ps3a_init_pcm_test_source();
+    }
 
     if (!g_lockMade) {
         sys_mutex_attr_t attr;
@@ -1327,7 +1407,9 @@ void S_PS3AUDIO_StartSound(
     ps3a_voice_t *v;
     sfx_t        *sfx;
 
-    if (!g_up || sfxHandle <= 0 || sfxHandle >= s_numSfx) {
+    if (!g_up || g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST ||
+        sfxHandle <= 0 || sfxHandle >= s_numSfx) {
         return;
     }
     sfx = &s_knownSfx[sfxHandle];
@@ -1447,7 +1529,9 @@ void S_PS3AUDIO_AddLoopingSound(
     int           i;
 
     (void)velocity;
-    if (!g_up || sfxHandle <= 0 || sfxHandle >= s_numSfx) {
+    if (!g_up || g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST ||
+        sfxHandle <= 0 || sfxHandle >= s_numSfx) {
         return;
     }
     sfx = &s_knownSfx[sfxHandle];
