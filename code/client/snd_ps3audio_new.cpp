@@ -768,7 +768,6 @@ qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
     s->decoder=d;
     Q_strncpyz(s->filename,filename,sizeof(s->filename));
     s->rate=rate; s->width=width; s->chans=chans;
-    s->startOffset=offsetFrames;
     s->loopCount=loopCount;
     s->pitch=(pitch>0.0f?pitch:1.0f);
     s->step=(float)rate*s->pitch/(float)PS3A_OUT_RATE;
