@@ -122,6 +122,12 @@ static uint32_t g_mix_blocks_total    = 0;
 static uint32_t g_mix_blocks_spu      = 0;
 static uint32_t g_mix_blocks_ppu      = 0;
 static uint32_t g_mix_blocks_fallback = 0;
+static uint32_t g_mix_blocks_testtone = 0;
+static volatile int g_ps3_test_tone = 0;
+static double g_ps3_test_phase = 0.0;
+static double g_audio_diag_sumsq = 0.0;
+static float g_audio_diag_peak = 0.0f;
+static uint32_t g_audio_diag_samples = 0;
 
 
 static vec3_t g_lpos  = {0, 0, 0};
@@ -146,6 +152,18 @@ static void ps3a_unlock()
     if (g_lockMade) {
         sysMutexUnlock(g_lock);
     }
+}
+
+/* Diagnostic output path: issue "ps3audiotest 1" in the in-game console
+ * to replace game audio with a quiet 440 Hz tone; use "ps3audiotest 0" to
+ * restore normal mixing. This separates libaudio/ring output from PCM decode. */
+static void ps3a_testtone_cmd()
+{
+    if (Cmd_Argc() > 1) {
+        g_ps3_test_tone = atoi(Cmd_Argv(1)) ? 1 : 0;
+    }
+    Com_Printf("PS3 audio test tone: %s (ps3audiotest 1|0)\\n",
+               g_ps3_test_tone ? "ON" : "OFF");
 }
 
 /* ---------------------------------------------------------------------------
@@ -823,34 +841,66 @@ qboolean S_PS3AUDIO_IsStreamActive(int slot)
 
 static void ps3a_mix_block(float *out)
 {
-#ifdef OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO
-    if (ps3a_mix_block_spu(out)) {
+    int k;
+
+    if (g_ps3_test_tone) {
+        const double phaseStep = 6.28318530717958647692 * 440.0 / PS3A_OUT_RATE;
+        for (k = 0; k < PS3A_BLOCK; k++) {
+            const float sample = (float)(sinf((float)g_ps3_test_phase) * 0.08f);
+            out[k * 2] = sample;
+            out[k * 2 + 1] = sample;
+            g_ps3_test_phase += phaseStep;
+            if (g_ps3_test_phase >= 6.28318530717958647692) {
+                g_ps3_test_phase -= 6.28318530717958647692;
+            }
+        }
         g_mix_blocks_total++;
-        g_mix_blocks_spu++;
+        g_mix_blocks_testtone++;
     } else {
-        g_mix_blocks_fallback++;
+#ifdef OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO
+        if (ps3a_mix_block_spu(out)) {
+            g_mix_blocks_total++;
+            g_mix_blocks_spu++;
+        } else {
+            g_mix_blocks_fallback++;
+            ps3a_mix_block_ppu(out);
+            g_mix_blocks_total++;
+            g_mix_blocks_ppu++;
+        }
+#else
         ps3a_mix_block_ppu(out);
         g_mix_blocks_total++;
         g_mix_blocks_ppu++;
-    }
-#else
-    ps3a_mix_block_ppu(out);
-    g_mix_blocks_total++;
-    g_mix_blocks_ppu++;
 #endif
+        ps3a_mix_streams(out);
+    }
 
-    ps3a_mix_streams(out);
+    /* Measure the actual float samples written into libaudio's ring. */
+    for (k = 0; k < PS3A_BLOCK * 2; k++) {
+        const float sample = out[k];
+        const float magnitude = fabsf(sample);
+        if (magnitude > g_audio_diag_peak) g_audio_diag_peak = magnitude;
+        g_audio_diag_sumsq += (double)sample * (double)sample;
+    }
+    g_audio_diag_samples += PS3A_BLOCK * 2;
 
     /* One diagnostic every 1024 output blocks (~5.5 s at 48 kHz). */
     if ((g_mix_blocks_total & 1023u) == 0) {
+        const double rms = g_audio_diag_samples
+            ? sqrt(g_audio_diag_sumsq / (double)g_audio_diag_samples) : 0.0;
         PS3_BootTraceFastf(
-            "PS3AUDIO: mix blocks total=%u spu=%u ppu=%u fallback=%u ring=%llu late=%llu",
+            "PS3AUDIO: mix blocks total=%u spu=%u ppu=%u fallback=%u tone=%u peak=%.4f rms=%.4f ring=%llu late=%llu",
             (unsigned)g_mix_blocks_total,
             (unsigned)g_mix_blocks_spu,
             (unsigned)g_mix_blocks_ppu,
             (unsigned)g_mix_blocks_fallback,
+            (unsigned)g_mix_blocks_testtone,
+            (double)g_audio_diag_peak, rms,
             (unsigned long long)g_audio_blocks,
             (unsigned long long)g_audio_late_blocks);
+        g_audio_diag_peak = 0.0f;
+        g_audio_diag_sumsq = 0.0;
+        g_audio_diag_samples = 0;
     }
 }
 
@@ -1059,6 +1109,7 @@ qboolean S_PS3AUDIO_Init()
     g_up     = true;
     PS3_BootTracef("PS3AUDIO: up (48 kHz stereo, %u blocks)", (unsigned)g_cfg.numBlocks);
     PS3_CompatAudioInit();
+    Cmd_AddCommand("ps3audiotest", ps3a_testtone_cmd);
     return qtrue;
 }
 
