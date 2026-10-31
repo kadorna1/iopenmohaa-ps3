@@ -19,6 +19,7 @@ static int ps3_music_current_mood = mood_none;
 static int ps3_music_fallback_mood = mood_none;
 static qboolean ps3_music_active;
 static qboolean ps3_music_loaded;
+static qboolean ps3_music_manual_stream;
 static char ps3_current_soundtrack[MAX_RES_NAME];
 static float ps3_music_volume = 1.0f;
 static float ps3_music_volume_start = 1.0f;
@@ -71,6 +72,7 @@ static qboolean PS3_MusicStartSong(int songnum)
 static void PS3_MusicUpdateInternal(void)
 {
     int selected;
+    if (ps3_music_manual_stream) return;
     if (ps3_music_fade_seconds > 0.0f) {
         float elapsed = (float)(cls.realtime - ps3_music_fade_start) / 1000.0f;
         float t = elapsed / ps3_music_fade_seconds;
@@ -128,6 +130,7 @@ static void PS3_MusicCommand(void)
         return;
     }
     ps3_music_active = qfalse;
+    ps3_music_manual_stream = qtrue;
     ps3_music_song = -1;
     (void)S_PS3AUDIO_StartStream(0, Cmd_Argv(1), 0, 0,
         s_musicVolume ? s_musicVolume->value : 0.9f, 1.0f,
@@ -317,6 +320,7 @@ void MUSIC_SongEnded(void)
 
 void MUSIC_NewSoundtrack(const char *name)
 {
+    ps3_music_manual_stream = qfalse;
     if (!name) return;
     if (!Q_stricmp(name, "none") || !name[0]) {
         MUSIC_FreeAllSongs();
@@ -332,6 +336,7 @@ void MUSIC_NewSoundtrack(const char *name)
 
 void MUSIC_UpdateMood(int current, int fallback)
 {
+    ps3_music_manual_stream = qfalse;
     ps3_music_current_mood = current;
     ps3_music_fallback_mood = fallback;
     ps3_music_active = qtrue;
@@ -353,12 +358,14 @@ void MUSIC_UpdateVolume(float volume, float fade_time)
 
 void MUSIC_StopAllSongs(void)
 {
+    ps3_music_manual_stream = qfalse;
     S_PS3AUDIO_StopStream(0);
     ps3_music_song = -1;
 }
 
 void MUSIC_FreeAllSongs(void)
 {
+    ps3_music_manual_stream = qfalse;
     MUSIC_StopAllSongs();
     ps3_music_current_mood = mood_none;
     ps3_music_fallback_mood = mood_none;
@@ -391,6 +398,7 @@ void S_loadsoundtrack(void)
     if (MUSIC_LoadSoundtrackFile(Cmd_Argv(1))) {
         Q_strncpyz(ps3_current_soundtrack, Cmd_Argv(1), sizeof(ps3_current_soundtrack));
         ps3_music_active = qtrue;
+        ps3_music_manual_stream = qfalse;
     }
 }
 
@@ -429,6 +437,7 @@ void MUSIC_StopChannel(int channel_number)
 
 qboolean MUSIC_PlaySong(const char *alias)
 {
+    ps3_music_manual_stream = qfalse;
     int song = MUSIC_FindSong(alias);
     if (song < 0) return qfalse;
     ps3_music_active = qtrue;
