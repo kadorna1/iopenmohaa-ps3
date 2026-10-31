@@ -1031,14 +1031,23 @@ qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
     return s->active?qtrue:qfalse;
 }
 
-void S_PS3AUDIO_StopStream(int slot) { ps3a_stream_stop(slot); }
+void S_PS3AUDIO_StopStream(int slot)
+{
+    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) return;
+    ps3a_stream_stop(slot);
+}
 void S_PS3AUDIO_PauseStream(int slot,qboolean pause)
 {
+    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) return;
     if(slot<0 || slot>=PS3A_STREAM_COUNT) return;
     ps3a_lock(); g_streams[slot].paused=pause?qtrue:qfalse; ps3a_unlock();
 }
 void S_PS3AUDIO_SetStreamVolume(int slot,float volume)
 {
+    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) return;
     if(slot<0 || slot>=PS3A_STREAM_COUNT) return;
     ps3a_lock(); g_streams[slot].volume=volume<0.0f?0.0f:volume; ps3a_unlock();
 }
@@ -1652,6 +1661,8 @@ void S_PS3AUDIO_StopSound(int entnum, int channel)
 {
     int i;
 
+    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) return;
     if (!g_up) {
         return;
     }
@@ -1673,6 +1684,8 @@ void S_PS3AUDIO_StopSound(int entnum, int channel)
 void S_PS3AUDIO_StopAllSounds(qboolean stop_music)
 {
     int i;
+    if (g_ps3_mix_mode == PS3A_MIX_PCM_VOICE_TEST ||
+        g_ps3_mix_mode == PS3A_MIX_PCM_STREAM_TEST) return;
     for (i = PS3A_STREAM_FIRST_SFX; i < PS3A_STREAM_COUNT; i++) ps3a_stream_stop(i);
     ps3a_stream_stop(2);
     if (stop_music) {
