@@ -347,13 +347,13 @@ jobs:
             ps3-ccache-stats.txt
 
       - name: Publish GitHub release
-        if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish v0.1.0.0a]')
+        if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish v0.1.0.0b]')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create v0.1.0.0a dist/*.pkg \
+          gh release create v0.1.0.0b dist/*.pkg \
             --target "$GITHUB_SHA" \
-            --title "Full audio support" \
-            --notes "Static-free PS3 audio release. Replaces libmad with minimp3 and includes the tested native PS3 streamed-audio/music backend, host-native PCM handling, load-time stream refills, and 6 dB mix headroom. PS3 release binaries are built without DWARF debug information and stripped of symbols."
+            --title "shader caching enabled" \
+            --notes "Shader-caching release for iOpenMOHAA PS3. Adds the pre-indexed Allied Assault material shader cache, offline generation from PK3 archives, runtime cache integrity and manifest validation with automatic fallback to the original parser, and cache diagnostics. Includes DualShock 3 aim assist enabled by default at maximum strength (1.0), configurable through archived cvars. Retains the static-free minimp3 audio backend, streamed audio support, 720p default display configuration, and stripped PS3 release binaries."
