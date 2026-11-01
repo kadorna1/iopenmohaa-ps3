@@ -46,8 +46,9 @@ jobs:
           config=assets/ps3_usrdir/main/autoexec.cfg
           grep -Fqx 'seta ps3_aim_assist "1"' "$config"
           grep -Fqx 'seta ps3_aim_assist_strength "1.0"' "$config"
-          grep -Fq 'in_buttons[1].wasPressed' code/client/cl_input.cpp
-          grep -Fq 'cge->CG_AimAssistNotify(enabled)' code/client/cl_input.cpp
+          grep -Fq 'CL_PS3ToggleAimAssist' code/client/cl_input.cpp
+          grep -Fq 'key == K_JOY7 && down && keys[key].repeats == 1' code/client/cl_keys.cpp
+          grep -Fq 'PS3_AIM_ASSIST_TOGGLE' code/client/cl_keys.cpp
           grep -Fq 'cge.CG_AimAssistNotify' code/cgame/cg_main.c
           grep -Fq '"AIM ASSIST ON"' code/cgame/cg_drawtools.cpp
           grep -Fq '"AIM ASSIST OFF"' code/cgame/cg_drawtools.cpp

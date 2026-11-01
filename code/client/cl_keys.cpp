@@ -1094,6 +1094,22 @@ void CL_KeyEvent(int key, qboolean down, unsigned time)
         }
     }
 
+#if defined(__PS3__)
+    /*
+     * L2 is K_JOY7 in the PS3 pad map. Handle its physical press edge before
+     * binding dispatch, so even an existing custom K_JOY7 bind cannot bypass
+     * the aim-assist toggle. The normal bound action still runs afterwards.
+     */
+    if (key == K_JOY7 && down && keys[key].repeats == 1) {
+        const qboolean toggled = CL_PS3ToggleAimAssist();
+        PS3_BootTraceFastf(
+            "PS3_AIM_ASSIST_TOGGLE key=%d triggered=%d enabled=%d state=%d catcher=0x%x",
+            key, toggled, Cvar_VariableIntegerValue("ps3_aim_assist"),
+            clc.state, Key_GetCatcher()
+        );
+    }
+#endif
+
     if ((key == K_ALT || key == K_INS) && cl_altbindings->integer) {
         alt_down = down;
     }

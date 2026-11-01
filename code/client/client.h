@@ -596,6 +596,9 @@ void IN_MouseOff( void );
 void CL_UpdateMouse();
 
 void CL_InitInput (void);
+#if defined(__PS3__)
+qboolean CL_PS3ToggleAimAssist(void);
+#endif
 void CL_ShutdownInput(void);
 void CL_SendCmd (void);
 void CL_ClearState (void);

@@ -800,6 +800,38 @@ void CL_FinishMove( usercmd_t *cmd ) {
 }
 
 
+#if defined(__PS3__)
+/*
+=================
+CL_PS3ToggleAimAssist
+
+Called from the physical DS3 L2 key-down edge. This deliberately does not
+depend on the saved binding for K_JOY7, so user configs cannot bypass it.
+=================
+*/
+qboolean CL_PS3ToggleAimAssist(void)
+{
+    qboolean enabled;
+
+    if (clc.state != CA_ACTIVE ||
+        Key_GetCatcher() != 0 ||
+        UI_MenuActive() ||
+        UI_ConsoleIsOpen()) {
+        return qfalse;
+    }
+
+    enabled = !Cvar_VariableIntegerValue("ps3_aim_assist");
+    Cvar_Set("ps3_aim_assist", enabled ? "1" : "0");
+
+    if (cge && cge->CG_AimAssistNotify) {
+        cge->CG_AimAssistNotify(enabled);
+    }
+
+    Com_Printf("PS3 aim assist: %s\n", enabled ? "ON" : "OFF");
+    return qtrue;
+}
+#endif
+
 /*
 =================
 CL_CreateCmd
@@ -811,24 +843,7 @@ usercmd_t CL_CreateCmd( void ) {
 
 	VectorCopy( cl.viewangles, oldAngles );
 
-#if defined(__PS3__)
-	/*
-	 * Secondary fire doubles as the aim-assist toggle. Consume the press edge
-	 * before CL_CmdButtons clears wasPressed; holding the button toggles once.
-	 * The regular secondary-fire command is still passed to the game.
-	 */
-	if (in_buttons[1].wasPressed &&
-		clc.state == CA_ACTIVE &&
-		Key_GetCatcher() == 0 &&
-		!UI_MenuActive() &&
-		!UI_ConsoleIsOpen()) {
-		const qboolean enabled = !Cvar_VariableIntegerValue("ps3_aim_assist");
-		Cvar_Set("ps3_aim_assist", enabled ? "1" : "0");
-		if (cge && cge->CG_AimAssistNotify) {
-			cge->CG_AimAssistNotify(enabled);
-		}
-	}
-#endif
+
 
 	// keyboard angle adjustment
 	CL_AdjustAngles ();
