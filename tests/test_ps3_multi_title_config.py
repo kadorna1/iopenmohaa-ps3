@@ -44,7 +44,7 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
     def test_workflow_builds_packages_and_saves_incremental_manifests(self):
         for appid in ("OMOHAA020", "OMOHAB020", "OMOHAS020"):
             self.assertIn(f"build-ps3-{appid}", self.workflow)
-            self.assertIn(f"iOpenMOHAA-PS3-{appid}", self.workflow)
+        self.assertIn('--name "iOpenMOHAA-PS3-$appid"', self.workflow)
         self.assertIn("--appid", self.workflow)
         self.assertIn("--extra-usrdir assets/ps3_usrdir", self.workflow)
         self.assertIn("Save source hashes for the next incremental build", self.workflow)
