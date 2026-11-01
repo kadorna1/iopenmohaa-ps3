@@ -137,7 +137,8 @@ jobs:
           grep -Fq 'cge.CG_AimAssistNotify' code/cgame/cg_main.c
           grep -Fq '"AIM ASSIST ON"' code/cgame/cg_drawtools.cpp
           grep -Fq '"AIM ASSIST OFF"' code/cgame/cg_drawtools.cpp
-          grep -Fq -- '--extra-usrdir assets/ps3_usrdir' .github/workflows/ps3-build.yml
+          grep -Fq 'stage_ps3_title_usrdir.sh' .github/workflows/ps3-build.yml
+          grep -Fq -- '--extra-usrdir "$stage_usrdir"' .github/workflows/ps3-build.yml
 
 
 
@@ -400,6 +401,16 @@ jobs:
             find assets/xmb -mindepth 1 -maxdepth 1 ! -name README.md -print
           fi
 
+      - name: Stage title-specific expansion data in each USRDIR
+        shell: bash
+        run: |
+          set -euo pipefail
+          for appid in OMOHAA020 OMOHAB020 OMOHAS020; do
+            stage_usrdir="$RUNNER_TEMP/ps3-usrdir-$appid"
+            rm -rf "$stage_usrdir"
+            bash tools/stage_ps3_title_usrdir.sh "$appid" assets/ps3_usrdir "$stage_usrdir"
+          done
+
       - name: Package three independent PS3 title IDs
         shell: bash
         run: |
@@ -412,13 +423,25 @@ jobs:
           )
           for appid in OMOHAA020 OMOHAB020 OMOHAS020; do
             echo "==> Package $appid"
+            stage_usrdir="$RUNNER_TEMP/ps3-usrdir-$appid"
+            test -d "$stage_usrdir"
+            case "$appid" in
+              OMOHAB020) expansion_dir="mainta" ;;
+              OMOHAS020) expansion_dir="maintt" ;;
+              *) expansion_dir="" ;;
+            esac
+            if [[ -n "$expansion_dir" ]] &&
+               ! find "$stage_usrdir/$expansion_dir" -type f -print -quit | grep -q .; then
+              echo "::warning::$appid package has no files in USRDIR/$expansion_dir; add them under assets/ps3_usrdir/$expansion_dir to include the expansion content."
+            fi
+            title="${TITLES[$appid]}"
             bash make_ps3_pkg.sh \
               --build-dir "build-ps3-$appid" \
               --appid "$appid" \
               --out-dir dist \
               --name "iOpenMOHAA-PS3-$appid" \
-              --title "${TITLES[$appid]}" \
-              --extra-usrdir assets/ps3_usrdir \
+              --title "$title" \
+              --extra-usrdir "$stage_usrdir" \
               2>&1 | tee "ps3-package-$appid.log"
             test -s "dist/iOpenMOHAA-PS3-$appid.pkg"
           done
