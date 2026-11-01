@@ -11,7 +11,7 @@ set(BUILD_SERVER OFF CACHE BOOL "Build dedicated server" FORCE)
 # files are searched through the shared basepath root.
 set(OPENMOHAA_PS3_APPID "OMOHAA020" CACHE STRING "PS3 package TITLE_ID / private HDD game directory")
 set(OPENMOHAA_PS3_DATA_APPID "OMOHAA020" CACHE STRING "PS3 shared game-data TITLE_ID")
-set(OPENMOHAA_PS3_TARGET_GAME "0" CACHE STRING "Default target game: 0=Allied Assault, 1=Breakthrough, 2=Spearhead")
+set(OPENMOHAA_PS3_TARGET_GAME "0" CACHE STRING "Default target game: 0=Allied Assault, 1=Spearhead, 2=Breakthrough")
 
 foreach(_appid_var OPENMOHAA_PS3_APPID OPENMOHAA_PS3_DATA_APPID)
     string(LENGTH "${${_appid_var}}" _appid_length)
@@ -21,7 +21,7 @@ foreach(_appid_var OPENMOHAA_PS3_APPID OPENMOHAA_PS3_DATA_APPID)
 endforeach()
 
 if(NOT OPENMOHAA_PS3_TARGET_GAME MATCHES "^[012]$")
-    message(FATAL_ERROR "OPENMOHAA_PS3_TARGET_GAME must be 0 (Allied Assault), 1 (Breakthrough), or 2 (Spearhead)")
+    message(FATAL_ERROR "OPENMOHAA_PS3_TARGET_GAME must be 0 (Allied Assault), 1 (Spearhead), or 2 (Breakthrough)")
 endif()
 
 set(CMAKE_DEFAULT_INSTALL_RUNTIME_DIR bin)
