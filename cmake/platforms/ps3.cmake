@@ -6,8 +6,9 @@ endif()
 set(PS3 TRUE CACHE BOOL "Building for PlayStation 3" FORCE)
 set(BUILD_SERVER OFF CACHE BOOL "Build dedicated server" FORCE)
 
-# Package TITLE_ID chooses each title's private USRDIR; all builds share the
-# Allied Assault game-data root for the engine's basepath search.
+# Package TITLE_ID chooses each title's private USRDIR, which holds writable
+# state and that title's expansion data. Only the Allied Assault base-game
+# files are searched through the shared basepath root.
 set(OPENMOHAA_PS3_APPID "OMOHAA020" CACHE STRING "PS3 package TITLE_ID / private HDD game directory")
 set(OPENMOHAA_PS3_DATA_APPID "OMOHAA020" CACHE STRING "PS3 shared game-data TITLE_ID")
 set(OPENMOHAA_PS3_TARGET_GAME "0" CACHE STRING "Default target game: 0=Allied Assault, 1=Breakthrough, 2=Spearhead")
