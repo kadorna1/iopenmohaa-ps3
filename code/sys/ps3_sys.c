@@ -433,17 +433,17 @@ static void ps3_register_exception_handler(void)
 
 void Sys_PlatformInit(void)
 {
-    PS3_BootTracef("Sys_PlatformInit: entry USRDIR=%s", PS3_USRDIR);
+    PS3_BootTracef("Sys_PlatformInit: app USRDIR=%s shared data USRDIR=%s", PS3_USRDIR, PS3_DATA_USRDIR);
     ps3_platform_running = qtrue;
 #if !defined(DEDICATED)
     sysUtilRegisterCallback(SYSUTIL_EVENT_SLOT0, PS3_SysutilCallback, NULL);
 #endif
     Sys_SetBinaryPath(PS3_USRDIR);
-    Sys_SetDefaultInstallPath(PS3_USRDIR);
+    Sys_SetDefaultInstallPath(PS3_DATA_USRDIR);
     Sys_Milliseconds();
     PS3_LogInit();
     PS3_BootTracef("Sys_PlatformInit: PS3_LogInit returned");
-    PS3_Logf("OpenMoHAA PS3 platform init (%s)", PS3_USRDIR);
+    PS3_Logf("OpenMoHAA PS3 platform init (app USRDIR=%s, shared data=%s)", PS3_USRDIR, PS3_DATA_USRDIR);
     PS3_Logf("PS3 build stamp: %s %s (trace19: native audio driver, 720p default, cgame crumbs)", __DATE__, __TIME__);
     PS3_BootTracef("Sys_PlatformInit: trace level %d (create USRDIR/trace_level.txt containing 2 for full tracing)", PS3_TraceLevel());
     ps3_register_exception_handler();

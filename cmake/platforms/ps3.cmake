@@ -6,12 +6,21 @@ endif()
 set(PS3 TRUE CACHE BOOL "Building for PlayStation 3" FORCE)
 set(BUILD_SERVER OFF CACHE BOOL "Build dedicated server" FORCE)
 
-# Keep runtime USRDIR/log/data paths identical to PARAM.SFO TITLE_ID.
-# OMOHAA020 is the APPID currently used by the package builder.
-set(OPENMOHAA_PS3_APPID "OMOHAA020" CACHE STRING "PS3 TITLE_ID / HDD game directory")
-string(LENGTH "${OPENMOHAA_PS3_APPID}" OPENMOHAA_PS3_APPID_LENGTH)
-if(NOT OPENMOHAA_PS3_APPID_LENGTH EQUAL 9 OR NOT OPENMOHAA_PS3_APPID MATCHES "^[A-Z0-9]+$")
-    message(FATAL_ERROR "OPENMOHAA_PS3_APPID must be a 9-character uppercase alphanumeric TITLE_ID (got '${OPENMOHAA_PS3_APPID}')")
+# Package TITLE_ID chooses each title's private USRDIR; all builds share the
+# Allied Assault game-data root for the engine's basepath search.
+set(OPENMOHAA_PS3_APPID "OMOHAA020" CACHE STRING "PS3 package TITLE_ID / private HDD game directory")
+set(OPENMOHAA_PS3_DATA_APPID "OMOHAA020" CACHE STRING "PS3 shared game-data TITLE_ID")
+set(OPENMOHAA_PS3_TARGET_GAME "0" CACHE STRING "Default target game: 0=Allied Assault, 1=Breakthrough, 2=Spearhead")
+
+foreach(_appid_var OPENMOHAA_PS3_APPID OPENMOHAA_PS3_DATA_APPID)
+    string(LENGTH "${${_appid_var}}" _appid_length)
+    if(NOT _appid_length EQUAL 9 OR NOT "${${_appid_var}}" MATCHES "^[A-Z0-9]+$")
+        message(FATAL_ERROR "${_appid_var} must be a 9-character uppercase alphanumeric PS3 TITLE_ID (got '${${_appid_var}}')")
+    endif()
+endforeach()
+
+if(NOT OPENMOHAA_PS3_TARGET_GAME MATCHES "^[012]$")
+    message(FATAL_ERROR "OPENMOHAA_PS3_TARGET_GAME must be 0 (Allied Assault), 1 (Breakthrough), or 2 (Spearhead)")
 endif()
 
 set(CMAKE_DEFAULT_INSTALL_RUNTIME_DIR bin)
@@ -62,7 +71,12 @@ link_directories(
     ${PS3DEV}/portlibs/ppu/lib
 )
 
-add_compile_definitions(__PS3__ _PS3 __lv2ppu__ __PSL1GHT__ PS3_APPID=\"${OPENMOHAA_PS3_APPID}\")
+add_compile_definitions(
+    __PS3__ _PS3 __lv2ppu__ __PSL1GHT__
+    PS3_APPID=\"${OPENMOHAA_PS3_APPID}\"
+    PS3_DATA_APPID=\"${OPENMOHAA_PS3_DATA_APPID}\"
+    PS3_DEFAULT_TARGET_GAME=\"${OPENMOHAA_PS3_TARGET_GAME}\"
+)
 option(OPENMOHAA_PS3_RSX_TEST "Boot into the RSX bring-up test (sys/ps3_rsxtest.c) instead of the engine" OFF)
 option(OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO "Use an experimental SPU-backed block mixer for supported PCM voices" OFF)
 if(OPENMOHAA_PS3_RSX_TEST)
