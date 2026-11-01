@@ -25,6 +25,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "cg_local.h"
 #include "cg_commands.h"
+#include <limits.h>
+#include <new>
 #include "memarchiver.h"
 
 const char *cg_vsstypes[] = {
@@ -144,7 +146,7 @@ cvssource_t *ClientGameCommandManager::AllocateVSSSource()
 
     pNew              = m_free_vsssources;
     m_free_vsssources = m_free_vsssources->next;
-    memset(pNew, 0, sizeof(cvssource_t));
+    *pNew = cvssource_t();
 
     pNew->next = m_active_vsssources.next;
     pNew->prev = &m_active_vsssources;
@@ -169,13 +171,15 @@ void ClientGameCommandManager::FreeVSSSource(cvssource_t *p)
 
 void ClientGameCommandManager::ResetVSSSources()
 {
-    int          i;
+    int          count;
     cvssource_t *p;
     cvssource_t *next;
 
     vss_maxvisible = cgi.Cvar_Get("vss_maxvisible", "1024", CVAR_ARCHIVE | CVAR_LATCH);
-    if (m_iAllocatedvsssources && m_iAllocatedvsssources == vss_maxvisible->integer) {
-        // free existing vss sources
+    count = vss_maxvisible->integer >= 128 ? vss_maxvisible->integer : 128;
+
+    if (m_vsssources && m_iAllocatedvsssources == count) {
+        // Return all active sources to the initialized free list.
         for (p = m_active_vsssources.prev; p != &m_active_vsssources; p = next) {
             next = p->prev;
             FreeVSSSource(p);
@@ -183,28 +187,8 @@ void ClientGameCommandManager::ResetVSSSources()
         return;
     }
 
-    if (m_iAllocatedvsssources) {
-        cgi.Free(m_vsssources);
-    }
-
-    if (vss_maxvisible->integer >= 128) {
-        m_iAllocatedvsssources = vss_maxvisible->integer;
-    } else {
-        m_iAllocatedvsssources = 128;
-    }
-
-    m_vsssources = (cvssource_t *)cgi.Malloc(sizeof(cvssource_t) * m_iAllocatedvsssources);
-    memset(m_vsssources, 0, sizeof(cvssource_t) * m_iAllocatedvsssources);
-
-    m_active_vsssources.next = &m_active_vsssources;
-    m_active_vsssources.prev = &m_active_vsssources;
-    m_free_vsssources        = m_vsssources;
-
-    for (i = 0; i < m_iAllocatedvsssources - 1; ++i) {
-        m_vsssources[i].next = &m_vsssources[i + 1];
-    }
-
-    m_vsssources[m_iAllocatedvsssources - 1].next = NULL;
+    // Rebuild the pool through the same constructor-safe path used at startup.
+    InitializeVSSSources();
 }
 
 void ClientGameCommandManager::ResetVSSSources(Event *ev)
@@ -225,36 +209,52 @@ void CG_ArchiveVSSGlobals(MemArchiver& archiver)
 
 void ClientGameCommandManager::InitializeVSSSources()
 {
-    int i;
+    int          i;
+    int          count;
+    size_t       allocationSize;
+    cvssource_t *newSources;
 
     vss_maxvisible = cgi.Cvar_Get("vss_maxvisible", "1024", CVAR_ARCHIVE | CVAR_LATCH);
-    if (m_iAllocatedvsssources && m_iAllocatedvsssources == vss_maxvisible->integer) {
-        // already allocated
+    count = vss_maxvisible->integer >= 128 ? vss_maxvisible->integer : 128;
+
+    if (m_vsssources && m_iAllocatedvsssources == count) {
         return;
     }
 
-    if (m_iAllocatedvsssources) {
+    // cgi.Malloc accepts an int byte count. Reject overflow before multiplying.
+    if ((size_t)count > (size_t)INT_MAX / sizeof(cvssource_t)) {
+        cgi.Error(ERR_DROP, "InitializeVSSSources: vss_maxvisible is too large (%d)", count);
+        return;
+    }
+
+    allocationSize = sizeof(cvssource_t) * (size_t)count;
+    newSources = (cvssource_t *)cgi.Malloc((int)allocationSize);
+    if (!newSources) {
+        cgi.Error(ERR_DROP, "InitializeVSSSources: unable to allocate %u bytes",
+            (unsigned)allocationSize);
+        return;
+    }
+
+    // These records contain C++ Vector members. Construct every object rather
+    // than treating them as raw bytes.
+    for (i = 0; i < count; ++i) {
+        new (&newSources[i]) cvssource_t();
+    }
+
+    for (i = 0; i < count - 1; ++i) {
+        newSources[i].next = &newSources[i + 1];
+    }
+    newSources[count - 1].next = NULL;
+
+    if (m_vsssources) {
         cgi.Free(m_vsssources);
     }
 
-    if (vss_maxvisible->integer >= 128) {
-        m_iAllocatedvsssources = vss_maxvisible->integer;
-    } else {
-        m_iAllocatedvsssources = 128;
-    }
-
-    m_vsssources = (cvssource_t *)cgi.Malloc(sizeof(cvssource_t) * m_iAllocatedvsssources);
-    memset(m_vsssources, 0, sizeof(sizeof(cvssource_t) * m_iAllocatedvsssources));
-
+    m_vsssources = newSources;
+    m_iAllocatedvsssources = count;
     m_active_vsssources.next = &m_active_vsssources;
     m_active_vsssources.prev = &m_active_vsssources;
-    m_free_vsssources        = m_vsssources;
-
-    for (i = 0; i < m_iAllocatedvsssources - 1; ++i) {
-        m_vsssources[i].next = &m_vsssources[i + 1];
-    }
-
-    m_vsssources[m_iAllocatedvsssources - 1].next = NULL;
+    m_free_vsssources = m_vsssources;
 }
 
 void ClientGameCommandManager::InitializeVSSCvars()
