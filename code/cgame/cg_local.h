@@ -604,6 +604,8 @@ extern "C" {
     void  CG_EyeOffset(vec3_t *o_vOfs);
     void  CG_EyeAngles(vec3_t *o_vAngles);
     float CG_SensitivityScale();
+    qboolean CG_AimAssist(const vec3_t viewAngles, float *yawError, float *pitchError, float *targetWeight);
+    void  CG_CalcEntityLerpPositions(centity_t *cent);
     void  CG_AddLightShow();
     qboolean CG_FrustumCullSphere(const vec3_t vPos, float fRadius);
     qboolean CG_SimpleDistanceCull(const vec3_t origin, float maxDist);

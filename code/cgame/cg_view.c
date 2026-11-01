@@ -20,7 +20,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 
+#include <math.h>
 #include "cg_local.h"
+#include "../qcommon/ps3_aim_assist_math.h"
 #include "cg_parsemsg.h"
 
 //============================================================================
@@ -734,6 +736,183 @@ void CG_EyeAngles(vec3_t *o_vAngles)
 float CG_SensitivityScale()
 {
     return cg.zoomSensitivity;
+}
+
+/*
+=================
+CG_AimAssist
+
+Finds a visible hostile sentient close to the supplied view direction.
+The callback is read-only: platform input applies the returned correction.
+=================
+*/
+qboolean CG_AimAssist(
+    const vec3_t viewAngles, float *yawError, float *pitchError, float *targetWeight
+)
+{
+    enum { MAX_CANDIDATES = 3 };
+    float candidateScore[MAX_CANDIDATES] = {1.0f, 1.0f, 1.0f};
+    float candidateYaw[MAX_CANDIDATES] = {0.0f, 0.0f, 0.0f};
+    float candidatePitch[MAX_CANDIDATES] = {0.0f, 0.0f, 0.0f};
+    float candidateWeight[MAX_CANDIDATES] = {0.0f, 0.0f, 0.0f};
+    vec3_t candidatePoint[MAX_CANDIDATES];
+    vec3_t zero = {0.0f, 0.0f, 0.0f};
+    int candidateCount = 0;
+    int selfTeam = 0;
+    int i;
+
+    if (yawError) {
+        *yawError = 0.0f;
+    }
+    if (pitchError) {
+        *pitchError = 0.0f;
+    }
+    if (targetWeight) {
+        *targetWeight = 0.0f;
+    }
+
+    if (!viewAngles || !yawError || !pitchError || !targetWeight ||
+        !cg.snap || cg.snap->numEntities <= 0 || !cg.clientFrame ||
+        !cgi.CM_BoxTrace || cg.refdef.width <= 0 || cg.refdef.height <= 0 ||
+        cg.renderingThirdPerson || cg.snap->ps.pm_type == PM_DEAD ||
+        (cg.snap->ps.pm_flags & (PMF_CAMERA_VIEW | PMF_INTERMISSION)) ||
+        (cg.snap->snapFlags & SNAPFLAG_NOT_ACTIVE)) {
+        return qfalse;
+    }
+
+    /* playerState_t has no entity team field; read the local snapshot entity. */
+    if (cg.snap->ps.clientNum >= 0 && cg.snap->ps.clientNum < MAX_GENTITIES) {
+        centity_t *self = &cg_entities[cg.snap->ps.clientNum];
+        if (self->currentValid) {
+            selfTeam = self->currentState.eFlags & EF_ANY_TEAM;
+        }
+    }
+
+    /* Allied Assault's single-player campaign is played on the Allied side. */
+    if (!selfTeam && cgs.gametype == GT_SINGLE_PLAYER) {
+        selfTeam = EF_ALLIES;
+    }
+
+    for (i = 0; i < cg.snap->numEntities; ++i) {
+        const int entityNum = cg.snap->entities[i].number;
+        centity_t *cent;
+        entityState_t *state;
+        int targetTeam;
+        vec3_t targetPoint;
+        vec3_t delta;
+        float horizontalDistanceSquared;
+        float distanceSquared;
+        float targetYaw;
+        float targetPitch;
+        float errorYaw;
+        float errorPitch;
+        float score;
+        float weight;
+        int slot;
+        int j;
+
+        if (entityNum < 0 || entityNum >= MAX_GENTITIES ||
+            entityNum == cg.snap->ps.clientNum) {
+            continue;
+        }
+
+        cent = &cg_entities[entityNum];
+        if (!cent->currentValid) {
+            continue;
+        }
+
+        state = &cent->currentState;
+        if (state->number != entityNum ||
+            (state->eType != ET_PLAYER &&
+             state->eType != ET_MODELANIM &&
+             state->eType != ET_MODELANIM_SKEL) ||
+            (state->eFlags & (EF_DEAD | EF_PLAYER_IN_MENU))) {
+            continue;
+        }
+
+        targetTeam = state->eFlags & EF_ANY_TEAM;
+        if (cgs.gametype == GT_FFA) {
+            /* Team flags are optional in FFA, but never attract to a known ally. */
+            if (selfTeam && targetTeam && (selfTeam & targetTeam)) {
+                continue;
+            }
+            /* An unclassified model-animation entity may be a prop, not a soldier. */
+            if (!targetTeam && state->eType != ET_PLAYER) {
+                continue;
+            }
+        } else if (!selfTeam || !targetTeam || (selfTeam & targetTeam)) {
+            /* Team and single-player modes require a known hostile target. */
+            continue;
+        }
+
+        /* Match the position to the same snapshot interpolation used to render it. */
+        CG_CalcEntityLerpPositions(cent);
+        VectorCopy(cent->lerpOrigin, targetPoint);
+        targetPoint[2] += 40.0f;
+
+        VectorSubtract(targetPoint, cg.refdef.vieworg, delta);
+        horizontalDistanceSquared = delta[0] * delta[0] + delta[1] * delta[1];
+        distanceSquared = horizontalDistanceSquared + delta[2] * delta[2];
+        if (distanceSquared < (48.0f * 48.0f) ||
+            distanceSquared > (2048.0f * 2048.0f) ||
+            horizontalDistanceSquared < 1.0f) {
+            continue;
+        }
+
+        targetYaw = RAD2DEG(atan2f(delta[1], delta[0]));
+        /* Positive Quake pitch looks down. */
+        targetPitch = RAD2DEG(atan2f(-delta[2], sqrtf(horizontalDistanceSquared)));
+        errorYaw = PS3_AimAssistAngleDelta(targetYaw, viewAngles[YAW]);
+        errorPitch = PS3_AimAssistAngleDelta(targetPitch, viewAngles[PITCH]);
+        score = PS3_AimAssistConeScore(errorYaw, errorPitch);
+        if (score >= 1.0f) {
+            continue;
+        }
+
+        weight = PS3_AimAssistWeight(score);
+        slot = 0;
+        while (slot < candidateCount && candidateScore[slot] <= score) {
+            ++slot;
+        }
+        if (slot >= MAX_CANDIDATES) {
+            continue;
+        }
+
+        if (candidateCount < MAX_CANDIDATES) {
+            ++candidateCount;
+        }
+        for (j = candidateCount - 1; j > slot; --j) {
+            candidateScore[j] = candidateScore[j - 1];
+            candidateYaw[j] = candidateYaw[j - 1];
+            candidatePitch[j] = candidatePitch[j - 1];
+            candidateWeight[j] = candidateWeight[j - 1];
+            VectorCopy(candidatePoint[j - 1], candidatePoint[j]);
+        }
+
+        candidateScore[slot] = score;
+        candidateYaw[slot] = errorYaw;
+        candidatePitch[slot] = errorPitch;
+        candidateWeight[slot] = weight;
+        VectorCopy(targetPoint, candidatePoint[slot]);
+    }
+
+    /* Trace only the three best-aligned candidates, never every snapshot actor. */
+    for (i = 0; i < candidateCount; ++i) {
+        trace_t trace;
+        cgi.CM_BoxTrace(
+            &trace, cg.refdef.vieworg, candidatePoint[i], zero, zero, 0, MASK_SOLID, qfalse
+        );
+        if (trace.fraction < 0.99f) {
+            continue;
+        }
+
+        *yawError = candidateYaw[i];
+        *pitchError = candidatePitch[i];
+        *targetWeight = candidateWeight[i];
+        return qtrue;
+    }
+
+    return qfalse;
 }
 
 void CG_AddLightShow()
