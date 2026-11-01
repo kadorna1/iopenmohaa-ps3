@@ -51,8 +51,19 @@ void MemArchiver::SetupForWriting(size_t initialSize)
     this->bufferSize    = 0;
     this->failed        = false;
 
+    if (initialSize > (size_t)INT_MAX) {
+        this->failed = true;
+#if defined(__PS3__)
+        PS3_TRACEF("SAVE MEMARCH initial capacity exceeds allocator limit bytes=%lu",
+            (unsigned long)initialSize);
+#else
+        cgi.DPrintf("MemArchiver: initial capacity exceeds allocator limit\n");
+#endif
+        return;
+    }
+
     if (initialSize) {
-        this->buffer = (byte *)cgi.Malloc(initialSize);
+        this->buffer = (byte *)cgi.Malloc((int)initialSize);
         if (!this->buffer) {
             this->failed = true;
 #if defined(__PS3__)
