@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "cg_local.h"
 #include "memarchiver.h"
+#include <limits.h>
 #include "../sys/ps3_step.h"
 #include "../corepp/vector.h"
 #include "../corepp/str.h"
@@ -237,6 +238,7 @@ void MemArchiver::ArchiveReadRaw(void *buffer, size_t size)
         PS3_STEPF("SAVE MEMARCH read past end used=%lu add=%lu capacity=%lu",
             (unsigned long)this->bufferSize, (unsigned long)size, (unsigned long)this->allocatedSize);
 #endif
+        failed = true;
         Com_Error(ERR_DROP, "MemArchiver: tried to read past end of buffer");
         return;
     }
@@ -273,6 +275,17 @@ void MemArchiver::ArchiveWriteRaw(const void *buffer, size_t size)
                 break;
             }
             newCapacity *= 2;
+        }
+
+        if (newCapacity > (size_t)INT_MAX) {
+            failed = true;
+#if defined(__PS3__)
+            PS3_TRACEF("SAVE MEMARCH capacity exceeds allocator limit capacity=%lu",
+                (unsigned long)newCapacity);
+#else
+            cgi.DPrintf("MemArchiver: save buffer capacity exceeds allocator limit\n");
+#endif
+            return;
         }
 
         newBuffer = (byte *)cgi.Malloc((int)newCapacity);
