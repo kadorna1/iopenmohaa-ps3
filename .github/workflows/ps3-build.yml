@@ -37,6 +37,12 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Test PS3 shader cache generator
+        shell: bash
+        run: |
+          set -eu
+          python3 -m unittest discover -s tests -p 'test_ps3_shader_cache.py' -v
+
 
 
       # Cache downloaded .deb packages. apt indexes are refreshed each run,
