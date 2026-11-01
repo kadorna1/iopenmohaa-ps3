@@ -850,7 +850,7 @@ void IN_Init(void *windowData)
 
     s_ps3_aim_sensitivity = Cvar_Get("ps3_aim_sensitivity", "0.5", CVAR_ARCHIVE);
     Cvar_Get("ps3_aim_assist", "1", CVAR_ARCHIVE);
-    Cvar_Get("ps3_aim_assist_strength", "0.50", CVAR_ARCHIVE);
+    Cvar_Get("ps3_aim_assist_strength", "1.0", CVAR_ARCHIVE);
     s_mouse_aim_accum_x = s_mouse_aim_accum_y = 0.0f;
 
     Cvar_Set("in_joystick", "1");

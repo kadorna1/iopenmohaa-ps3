@@ -1,7 +1,7 @@
 # PS3 controller aim assist
 
 The PS3 build has optional aim assist for the DualShock 3 right stick. It is
-enabled by default at a moderate strength and is independent of USB-mouse
+enabled by default at full strength and is independent of USB-mouse
 aiming and menu cursor movement.
 
 ## Startup configuration
@@ -19,7 +19,7 @@ Use the in-game console to change the values for the current session:
 
 ```
 ps3_aim_assist 1
-ps3_aim_assist_strength 0.50
+ps3_aim_assist_strength 1.0
 ```
 
 Set `ps3_aim_assist 0` to disable it. Strength is clamped to 0.0–1.0; zero
