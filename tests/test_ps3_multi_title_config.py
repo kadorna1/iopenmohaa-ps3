@@ -72,7 +72,7 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
             root = pathlib.Path(tmp)
             source = root / "source"
             (source / "main").mkdir(parents=True)
-            (source / "main" / "autoexec.cfg").write_text("set test 1\\n")
+            (source / "main" / "autoexec.cfg").write_text("set test 1\n")
             (source / "mainta").mkdir()
             (source / "mainta" / "breakthrough.pk3").write_bytes(b"breakthrough")
             (source / "maintt").mkdir()
