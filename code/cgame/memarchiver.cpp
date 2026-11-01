@@ -32,6 +32,7 @@ MemArchiver::MemArchiver()
     buffer        = 0;
     allocatedSize = 0;
     bufferSize    = 0;
+    failed        = false;
 }
 
 MemArchiver::~MemArchiver()
@@ -44,9 +45,23 @@ MemArchiver::~MemArchiver()
 void MemArchiver::SetupForWriting(size_t initialSize)
 {
     this->state         = MEMARC_WRITING;
-    this->buffer        = (byte *)cgi.Malloc(initialSize);
-    this->allocatedSize = initialSize;
+    this->buffer        = NULL;
+    this->allocatedSize = 0;
     this->bufferSize    = 0;
+    this->failed        = false;
+
+    if (initialSize) {
+        this->buffer = (byte *)cgi.Malloc(initialSize);
+        if (!this->buffer) {
+            this->failed = true;
+#if defined(__PS3__)
+            PS3_TRACEF("SAVE MEMARCH initial allocation failed bytes=%lu",
+                (unsigned long)initialSize);
+#endif
+            return;
+        }
+        this->allocatedSize = initialSize;
+    }
 }
 
 void MemArchiver::SetupForReading(byte *buffer, size_t size)
@@ -55,6 +70,7 @@ void MemArchiver::SetupForReading(byte *buffer, size_t size)
     this->buffer        = buffer;
     this->allocatedSize = size;
     this->bufferSize    = 0;
+    this->failed        = false;
 }
 
 void MemArchiver::SetBaseTime(unsigned int time)
@@ -69,11 +85,16 @@ size_t MemArchiver::BufferSize() const
 
 byte *MemArchiver::ConfiscateBuffer()
 {
-    byte *confiscatedBuffer = buffer;
+    byte *confiscatedBuffer;
 
-    buffer        = NULL;
-    allocatedSize = 0;
-    bufferSize    = 0;
+    if (failed) {
+        return NULL;
+    }
+
+    confiscatedBuffer = buffer;
+    buffer            = NULL;
+    allocatedSize     = 0;
+    bufferSize        = 0;
 
     return confiscatedBuffer;
 }
@@ -90,7 +111,12 @@ bool MemArchiver::IsWriting() const
 
 bool MemArchiver::FinishedReading() const
 {
-    return bufferSize == allocatedSize;
+    return !failed && bufferSize == allocatedSize;
+}
+
+bool MemArchiver::Failed() const
+{
+    return failed;
 }
 
 void MemArchiver::ArchiveByte(byte *value)
@@ -205,12 +231,14 @@ void MemArchiver::ArchiveReadRaw(void *buffer, size_t size)
         return;
     }
 
-    if (size + this->bufferSize > this->allocatedSize) {
+    if (!this->buffer || this->bufferSize > this->allocatedSize
+        || size > this->allocatedSize - this->bufferSize) {
 #if defined(__PS3__)
-        PS3_STEPF("SAVE MEMARCH growth used=%lu add=%lu capacity=%lu",
+        PS3_STEPF("SAVE MEMARCH read past end used=%lu add=%lu capacity=%lu",
             (unsigned long)this->bufferSize, (unsigned long)size, (unsigned long)this->allocatedSize);
 #endif
         Com_Error(ERR_DROP, "MemArchiver: tried to read past end of buffer");
+        return;
     }
 
     memcpy(buffer, this->buffer + this->bufferSize, size);
@@ -219,33 +247,65 @@ void MemArchiver::ArchiveReadRaw(void *buffer, size_t size)
 
 void MemArchiver::ArchiveWriteRaw(const void *buffer, size_t size)
 {
-    if (!size) {
+    size_t requiredSize;
+    size_t newCapacity;
+    byte  *newBuffer;
+
+    if (failed || !size) {
         return;
     }
 
-    if (size + this->bufferSize > this->allocatedSize) {
-        if (!this->allocatedSize) {
-            this->allocatedSize = 1024;
-            this->buffer        = (byte *)cgi.Malloc(this->allocatedSize);
-        } else {
-            byte *newBuffer;
-
-            do {
-                this->allocatedSize *= 2;
-            } while (size + this->bufferSize > this->allocatedSize);
-
-            newBuffer = (byte *)cgi.Malloc(this->allocatedSize);
+    if (size > (size_t)-1 - this->bufferSize) {
+        failed = true;
 #if defined(__PS3__)
-            PS3_STEPF("SAVE MEMARCH allocation result=%p capacity=%lu", (void *)newBuffer, (unsigned long)this->allocatedSize);
+        PS3_TRACEF("SAVE MEMARCH size overflow used=%lu add=%lu",
+            (unsigned long)this->bufferSize, (unsigned long)size);
 #endif
-            if (!newBuffer) {
-                cgi.Error(ERR_DROP, "MemArchiver: unable to grow save buffer to %lu bytes", (unsigned long)this->allocatedSize);
-                return;
+        return;
+    }
+
+    requiredSize = this->bufferSize + size;
+    if (requiredSize > this->allocatedSize) {
+        newCapacity = this->allocatedSize ? this->allocatedSize : 1024;
+        while (newCapacity < requiredSize) {
+            if (newCapacity > (size_t)-1 / 2) {
+                newCapacity = requiredSize;
+                break;
             }
-            memcpy(newBuffer, this->buffer, this->bufferSize);
-            cgi.Free(this->buffer);
-            this->buffer = newBuffer;
+            newCapacity *= 2;
         }
+
+        newBuffer = (byte *)cgi.Malloc((int)newCapacity);
+#if defined(__PS3__)
+        PS3_STEPF("SAVE MEMARCH allocation result=%p used=%lu add=%lu capacity=%lu",
+            (void *)newBuffer, (unsigned long)this->bufferSize,
+            (unsigned long)size, (unsigned long)newCapacity);
+#endif
+        if (!newBuffer) {
+            failed = true;
+#if defined(__PS3__)
+            PS3_TRACEF("SAVE MEMARCH allocation failed used=%lu add=%lu capacity=%lu",
+                (unsigned long)this->bufferSize, (unsigned long)size, (unsigned long)newCapacity);
+#else
+            cgi.DPrintf("MemArchiver: unable to grow save buffer to %lu bytes\n",
+                (unsigned long)newCapacity);
+#endif
+            return;
+        }
+
+        if (this->bufferSize) {
+            memcpy(newBuffer, this->buffer, this->bufferSize);
+        }
+        if (this->buffer) {
+            cgi.Free(this->buffer);
+        }
+        this->buffer        = newBuffer;
+        this->allocatedSize = newCapacity;
+    }
+
+    if (!this->buffer) {
+        failed = true;
+        return;
     }
 
     memcpy(this->buffer + this->bufferSize, buffer, size);
