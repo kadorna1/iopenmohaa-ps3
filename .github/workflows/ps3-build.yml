@@ -260,6 +260,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The job runs inside the builder container as root while checkout
+          # owns the workspace as the runner UID. Allow git ls-files in this
+          # explicitly selected repository without disabling safe.directory globally.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           python3 - <<'PY'
           import hashlib
           import json
