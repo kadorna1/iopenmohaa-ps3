@@ -36,7 +36,8 @@ def _skip_trivia(data: bytes, pos: int, source: str) -> int:
             continue
         if data.startswith(b"//", pos):
             end = data.find(b"\n", pos + 2)
-            return size if end < 0 else _skip_trivia(data, end + 1, source)
+            pos = size if end < 0 else end + 1
+            continue
         if data.startswith(b"/*", pos):
             end = data.find(b"*/", pos + 2)
             if end < 0:
