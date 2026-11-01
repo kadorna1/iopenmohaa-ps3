@@ -2268,12 +2268,36 @@ qboolean SV_ArchiveLevelFile(qboolean loading, qboolean autosave)
 		} else
 #endif
 		{
+#if defined(__PS3__)
+			PS3_TRACEF("SAVE PS3 CGame snapshot begin map=%s", svs.rawServerName);
+			PS3_TRACEMEM("save-before-cgame-snapshot");
+			PS3_ZONECHECK_QUIET("save-before-cgame-snapshot");
+#endif
+			cls.savedCgameState = NULL;
+			cls.savedCgameStateSize = 0;
 			cls.savedCgameStateSize = cge->CG_SaveStateToBuffer(&cls.savedCgameState, svs.time);
+#if defined(__PS3__)
+			PS3_TRACEF("SAVE PS3 CGame snapshot end map=%s state=%p size=%u",
+				svs.rawServerName, (void *)cls.savedCgameState, (unsigned)cls.savedCgameStateSize);
+			PS3_TRACEMEM("save-after-cgame-snapshot");
+			PS3_ZONECHECK_QUIET("save-after-cgame-snapshot");
+			if (!cls.savedCgameState || !cls.savedCgameStateSize) {
+				PS3_TRACEF("SAVE PS3 CGame snapshot unavailable; writing server-only level state map=%s",
+					svs.rawServerName);
+			}
+#endif
 		}
+#if defined(__PS3__)
+		PS3_TRACEF("SAVE PS3 before ge->WriteLevel map=%s cgameState=%p size=%u",
+			svs.rawServerName, (void *)cls.savedCgameState, (unsigned)cls.savedCgameStateSize);
+		PS3_TRACEMEM("save-before-level-write");
+#endif
 		ge->WriteLevel(name, autosave, (byte **)&cls.savedCgameState, &cls.savedCgameStateSize);
 #if defined(__PS3__)
 		PS3_TRACEF("SAVE PS3 after ge->WriteLevel map=%s cgameState=%p size=%u",
 			svs.rawServerName, (void *)cls.savedCgameState, (unsigned)cls.savedCgameStateSize);
+		PS3_TRACEMEM("save-after-level-write");
+		PS3_ZONECHECK_QUIET("save-after-level-write");
 #endif
 		/* The PS3 map-entry autosave deliberately has no CGame snapshot. Z_Free
 		 * dereferences its argument before checking the zone tag, so NULL must
@@ -2649,7 +2673,16 @@ void SV_SaveGame(const char *gamename, qboolean autosave)
 		}
 	}
 
+#if defined(__PS3__)
+	PS3_TRACEF("SAVE PS3 server archive begin name=%s", svs.gameName);
+	PS3_TRACEMEM("save-before-server-archive");
+	PS3_ZONECHECK_QUIET("save-before-server-archive");
+#endif
 	SV_ArchiveServerFile(qfalse, autosave);
+#if defined(__PS3__)
+	PS3_TRACEF("SAVE PS3 server archive complete name=%s", svs.gameName);
+	PS3_TRACEMEM("save-after-server-archive");
+#endif
 
 	Com_Printf("Done.\n");
 
