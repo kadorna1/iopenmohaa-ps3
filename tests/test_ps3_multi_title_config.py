@@ -59,6 +59,7 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
         self.assertIn("tools/stage_ps3_title_usrdir.sh", self.workflow)
         self.assertIn('--extra-usrdir "$stage_usrdir"', self.workflow)
         self.assertIn("assets/ps3_usrdir", self.workflow)
+        self.assertIn("lfs: true", self.workflow)
         self.assertIn("Save source hashes for the next incremental build", self.workflow)
         self.assertIn("ps3-build-v3-", self.workflow)
         self.assertIn("--recurse-submodules", self.workflow)
