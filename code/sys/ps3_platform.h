@@ -76,9 +76,9 @@ static inline int mprotect(void *addr, size_t len, int prot) {
 #ifndef PS3_DATA_APPID
 #define PS3_DATA_APPID "OMOHAA020"
 #endif
-/* Writable state stays private to each package TITLE_ID. */
+/* Writable state and title-specific expansion files stay package-local. */
 #define PS3_USRDIR      "/dev_hdd0/game/" PS3_APPID "/USRDIR"
-/* Read-only game files are shared from the Allied Assault installation. */
+/* Shared basepath fallback for common Allied Assault game assets. */
 #define PS3_DATA_USRDIR "/dev_hdd0/game/" PS3_DATA_APPID "/USRDIR"
 #define PS3_LOG_PATH    PS3_USRDIR "/openmohaa-ps3.log"
 
