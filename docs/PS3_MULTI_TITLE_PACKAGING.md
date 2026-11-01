@@ -6,8 +6,8 @@ and toolchain:
 | Product | PS3 TITLE_ID | Default target game |
 |---|---|---:|
 | Allied Assault | `OMOHAA020` | `0` (`TG_MOH`) |
-| Breakthrough | `OMOHAB020` | `1` (`TG_MOHTA`) |
-| Spearhead | `OMOHAS020` | `2` (`TG_MOHTT`) |
+| Breakthrough | `OMOHAB020` | `2` (`TG_MOHTT`) |
+| Spearhead | `OMOHAS020` | `1` (`TG_MOHTA`) |
 
 PS3 package TITLE_ID values are nine characters. The abbreviated forms
 `OMOHA020`, `OMOHAB20`, and `OMOHAS20` are eight characters; this workflow
@@ -22,8 +22,8 @@ expansion directory:
 
 | Product | Source in the repository | Destination after installation |
 |---|---|---|
-| Breakthrough | `assets/ps3_usrdir/mainta/` | `/dev_hdd0/game/OMOHAB020/USRDIR/mainta/` |
-| Spearhead | `assets/ps3_usrdir/maintt/` | `/dev_hdd0/game/OMOHAS020/USRDIR/maintt/` |
+| Breakthrough | `assets/ps3_usrdir/maintt/` | `/dev_hdd0/game/OMOHAB020/USRDIR/maintt/` |
+| Spearhead | `assets/ps3_usrdir/mainta/` | `/dev_hdd0/game/OMOHAS020/USRDIR/mainta/` |
 
 Do not place the other expansion's directory in that package. The staging
 helper explicitly filters `mainta` and `maintt` out of the common copy, then
@@ -47,7 +47,7 @@ their own package TITLE_ID, but the engine's default install/base path remains:
 
 The PS3 filesystem mounts both the package-local home paths and this shared
 base path. That lets Breakthrough read its expansion content from its own
-`USRDIR/mainta` and Spearhead from its own `USRDIR/maintt`, while common
+`USRDIR/maintt` and Spearhead from its own `USRDIR/mainta`, while common
 Allied Assault assets remain available from:
 
 ```
