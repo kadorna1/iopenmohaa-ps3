@@ -522,6 +522,9 @@ functions exported to the main executable
 
         qboolean (*CG_Command_ProcessFile)(const char *name, qboolean quiet, dtiki_t *curTiki);
 
+        /* Optional platform input assistance; appended to preserve existing offsets. */
+        qboolean (*CG_AimAssist)(const vec3_t viewAngles, float *yawError, float *pitchError, float *targetWeight);
+
     } clientGameExport_t;
 
 #ifdef CGAME_DLL

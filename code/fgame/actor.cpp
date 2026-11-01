@@ -3114,6 +3114,19 @@ Initialize actor.
 void Actor::EventStart(Event *ev)
 {
     ResolveVoiceType();
+
+    /*
+     * Publish scripted actors' team/dead flags to clients. Actors use
+     * ET_MODELANIM rather than ET_PLAYER, so the client cannot otherwise
+     * distinguish hostile soldiers from allies and corpses.
+     */
+    edict->s.eFlags &= ~(EF_DEAD | EF_ANY_TEAM);
+    if (m_Team == TEAM_AMERICAN) {
+        edict->s.eFlags |= EF_ALLIES;
+    } else if (m_Team == TEAM_GERMAN) {
+        edict->s.eFlags |= EF_AXIS;
+    }
+
     setSize(MINS, MAXS); //notsure
 
     droptofloor(16384);
@@ -5190,6 +5203,7 @@ void Actor::HandleKilled(Event *ev, bool bPlayDeathAnim)
 {
     deadflag = DEAD_DEAD;
     health   = 0.0;
+    edict->s.eFlags |= EF_DEAD;
 
     if (bPlayDeathAnim) {
         Event event(EV_Listener_ExecuteScript, ev->NumArgs() + 1);

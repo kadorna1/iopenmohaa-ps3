@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 // cl.input.c  -- builds an intended movement command to send to the server
 
+#include <math.h>
 #include "client.h"
 #include "cl_ui.h"
 
@@ -504,41 +505,122 @@ CL_JoystickMove
 =================
 */
 void CL_JoystickMove( usercmd_t *cmd ) {
-	float	anglespeed;
+    float anglespeed;
 
-	float yaw     = j_yaw->value     * cl.joystickAxis[j_yaw_axis->integer];
-	float right   = j_side->value    * cl.joystickAxis[j_side_axis->integer];
-	float forward = j_forward->value * cl.joystickAxis[j_forward_axis->integer];
-	float pitch   = j_pitch->value   * cl.joystickAxis[j_pitch_axis->integer];
-	float up      = j_up->value      * cl.joystickAxis[j_up_axis->integer];
+    float yaw     = j_yaw->value     * cl.joystickAxis[j_yaw_axis->integer];
+    float right   = j_side->value    * cl.joystickAxis[j_side_axis->integer];
+    float forward = j_forward->value * cl.joystickAxis[j_forward_axis->integer];
+    float pitch   = j_pitch->value   * cl.joystickAxis[j_pitch_axis->integer];
+    float up      = j_up->value      * cl.joystickAxis[j_up_axis->integer];
 
-	if ( in_speed.active ^ cl_run->integer ) {
-		cmd->buttons |= BUTTON_RUN;
-	}
+#if defined(__PS3__)
+    float aimAssistYawError = 0.0f;
+    float aimAssistPitchError = 0.0f;
+    float aimAssistFactor = 0.0f;
+    float aimAssistYawInput = in_strafe.active ? right : yaw;
+    float aimAssistPitchInput = in_mlooking ? forward : pitch;
 
-	if ( in_speed.active ) {
-		anglespeed = 0.001 * cls.frametime * cl_anglespeedkey->value;
-	} else {
-		anglespeed = 0.001 * cls.frametime;
-	}
+    /*
+     * Query CGame only while the player is actively turning in gameplay.
+     * Menus, mouse aiming, and keyboard movement never enter this path.
+     */
+    if (Cvar_VariableIntegerValue("ps3_aim_assist") &&
+        cge && cge->CG_AimAssist &&
+        clc.state == CA_ACTIVE &&
+        Key_GetCatcher() == 0 &&
+        !UI_MenuActive() &&
+        (aimAssistYawInput != 0.0f || aimAssistPitchInput != 0.0f)) {
+        float targetWeight = 0.0f;
+        float strength = Cvar_VariableValue("ps3_aim_assist_strength");
 
-	if ( !in_strafe.active ) {
-		cl.viewangles[YAW] += anglespeed * yaw;
-		cmd->rightmove = ClampChar( cmd->rightmove + (int)right );
-	} else {
-		cl.viewangles[YAW] += anglespeed * right;
-		cmd->rightmove = ClampChar( cmd->rightmove + (int)yaw );
-	}
+        if (!isfinite(strength)) {
+            strength = 0.50f;
+        }
+        if (strength < 0.0f) {
+            strength = 0.0f;
+        } else if (strength > 1.0f) {
+            strength = 1.0f;
+        }
 
-	if ( in_mlooking ) {
-		cl.viewangles[PITCH] += anglespeed * forward;
-		cmd->forwardmove = ClampChar( cmd->forwardmove + (int)pitch );
-	} else {
-		cl.viewangles[PITCH] += anglespeed * pitch;
-		cmd->forwardmove = ClampChar( cmd->forwardmove + (int)forward );
-	}
+        if (strength > 0.0f &&
+            cge->CG_AimAssist(cl.viewangles, &aimAssistYawError, &aimAssistPitchError, &targetWeight) &&
+            isfinite(aimAssistYawError) && isfinite(aimAssistPitchError) && isfinite(targetWeight)) {
+            if (targetWeight < 0.0f) {
+                targetWeight = 0.0f;
+            } else if (targetWeight > 1.0f) {
+                targetWeight = 1.0f;
+            }
 
-	cmd->upmove = ClampChar( cmd->upmove + (int)up );
+            /*
+             * Apply assistance only when the stick is already moving toward
+             * the target. This prevents magnetism from fighting deliberate
+             * turns away from an enemy.
+             */
+            if (targetWeight > 0.0f &&
+                (aimAssistYawInput * aimAssistYawError +
+                 aimAssistPitchInput * aimAssistPitchError) > 0.0f) {
+                const float inputScale = 1.0f - (0.35f * strength * targetWeight);
+
+                aimAssistFactor = strength * targetWeight;
+                aimAssistYawInput *= inputScale;
+                aimAssistPitchInput *= inputScale;
+
+                if (in_strafe.active) {
+                    right = aimAssistYawInput;
+                } else {
+                    yaw = aimAssistYawInput;
+                }
+                if (in_mlooking) {
+                    forward = aimAssistPitchInput;
+                } else {
+                    pitch = aimAssistPitchInput;
+                }
+            }
+        }
+    }
+#endif
+
+    if ( in_speed.active ^ cl_run->integer ) {
+        cmd->buttons |= BUTTON_RUN;
+    }
+
+    if ( in_speed.active ) {
+        anglespeed = 0.001 * cls.frametime * cl_anglespeedkey->value;
+    } else {
+        anglespeed = 0.001 * cls.frametime;
+    }
+
+    if ( !in_strafe.active ) {
+        cl.viewangles[YAW] += anglespeed * yaw;
+        cmd->rightmove = ClampChar( cmd->rightmove + (int)right );
+    } else {
+        cl.viewangles[YAW] += anglespeed * right;
+        cmd->rightmove = ClampChar( cmd->rightmove + (int)yaw );
+    }
+
+    if ( in_mlooking ) {
+        cl.viewangles[PITCH] += anglespeed * forward;
+        cmd->forwardmove = ClampChar( cmd->forwardmove + (int)pitch );
+    } else {
+        cl.viewangles[PITCH] += anglespeed * pitch;
+        cmd->forwardmove = ClampChar( cmd->forwardmove + (int)forward );
+    }
+
+#if defined(__PS3__)
+    if (aimAssistFactor > 0.0f) {
+        const float frameSeconds = (cls.frametime > 0 ? (float)cls.frametime : 0.0f) * 0.001f;
+        float pullFraction = 0.75f * aimAssistFactor * frameSeconds;
+
+        /* Bound the per-frame correction, including unusually long frames. */
+        if (pullFraction > 0.02f) {
+            pullFraction = 0.02f;
+        }
+        cl.viewangles[YAW] += aimAssistYawError * pullFraction;
+        cl.viewangles[PITCH] += aimAssistPitchError * pullFraction;
+    }
+#endif
+
+    cmd->upmove = ClampChar( cmd->upmove + (int)up );
 }
 
 /*

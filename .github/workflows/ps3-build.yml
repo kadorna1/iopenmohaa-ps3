@@ -37,6 +37,13 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Test PS3 aim-assist math
+        shell: bash
+        run: |
+          set -eu
+          cc -std=c99 -Wall -Wextra -Werror tests/test_ps3_aim_assist_math.c -lm -o /tmp/test_ps3_aim_assist_math
+          /tmp/test_ps3_aim_assist_math
+
 
 
       # Cache downloaded .deb packages. apt indexes are refreshed each run,
