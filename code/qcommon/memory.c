@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "q_shared.h"
 #include "qcommon.h"
+#include <limits.h>
 
 #ifndef DEDICATED
 #  include "../client/client.h"
@@ -196,6 +197,7 @@ static void *Z_TagMallocCaller( int size, int tag, void *caller ) {
 void *Z_TagMalloc( int size, int tag ) {
 #endif
 	memblock_t *block;
+	int requestedSize = size;
 
 	if( size <= 0 )
 	{
@@ -206,6 +208,12 @@ void *Z_TagMalloc( int size, int tag ) {
 
 	if( tag == TAG_FREE ) {
 		Com_Error( ERR_FATAL, "Z_TagMalloc: tried to use a 0 tag" );
+	}
+
+	if( size > INT_MAX - (int)sizeof( memblock_t ) - (int)sizeof( int )
+		- (int)( sizeof( intptr_t ) - 1 ) ) {
+		Com_Error( ERR_FATAL, "Z_TagMalloc: allocation size overflow (%d bytes, tag %d)", size, tag );
+		return NULL;
 	}
 
 #ifdef ZONE_DEBUG
@@ -219,6 +227,13 @@ void *Z_TagMalloc( int size, int tag ) {
 	size = PAD( size, sizeof( intptr_t ) );		// align to 32/64 bit boundary
 
 	block = ( memblock_t * )malloc( size );
+	if( !block ) {
+#if defined(__PS3__)
+		PS3_TRACEF( "ZONE malloc failed request=%d total=%d tag=%d", requestedSize, size, tag );
+#endif
+		Com_Error( ERR_FATAL, "Z_TagMalloc: failed to allocate %d bytes for tag %d", size, tag );
+		return NULL;
+	}
 	block->id = ZONEID;
 	block->size = size;
 #if defined(__PS3__) && !defined(ZONE_DEBUG)
