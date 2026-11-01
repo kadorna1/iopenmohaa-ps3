@@ -24,7 +24,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="build-ps3"
 ELF=""
 APPID=""
-TITLE="OpenMoHAA"
+TITLE="iOpenMOHAA-PS3"
 ICON=""
 PIC1=""
 SND0=""
@@ -51,7 +51,7 @@ Usage: make_ps3_pkg.sh [options]
                       the binary (OPENMOHAA_PS3_APPID); the game's data and log
                       folder is /dev_hdd0/game/<ID>/USRDIR. Default: the value
                       in CMakeCache.txt, else OMOHAA020.
-  --title TEXT        Name shown in the XMB (default: OpenMoHAA).
+  --title TEXT        Name shown in the XMB (default: iOpenMOHAA-PS3).
   --icon FILE         ICON0.PNG source; resized to 320x176 when ImageMagick or
                       Pillow is available (default: assets/xmb/ICON0.PNG).
   --pic1 FILE         optional PIC1.PNG (background, 1920x1080).
@@ -263,7 +263,7 @@ case "$ELF" in
         ;;
     *)
         info "strip + sprxlinker"
-        "$STRIP" "$ELF" -o "$PREPARED"
+        "$STRIP" --strip-all "$ELF" -o "$PREPARED"
         "$SPRX" "$PREPARED"
         ;;
 esac
