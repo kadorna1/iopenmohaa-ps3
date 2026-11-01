@@ -273,6 +273,11 @@ jobs:
           cmake --build build-ps3 --target ps3_self --parallel 2 2>&1 | tee ps3-self.log
           test -s build-ps3/EBOOT.BIN
           file build-ps3/EBOOT.BIN
+          if readelf -SW build-ps3/bin/openmohaa | grep -Eq "[.]debug_|[.]zdebug_"; then
+            echo "::error::Debug sections found in PS3 release ELF"
+            exit 1
+          fi
+          echo "Verified: PS3 release ELF contains no DWARF debug sections"
           ls -lh build-ps3/EBOOT.BIN
           find build-ps3 \( -type f -name '*.elf' -o -type f -name 'openmohaa' \) -print | sort > ps3-build-outputs.txt
           cat ps3-build-outputs.txt
@@ -294,7 +299,8 @@ jobs:
           pkg_args=(
             --build-dir build-ps3
             --out-dir dist
-            --name OpenMoHAA-PS3-OMOHAA020
+            --name iOpenMOHAA-PS3-OMOHAA020
+            --title iOpenMOHAA-PS3
           )
           bash make_ps3_pkg.sh "${pkg_args[@]}" 2>&1 | tee ps3-package.log
           find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print
@@ -304,7 +310,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: OpenMoHAA-PS3-OMOHAA020-${{ github.run_number }}
+          name: iOpenMOHAA-PS3-OMOHAA020-${{ github.run_number }}
           if-no-files-found: warn
           retention-days: 14
           compression-level: 0
@@ -321,3 +327,15 @@ jobs:
             ps3-self.log
             ps3-package.log
             ps3-ccache-stats.txt
+
+      - name: Publish GitHub release
+        if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish v0.1.0.0a]')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create v0.1.0.0a dist/*.pkg \
+            --target "$GITHUB_SHA" \
+            --title "Full audio support" \
+            --notes "Static-free PS3 audio release. Replaces libmad with minimp3 and includes the tested native PS3 streamed-audio/music backend, host-native PCM handling, load-time stream refills, and 6 dB mix headroom. PS3 release binaries are built without DWARF debug information and stripped of symbols."
