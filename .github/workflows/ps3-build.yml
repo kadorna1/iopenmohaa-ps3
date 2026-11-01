@@ -330,7 +330,7 @@ jobs:
           find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print
           test -n "$(find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print -quit)"
 
-      - name: Upload PS3 build, PKG files, and logs
+      - name: Upload installable PS3 PKG files
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -339,18 +339,7 @@ jobs:
           retention-days: 14
           compression-level: 0
           path: |
-            build-ps3/EBOOT.BIN
-            build-ps3/bin/openmohaa
-            build-ps3/**/*.elf
             dist/*.pkg
-            dist/*
-            ps3-sdk-info.txt
-            ps3-build-outputs.txt
-            ps3-configure.log
-            ps3-build.log
-            ps3-self.log
-            ps3-package.log
-            ps3-ccache-stats.txt
 
       - name: Publish GitHub release
         if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish v0.1.0.0b]')
