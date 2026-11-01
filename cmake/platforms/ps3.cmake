@@ -68,6 +68,8 @@ option(OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO "Use an experimental SPU-backed bloc
 if(OPENMOHAA_PS3_RSX_TEST)
     add_compile_definitions(PS3_RSX_TEST=1)
 endif()
+# Release builds must not emit DWARF or other compiler debug information.
+add_compile_options(-g0)
 add_compile_options(-mcpu=cell -mno-altivec -fno-strict-aliasing -fno-common -fno-gnu-unique -mminimal-toc)
 add_compile_options(-include ${SOURCE_DIR}/sys/ps3_platform.h)
 
