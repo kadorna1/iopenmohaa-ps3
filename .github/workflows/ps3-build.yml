@@ -383,7 +383,7 @@ jobs:
             fi
             echo "Verified: $appid release ELF contains no DWARF debug sections"
             ls -lh "$build_dir/EBOOT.BIN"
-            find "$build_dir" \\( -type f -name '*.elf' -o -type f -name 'openmohaa' \\) -print | sort > "ps3-build-outputs-$appid.txt"
+            find "$build_dir" \( -type f -name '*.elf' -o -type f -name 'openmohaa' \) -print | sort > "ps3-build-outputs-$appid.txt"
             cat "ps3-build-outputs-$appid.txt"
           done
 
