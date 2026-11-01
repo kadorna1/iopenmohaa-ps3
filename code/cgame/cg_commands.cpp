@@ -28,6 +28,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cg_specialfx.h"
 #include "scriptexception.h"
 #include "../corepp/tiki.h"
+#include <limits.h>
+#include <new>
 #include "cg_archive.h"
 #include "memarchiver.h"
 #include "../sys/ps3_step.h"
@@ -6102,17 +6104,42 @@ void ClientGameCommandManager::ArchiveToMemory(MemArchiver& archiver)
     for (i = 0; i < MAX_TEMPMODELS; i++) {
         m_tempmodels[i].ArchiveToMemory(archiver);
     }
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_TRACEF("SAVE CG tempmodel archive complete count=%d", MAX_TEMPMODELS);
+    }
+#endif
 
     if (archiver.IsReading()) {
-        archiver.ArchiveInteger(&num);
-        if (m_iAllocatedvsssources != num) {
-            m_iAllocatedvsssources = num;
+        cvssource_t *newSources;
+        size_t       allocationSize;
 
-            m_vsssources = (cvssource_t *)cgi.Malloc(m_iAllocatedvsssources * sizeof(cvssource_t));
-            // instead of using memset, call the constructor
-            for (i = 0; i < m_iAllocatedvsssources; i++) {
-                new (&m_vsssources[i]) cvssource_t();
+        archiver.ArchiveInteger(&num);
+        if (num < 128 || (size_t)num > (size_t)INT_MAX / sizeof(cvssource_t)) {
+            cgi.Error(ERR_DROP, "Invalid VSS source count in savegame: %d", num);
+            return;
+        }
+
+        if (!m_vsssources || m_iAllocatedvsssources != num) {
+            allocationSize = sizeof(cvssource_t) * (size_t)num;
+            newSources = (cvssource_t *)cgi.Malloc((int)allocationSize);
+            if (!newSources) {
+                cgi.Error(ERR_DROP, "Unable to restore %d VSS sources (%u bytes)",
+                    num, (unsigned)allocationSize);
+                return;
             }
+
+            // Construct every object before archived pointers are resolved into this pool.
+            for (i = 0; i < num; ++i) {
+                new (&newSources[i]) cvssource_t();
+            }
+
+            if (m_vsssources) {
+                cgi.Free(m_vsssources);
+            }
+
+            m_vsssources = newSources;
+            m_iAllocatedvsssources = num;
         }
     } else {
         archiver.ArchiveInteger(&m_iAllocatedvsssources);
