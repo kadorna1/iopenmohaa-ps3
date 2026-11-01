@@ -21,6 +21,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include "tr_local.h"
 
+#if defined(__PS3__)
+#include <stdlib.h>
+#endif
+
 // tr_shader.c -- this file deals with the parsing and definition of shaders
 
 
@@ -3780,6 +3784,15 @@ void	R_ShaderList_f (void) {
 }
 
 
+#if defined(__PS3__)
+static int ShaderFileNameCompare(const void *left, const void *right)
+{
+    const char * const *leftName = (const char * const *)left;
+    const char * const *rightName = (const char * const *)right;
+    return Q_stricmp(*leftName, *rightName);
+}
+#endif
+
 /*
 ====================
 ScanAndLoadShaderFiles
@@ -3806,6 +3819,12 @@ static void ScanAndLoadShaderFiles( void )
         ri.Printf(PRINT_WARNING, "WARNING: no shader files found\n");
         return;
     }
+
+#if defined(__PS3__)
+    /* Match the deterministic order used by the offline PS3 shader indexer. */
+    if (numShaders > 1)
+        qsort(shaderFiles, numShaders, sizeof(shaderFiles[0]), ShaderFileNameCompare);
+#endif
 
     if (numShaders > MAX_SHADER_FILES) {
         numShaders = MAX_SHADER_FILES;
@@ -3915,6 +3934,172 @@ static void CreateExternalShaders( void ) {
 	tr.flareShader = R_FindShader( "flare", LIGHTMAP_NONE, qtrue, r_picmip->integer, qtrue, qtrue);
 }
 
+
+#if defined(__PS3__)
+/*
+ * Optional pre-indexed material shader database.
+ *
+ * Layout (little-endian): fixed header, source-name manifest, fixed-size
+ * material entries, then the NUL-terminated shader text blocks. Renderer
+ * pointers and image/lightmap state are intentionally not serialized.
+ */
+#define PS3_SHADER_CACHE_PATH "scripts/ps3_shader_cache.bin"
+#define PS3_SHADER_CACHE_HEADER_SIZE 32
+#define PS3_SHADER_CACHE_SOURCE_SIZE 64
+#define PS3_SHADER_CACHE_ENTRY_SIZE 76
+#define PS3_SHADER_CACHE_MAX_ENTRIES 262144
+
+static unsigned int PS3_ShaderCacheReadU16(const unsigned char *data)
+{
+    return (unsigned int)data[0] | ((unsigned int)data[1] << 8);
+}
+
+static unsigned int PS3_ShaderCacheReadU32(const unsigned char *data)
+{
+    return (unsigned int)data[0]
+        | ((unsigned int)data[1] << 8)
+        | ((unsigned int)data[2] << 16)
+        | ((unsigned int)data[3] << 24);
+}
+
+static qboolean PS3_LoadShaderCache(void)
+{
+    void *rawData = NULL;
+    char **shaderFiles = NULL;
+    int numShaderFiles = 0;
+    long rawLength;
+    const unsigned char *data;
+    const unsigned char *manifest;
+    const unsigned char *entries;
+    const unsigned char *textData;
+    unsigned int entryCount;
+    unsigned int sourceCount;
+    unsigned int textSize;
+    unsigned int sourceRecordSize;
+    unsigned int entryRecordSize;
+    unsigned long long expectedLength;
+    unsigned int i;
+    const char *failure = NULL;
+
+    rawLength = ri.FS_ReadFile(PS3_SHADER_CACHE_PATH, &rawData);
+    if (rawLength < 0 || !rawData)
+        return qfalse; /* Cache is optional; the normal parser is the fallback. */
+
+    data = (const unsigned char *)rawData;
+    if (rawLength < PS3_SHADER_CACHE_HEADER_SIZE
+        || memcmp(data, "OMHPSHC1", 8) != 0) {
+        failure = "bad header or magic";
+        goto reject;
+    }
+
+    if (PS3_ShaderCacheReadU32(data + 8) != 1) {
+        failure = "unsupported version";
+        goto reject;
+    }
+
+    entryCount = PS3_ShaderCacheReadU32(data + 12);
+    sourceCount = PS3_ShaderCacheReadU32(data + 16);
+    textSize = PS3_ShaderCacheReadU32(data + 20);
+    sourceRecordSize = PS3_ShaderCacheReadU32(data + 24);
+    entryRecordSize = PS3_ShaderCacheReadU32(data + 28);
+
+    if (!entryCount || entryCount > PS3_SHADER_CACHE_MAX_ENTRIES
+        || !sourceCount || sourceCount > MAX_SHADER_FILES
+        || !textSize
+        || sourceRecordSize != PS3_SHADER_CACHE_SOURCE_SIZE
+        || entryRecordSize != PS3_SHADER_CACHE_ENTRY_SIZE) {
+        failure = "invalid counts or record sizes";
+        goto reject;
+    }
+
+    expectedLength = PS3_SHADER_CACHE_HEADER_SIZE
+        + (unsigned long long)sourceCount * sourceRecordSize
+        + (unsigned long long)entryCount * entryRecordSize
+        + (unsigned long long)textSize;
+    if (expectedLength != (unsigned long long)rawLength) {
+        failure = "file size does not match its index";
+        goto reject;
+    }
+
+    shaderFiles = ri.FS_ListFiles("scripts", ".shader", &numShaderFiles);
+    if (!shaderFiles || numShaderFiles != (int)sourceCount
+        || numShaderFiles > MAX_SHADER_FILES) {
+        failure = "shader file list differs from the cache manifest";
+        goto reject;
+    }
+
+    if (numShaderFiles > 1)
+        qsort(shaderFiles, numShaderFiles, sizeof(shaderFiles[0]), ShaderFileNameCompare);
+
+    manifest = data + PS3_SHADER_CACHE_HEADER_SIZE;
+    for (i = 0; i < sourceCount; ++i) {
+        const char *expectedName = (const char *)(manifest + i * sourceRecordSize);
+        if (!memchr(expectedName, '\0', sourceRecordSize)
+            || Q_stricmp(shaderFiles[i], expectedName) != 0) {
+            failure = "shader file list differs from the cache manifest";
+            goto reject;
+        }
+    }
+
+    entries = manifest + sourceCount * sourceRecordSize;
+    textData = entries + entryCount * entryRecordSize;
+
+    /* Validate every record before allocating or linking hash entries. */
+    for (i = 0; i < entryCount; ++i) {
+        const unsigned char *entry = entries + i * entryRecordSize;
+        unsigned int nameLength = PS3_ShaderCacheReadU16(entry);
+        unsigned int textOffset = PS3_ShaderCacheReadU32(entry + 4);
+        unsigned int textLength = PS3_ShaderCacheReadU32(entry + 8);
+        const unsigned char *name = entry + 12;
+
+        if (!nameLength || nameLength >= 64
+            || memchr(name, '\0', nameLength) != NULL
+            || name[nameLength] != '\0'
+            || textLength < 2
+            || textOffset > textSize
+            || textLength > textSize - textOffset
+            || textData[textOffset + textLength - 1] != '\0'
+            || textData[textOffset + textLength - 2] != '}') {
+            failure = "invalid material entry";
+            goto reject;
+        }
+    }
+
+    s_shaderText = ri.Malloc(textSize);
+    if (!s_shaderText) {
+        failure = "not enough memory for shader text";
+        goto reject;
+    }
+    memcpy(s_shaderText, textData, textSize);
+
+    for (i = 0; i < entryCount; ++i) {
+        const unsigned char *entry = entries + i * entryRecordSize;
+        unsigned int textOffset = PS3_ShaderCacheReadU32(entry + 4);
+        const char *name = (const char *)(entry + 12);
+        shadertext_t *cached = AddShaderTextToHash(name, generateHashValue(name));
+        cached->text = s_shaderText + textOffset;
+    }
+
+    ri.Printf(PRINT_ALL,
+              "Loaded pre-indexed PS3 material shader cache: %u definitions from %u files (%u bytes)\n",
+              entryCount, sourceCount, textSize);
+    ri.FS_FreeFileList(shaderFiles);
+    ri.FS_FreeFile(rawData);
+    return qtrue;
+
+reject:
+    if (shaderFiles)
+        ri.FS_FreeFileList(shaderFiles);
+    if (rawData)
+        ri.FS_FreeFile(rawData);
+    if (failure)
+        ri.Printf(PRINT_WARNING,
+                  "Ignoring PS3 material shader cache (%s); using normal shader parser\n",
+                  failure);
+    return qfalse;
+}
+#endif /* __PS3__ */
+
 void R_StartupShaders()
 {
     ri.Printf(PRINT_ALL, "Initializing Shaders\n");
@@ -3924,9 +4109,15 @@ void R_StartupShaders()
 
     Com_Memset(hashTable, 0, sizeof(hashTable));
 
+#if defined(__PS3__)
+    if (!PS3_LoadShaderCache()) {
+        ScanAndLoadShaderFiles();
+        FindShadersInShaderText();
+    }
+#else
     ScanAndLoadShaderFiles();
-
     FindShadersInShaderText();
+#endif
 
     R_SetupShaders();
 }
