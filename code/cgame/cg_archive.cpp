@@ -25,12 +25,28 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cg_commands.h"
 #include "memarchiver.h"
 #include "../corepp/tiki.h"
+#include "../sys/ps3_step.h"
 
 void CG_ArchiveStuff(MemArchiver& archiver, int svsTime)
 {
 	archiver.SetBaseTime(svsTime);
+#if defined(__PS3__)
+	if (archiver.IsWriting()) {
+		PS3_TRACEF("SAVE CG archive begin");
+	}
+#endif
 	commandManager.ArchiveToMemory(archiver);
+#if defined(__PS3__)
+	if (archiver.IsWriting()) {
+		PS3_TRACEF("SAVE CG command-manager archive complete");
+	}
+#endif
 	CG_ArchiveVSSGlobals(archiver);
+#if defined(__PS3__)
+	if (archiver.IsWriting()) {
+		PS3_TRACEF("SAVE CG archive complete");
+	}
+#endif
 }
 
 size_t CG_SaveStateToBuffer(void** out, int svsTime)
@@ -38,12 +54,34 @@ size_t CG_SaveStateToBuffer(void** out, int svsTime)
 	MemArchiver archiver;
 	size_t size;
 
+	if (out) {
+		*out = NULL;
+	}
+
 	archiver.SetupForWriting(0x200000);
+	if (archiver.Failed()) {
+#if defined(__PS3__)
+		PS3_TRACEF("SAVE CG snapshot aborted: initial buffer allocation failed");
+#endif
+		return 0;
+	}
+
 	CG_ArchiveStuff(archiver, svsTime);
+	if (archiver.Failed()) {
+#if defined(__PS3__)
+		PS3_TRACEF("SAVE CG snapshot aborted: archive allocation failed partial=%lu",
+			(unsigned long)archiver.BufferSize());
+#endif
+		return 0;
+	}
+
 	size = archiver.BufferSize();
 	if (size && out) {
 		*out = archiver.ConfiscateBuffer();
 	}
+#if defined(__PS3__)
+	PS3_TRACEF("SAVE CG snapshot ready size=%lu", (unsigned long)size);
+#endif
 
 	return size;
 }
