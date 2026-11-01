@@ -46,6 +46,11 @@ jobs:
           config=assets/ps3_usrdir/main/autoexec.cfg
           grep -Fqx 'seta ps3_aim_assist "1"' "$config"
           grep -Fqx 'seta ps3_aim_assist_strength "1.0"' "$config"
+          grep -Fq 'in_buttons[1].wasPressed' code/client/cl_input.cpp
+          grep -Fq 'cge->CG_AimAssistNotify(enabled)' code/client/cl_input.cpp
+          grep -Fq 'cge.CG_AimAssistNotify' code/cgame/cg_main.c
+          grep -Fq '"AIM ASSIST ON"' code/cgame/cg_drawtools.cpp
+          grep -Fq '"AIM ASSIST OFF"' code/cgame/cg_drawtools.cpp
           grep -Fq -- '--extra-usrdir assets/ps3_usrdir' .github/workflows/ps3-build.yml
 
 

@@ -811,6 +811,25 @@ usercmd_t CL_CreateCmd( void ) {
 
 	VectorCopy( cl.viewangles, oldAngles );
 
+#if defined(__PS3__)
+	/*
+	 * Secondary fire doubles as the aim-assist toggle. Consume the press edge
+	 * before CL_CmdButtons clears wasPressed; holding the button toggles once.
+	 * The regular secondary-fire command is still passed to the game.
+	 */
+	if (in_buttons[1].wasPressed &&
+		clc.state == CA_ACTIVE &&
+		Key_GetCatcher() == 0 &&
+		!UI_MenuActive() &&
+		!UI_ConsoleIsOpen()) {
+		const qboolean enabled = !Cvar_VariableIntegerValue("ps3_aim_assist");
+		Cvar_Set("ps3_aim_assist", enabled ? "1" : "0");
+		if (cge && cge->CG_AimAssistNotify) {
+			cge->CG_AimAssistNotify(enabled);
+		}
+	}
+#endif
+
 	// keyboard angle adjustment
 	CL_AdjustAngles ();
 

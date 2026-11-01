@@ -15,6 +15,12 @@ workflow.
 
 ## Controls
 
+Tap the DualShock 3 secondary-fire button (default PS3 binding: L2,
+`+attacksecondary`) during active gameplay to toggle aim assist. A short
+**AIM ASSIST ON** or **AIM ASSIST OFF** message appears at the top-left of
+the screen. The toggle is edge-triggered, so holding the button changes the
+state only once. Secondary fire retains its normal weapon action.
+
 Use the in-game console to change the values for the current session:
 
 ```

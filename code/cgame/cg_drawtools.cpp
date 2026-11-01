@@ -1519,6 +1519,53 @@ void CG_DrawVote()
     }
 }
 
+static int s_aimAssistStatusTime = 0;
+static qboolean s_aimAssistStatusPending = qfalse;
+static qboolean s_aimAssistStatusEnabled = qfalse;
+
+void CG_AimAssistNotify(qboolean enabled)
+{
+    s_aimAssistStatusEnabled = enabled;
+    s_aimAssistStatusTime = cg.time;
+    s_aimAssistStatusPending = qtrue;
+}
+
+static void CG_DrawAimAssistStatus(void)
+{
+    const char *message;
+    int elapsed;
+    const float x = 18.0f;
+    const float y = 22.0f;
+    vec4_t shadowColor = {0.0f, 0.0f, 0.0f, 0.9f};
+    vec4_t textColor;
+
+    if (!s_aimAssistStatusPending) {
+        return;
+    }
+
+    elapsed = cg.time - s_aimAssistStatusTime;
+    if (elapsed < 0 || elapsed >= 2500) {
+        s_aimAssistStatusPending = qfalse;
+        return;
+    }
+
+    if (!cgs.media.hudDrawFont) {
+        return;
+    }
+
+    message = s_aimAssistStatusEnabled ? "AIM ASSIST ON" : "AIM ASSIST OFF";
+    textColor[0] = s_aimAssistStatusEnabled ? 0.25f : 1.0f;
+    textColor[1] = s_aimAssistStatusEnabled ? 1.0f : 0.25f;
+    textColor[2] = 0.25f;
+    textColor[3] = 1.0f;
+
+    cgi.R_SetColor(shadowColor);
+    cgi.R_DrawString(cgs.media.hudDrawFont, message, x + 1.0f, y + 1.0f, -1, cgs.uiHiResScale);
+    cgi.R_SetColor(textColor);
+    cgi.R_DrawString(cgs.media.hudDrawFont, message, x, y, -1, cgs.uiHiResScale);
+    cgi.R_SetColor(NULL);
+}
+
 /*
 ==============
 CG_Draw2D
@@ -1540,4 +1587,5 @@ void CG_Draw2D(void)
     CG_DrawVote();
     CG_DrawInstantMessageMenu();
     CG_DrawCrosshair();
+    CG_DrawAimAssistStatus();
 }
