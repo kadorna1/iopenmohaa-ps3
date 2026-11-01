@@ -3982,8 +3982,17 @@ static qboolean PS3_LoadShaderCache(void)
     const char *failure = NULL;
 
     rawLength = ri.FS_ReadFile(PS3_SHADER_CACHE_PATH, &rawData);
-    if (rawLength < 0 || !rawData)
+    if (rawLength < 0 || !rawData) {
+        ri.Printf(PRINT_WARNING,
+                  "PS3 material shader cache unavailable: '%s' (FS_ReadFile=%ld, buffer=%s); using normal shader parser\\n",
+                  PS3_SHADER_CACHE_PATH, rawLength,
+                  rawData ? "non-null" : "null");
         return qfalse; /* Cache is optional; the normal parser is the fallback. */
+    }
+
+    ri.Printf(PRINT_ALL,
+              "PS3 material shader cache found: '%s' (%ld bytes)\\n",
+              PS3_SHADER_CACHE_PATH, rawLength);
 
     data = (const unsigned char *)rawData;
     if (rawLength < PS3_SHADER_CACHE_HEADER_SIZE
@@ -4024,6 +4033,9 @@ static qboolean PS3_LoadShaderCache(void)
     shaderFiles = ri.FS_ListFiles("scripts", ".shader", &numShaderFiles);
     if (!shaderFiles || numShaderFiles != (int)sourceCount
         || numShaderFiles > MAX_SHADER_FILES) {
+        ri.Printf(PRINT_WARNING,
+                  "PS3 material shader cache source count mismatch: cache=%u, filesystem=%d\\n",
+                  sourceCount, numShaderFiles);
         failure = "shader file list differs from the cache manifest";
         goto reject;
     }
@@ -4034,8 +4046,17 @@ static qboolean PS3_LoadShaderCache(void)
     manifest = data + PS3_SHADER_CACHE_HEADER_SIZE;
     for (i = 0; i < sourceCount; ++i) {
         const char *expectedName = (const char *)(manifest + i * sourceRecordSize);
-        if (!memchr(expectedName, '\0', sourceRecordSize)
-            || Q_stricmp(shaderFiles[i], expectedName) != 0) {
+        if (!memchr(expectedName, '\\0', sourceRecordSize)) {
+            ri.Printf(PRINT_WARNING,
+                      "PS3 material shader cache manifest entry %u has no filename terminator\\n",
+                      i);
+            failure = "invalid shader filename in cache manifest";
+            goto reject;
+        }
+        if (Q_stricmp(shaderFiles[i], expectedName) != 0) {
+            ri.Printf(PRINT_WARNING,
+                      "PS3 material shader cache manifest mismatch at %u: cache='%s', filesystem='%s'\\n",
+                      i, expectedName, shaderFiles[i]);
             failure = "shader file list differs from the cache manifest";
             goto reject;
         }

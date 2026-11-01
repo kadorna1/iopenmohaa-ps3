@@ -55,7 +55,9 @@ On PS3, `R_StartupShaders()` looks for `scripts/ps3_shader_cache.bin`.
 The loader checks the format version, record sizes, all offsets/terminators,
 and the sorted shader-file-name manifest before using it. A missing cache is
 normal. An invalid cache or a different set of shader filenames causes the
-renderer to use the original script scanner and parser.
+renderer to use the original script scanner and parser. The PS3 log reports
+whether the cache file was found, its byte size, source-file count mismatches,
+and the first filename mismatch.
 
 The cache stores shader names and original shader-definition text blocks, not
 renderer structs, image pointers, lightmap pointers, or RSX programs. The
