@@ -19,8 +19,8 @@ dest_usrdir="$3"
 
 case "$appid" in
     OMOHAA020) expansion_dir="" ;;
-    OMOHAB020) expansion_dir="mainta" ;;
-    OMOHAS020) expansion_dir="maintt" ;;
+    OMOHAB020) expansion_dir="maintt" ;;
+    OMOHAS020) expansion_dir="mainta" ;;
     *)
         echo "error: unsupported PS3 title ID: $appid" >&2
         exit 1
