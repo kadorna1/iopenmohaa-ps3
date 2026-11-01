@@ -6118,6 +6118,11 @@ void ClientGameCommandManager::ArchiveToMemory(MemArchiver& archiver)
         archiver.ArchiveInteger(&m_iAllocatedvsssources);
     }
 
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_TRACEF("SAVE CG VSS archive begin count=%d", m_iAllocatedvsssources);
+    }
+#endif
     ArchiveVssSourcePointerToMemory(archiver, &m_active_vsssources.prev);
     ArchiveVssSourcePointerToMemory(archiver, &m_active_vsssources.next);
     ArchiveVssSourcePointerToMemory(archiver, &m_free_vsssources);
@@ -6126,6 +6131,11 @@ void ClientGameCommandManager::ArchiveToMemory(MemArchiver& archiver)
         m_vsssources[i].ArchiveToMemory(archiver);
     }
 
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_TRACEF("SAVE CG VSS archive complete count=%d", m_iAllocatedvsssources);
+    }
+#endif
     archiver.ArchiveTime(&m_iLastVSSRepulsionTime);
     m_command_time_manager.ArchiveToMemory(archiver);
     archiver.ArchiveInteger(&m_seed);
