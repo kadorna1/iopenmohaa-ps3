@@ -6135,6 +6135,10 @@ void ClientGameCommandManager::ArchiveToMemory(MemArchiver& archiver)
         size_t       allocationSize;
 
         archiver.ArchiveInteger(&num);
+        if (archiver.Failed()) {
+            return;
+        }
+
         if (num < 128 || (size_t)num > (size_t)INT_MAX / sizeof(cvssource_t)) {
             cgi.Error(ERR_DROP, "Invalid VSS source count in savegame: %d", num);
             return;
