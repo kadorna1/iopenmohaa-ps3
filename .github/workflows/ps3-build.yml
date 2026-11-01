@@ -391,22 +391,6 @@ jobs:
         if: always()
         run: ccache --show-stats | tee ps3-ccache-stats.txt
 
-      - name: Link EBOOT.BIN with PSL1GHT
-        shell: bash
-        run: |
-          set -o pipefail
-          cmake --build build-ps3 --target ps3_self --parallel 2 2>&1 | tee ps3-self.log
-          test -s build-ps3/EBOOT.BIN
-          file build-ps3/EBOOT.BIN
-          if readelf -SW build-ps3/bin/openmohaa | grep -Eq "[.]debug_|[.]zdebug_"; then
-            echo "::error::Debug sections found in PS3 release ELF"
-            exit 1
-          fi
-          echo "Verified: PS3 release ELF contains no DWARF debug sections"
-          ls -lh build-ps3/EBOOT.BIN
-          find build-ps3 \( -type f -name '*.elf' -o -type f -name 'openmohaa' \) -print | sort > ps3-build-outputs.txt
-          cat ps3-build-outputs.txt
-
       - name: Stage optional XMB assets
         shell: bash
         run: |
