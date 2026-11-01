@@ -6022,8 +6022,8 @@ cvssource_t *ClientGameCommandManager::VssSourceForId(int id)
         return &m_active_vsssources;
     }
 
-    if (id == -2) {
-        return 0;
+    if (id == -2 || id < 0 || id >= m_iAllocatedvsssources || !m_vsssources) {
+        return NULL;
     }
 
     return &m_vsssources[id];
