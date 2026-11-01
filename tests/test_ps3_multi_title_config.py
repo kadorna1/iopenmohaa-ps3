@@ -15,6 +15,7 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
         cls.ps3_sys = (ROOT / "code/sys/ps3_sys.c").read_text()
         cls.sys_main = (ROOT / "code/sys/sys_main.c").read_text()
         cls.common = (ROOT / "code/qcommon/common.c").read_text()
+        cls.q_shared = (ROOT / "code/qcommon/q_shared.h").read_text()
         cls.files = (ROOT / "code/qcommon/files.cpp").read_text()
         cls.workflow = (ROOT / ".github/workflows/ps3-build.yml").read_text()
         cls.stage_script = ROOT / "tools/stage_ps3_title_usrdir.sh"
@@ -48,7 +49,12 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
     def test_expansion_executables_select_their_native_target(self):
         self.assertIn('Cvar_Get("com_target_game", PS3_DEFAULT_TARGET_GAME,', self.common)
         self.assertIn("PS3_DEFAULT_TARGET_GAME", self.cmake)
-        self.assertIn("TITLE_GAME_IDS=(0 1 2)", self.workflow)
+        self.assertIn("TITLE_GAME_IDS=(0 2 1)", self.workflow)
+        # OpenMoHAA's native enum uses MOHTA for Spearhead and MOHTT for Breakthrough.
+        self.assertIn('#define PRODUCT_EXTENSION_MOHTA\t\t\t"Spearhead"', self.q_shared)
+        self.assertIn('#define GAME_EXTENSION_MOHTA\t\t\t"mainta"', self.q_shared)
+        self.assertIn('#define PRODUCT_EXTENSION_MOHTT\t\t\t"Breakthrough"', self.q_shared)
+        self.assertIn('#define GAME_EXTENSION_BASE_MOHTT\t\t"maintt"', self.q_shared)
         self.assertIn("TITLE_APPIDS=(OMOHAA020 OMOHAB020 OMOHAS020)", self.workflow)
 
     def test_workflow_builds_packages_and_saves_incremental_manifests(self):
@@ -73,9 +79,9 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
             (source / "main").mkdir(parents=True)
             (source / "main" / "autoexec.cfg").write_text("set test 1\n")
             (source / "mainta").mkdir()
-            (source / "mainta" / "breakthrough.pk3").write_bytes(b"breakthrough")
+            (source / "mainta" / "spearhead.pk3").write_bytes(b"spearhead")
             (source / "maintt").mkdir()
-            (source / "maintt" / "spearhead.pk3").write_bytes(b"spearhead")
+            (source / "maintt" / "breakthrough.pk3").write_bytes(b"breakthrough")
 
             staged = {}
             for appid in ("OMOHAA020", "OMOHAB020", "OMOHAS020"):
@@ -95,10 +101,10 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
             # Only the selected expansion's tree is copied to each expansion PKG.
             self.assertFalse((staged["OMOHAA020"] / "mainta").exists())
             self.assertFalse((staged["OMOHAA020"] / "maintt").exists())
-            self.assertTrue((staged["OMOHAB020"] / "mainta" / "breakthrough.pk3").is_file())
-            self.assertFalse((staged["OMOHAB020"] / "maintt").exists())
-            self.assertTrue((staged["OMOHAS020"] / "maintt" / "spearhead.pk3").is_file())
-            self.assertFalse((staged["OMOHAS020"] / "mainta").exists())
+            self.assertTrue((staged["OMOHAB020"] / "maintt" / "breakthrough.pk3").is_file())
+            self.assertFalse((staged["OMOHAB020"] / "mainta").exists())
+            self.assertTrue((staged["OMOHAS020"] / "mainta" / "spearhead.pk3").is_file())
+            self.assertFalse((staged["OMOHAS020"] / "maintt").exists())
 
 
 if __name__ == "__main__":
