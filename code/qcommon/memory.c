@@ -231,7 +231,7 @@ void *Z_TagMalloc( int size, int tag ) {
 #if defined(__PS3__)
 		PS3_TRACEF( "ZONE malloc failed request=%d total=%d tag=%d", requestedSize, size, tag );
 #endif
-		Com_Error( ERR_FATAL, "Z_TagMalloc: failed to allocate %d bytes for tag %d", size, tag );
+		Com_Error( ERR_FATAL, "Z_TagMalloc: failed to allocate request=%d bytes (total=%d, tag=%d)", requestedSize, size, tag );
 		return NULL;
 	}
 	block->id = ZONEID;
