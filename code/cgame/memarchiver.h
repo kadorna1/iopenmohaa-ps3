@@ -47,6 +47,7 @@ public:
     bool   IsReading() const;
     bool   IsWriting() const;
     bool   FinishedReading() const;
+    bool   Failed() const;
 
     void ArchiveByte(byte *value);
     void ArchiveBoolean(qboolean *value);
@@ -70,4 +71,5 @@ private:
     size_t          bufferSize;
     size_t          allocatedSize;
     int             svsTime;
+    bool            failed;
 };
