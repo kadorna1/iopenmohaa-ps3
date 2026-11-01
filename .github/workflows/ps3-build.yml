@@ -37,12 +37,16 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Test PS3 aim-assist math
+      - name: Test PS3 aim-assist math and startup config
         shell: bash
         run: |
           set -eu
           cc -std=c99 -Wall -Wextra -Werror tests/test_ps3_aim_assist_math.c -lm -o /tmp/test_ps3_aim_assist_math
           /tmp/test_ps3_aim_assist_math
+          config=assets/ps3_usrdir/main/autoexec.cfg
+          grep -Fqx 'seta ps3_aim_assist "1"' "$config"
+          grep -Fqx 'seta ps3_aim_assist_strength "0.50"' "$config"
+          grep -Fq -- '--extra-usrdir assets/ps3_usrdir' .github/workflows/ps3-build.yml
 
 
 
@@ -308,6 +312,7 @@ jobs:
             --out-dir dist
             --name iOpenMOHAA-PS3-OMOHAA020
             --title iOpenMOHAA-PS3
+            --extra-usrdir assets/ps3_usrdir
           )
           bash make_ps3_pkg.sh "${pkg_args[@]}" 2>&1 | tee ps3-package.log
           find dist -maxdepth 1 -type f -name '*.pkg' -size +0c -print

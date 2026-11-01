@@ -4,9 +4,18 @@ The PS3 build has optional aim assist for the DualShock 3 right stick. It is
 enabled by default at a moderate strength and is independent of USB-mouse
 aiming and menu cursor movement.
 
+## Startup configuration
+
+The PS3 package installs these defaults in
+`/dev_hdd0/game/OMOHAA020/USRDIR/main/autoexec.cfg`. OpenMoHAA loads
+`autoexec.cfg` at startup after `omconfig.cfg`, so the packaged values are
+applied each normal startup. The file is maintained in
+`assets/ps3_usrdir/main/autoexec.cfg` and staged into the PKG by the PS3
+workflow.
+
 ## Controls
 
-Use the in-game console:
+Use the in-game console to change the values for the current session:
 
 ```
 ps3_aim_assist 1
