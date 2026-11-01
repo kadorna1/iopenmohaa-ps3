@@ -37,17 +37,17 @@ class ShaderCacheParserTests(unittest.TestCase):
             ["textures/test/stone", "textures/test/a quoted name"],
         )
         self.assertIn(b"map textures/test/stone.tga", parsed[0][1])
-        self.assertTrue(parsed[0][1].endswith(b"}\\0"))
+        self.assertTrue(parsed[0][1].endswith(b"}\0"))
 
     def test_rejects_unterminated_material(self):
         with self.assertRaises(ValueError):
-            parse_shader_definitions(b"textures/bad { map image\\n", "bad.shader")
+            parse_shader_definitions(b"textures/bad { map image\n", "bad.shader")
 
     def test_cache_is_deterministic_and_keeps_file_manifest(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "z.shader").write_text("textures/duplicate { map z.tga }\\n", encoding="utf-8")
-            (root / "a.shader").write_text("textures/duplicate { map a.tga }\\n", encoding="utf-8")
+            (root / "z.shader").write_text("textures/duplicate { map z.tga }\n", encoding="utf-8")
+            (root / "a.shader").write_text("textures/duplicate { map a.tga }\n", encoding="utf-8")
 
             cache1, stats = build_cache(root)
             cache2, _ = build_cache(root)
@@ -68,7 +68,7 @@ class ShaderCacheParserTests(unittest.TestCase):
             manifest_offset = HEADER_STRUCT.size
             names = [
                 cache1[manifest_offset + i * src_size:
-                       manifest_offset + (i + 1) * src_size].split(b"\\0", 1)[0]
+                       manifest_offset + (i + 1) * src_size].split(b"\0", 1)[0]
                 for i in range(source_count)
             ]
             self.assertEqual(names, [b"a.shader", b"z.shader"])
