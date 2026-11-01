@@ -26,10 +26,95 @@ env:
   OPENMOHAA_PS3_APPID: OMOHAA020
 
 jobs:
+  # The builder image is immutable per dependency-manifest/Dockerfile hash.
+  # Normal runs reuse the existing GHCR image instead of reinstalling APT packages.
+  prepare-builder:
+    name: Prepare persistent PS3 host build environment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve dependency image fingerprint
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_ref=HEAD
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+            source_ref=FETCH_HEAD
+          fi
+
+          tmp="$(mktemp -d)"
+          if [[ "$source_ref" == "HEAD" ]]; then
+            cp .github/ps3-host-deps.txt "$tmp/ps3-host-deps.txt"
+            cp .github/docker/ps3-builder.Dockerfile "$tmp/ps3-builder.Dockerfile"
+          else
+            git show "$source_ref:.github/ps3-host-deps.txt" > "$tmp/ps3-host-deps.txt"
+            git show "$source_ref:.github/docker/ps3-builder.Dockerfile" > "$tmp/ps3-builder.Dockerfile"
+          fi
+
+          deps_sha="$(sha256sum "$tmp/ps3-host-deps.txt" | cut -d ' ' -f 1)"
+          dockerfile_sha="$(sha256sum "$tmp/ps3-builder.Dockerfile" | cut -d ' ' -f 1)"
+          fingerprint="$(printf '%s\n%s\n' "$deps_sha" "$dockerfile_sha" | sha256sum | cut -c1-20)"
+          image="ghcr.io/kadorna1/iopenmohaa-ps3-builder:deps-$fingerprint"
+
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          if docker pull "$image"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Reusing prebuilt host dependency image: $image"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No prebuilt image found for this dependency set: $image"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.image.outputs.exists != 'true' && github.event_name != 'pull_request'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and publish host dependency image
+        if: steps.image.outputs.exists != 'true' && github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/docker/ps3-builder.Dockerfile
+          push: true
+          tags: ${{ steps.image.outputs.image }}
+
+      - name: Require the base dependency image for pull requests
+        if: steps.image.outputs.exists != 'true' && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          echo "::error::The builder image for the PR base dependency set is not available in GHCR. Run a main-branch build to publish it first."
+          exit 1
+
   build-ps3:
     name: Build OpenMoHAA for PS3 (PSL1GHT)
+    needs: prepare-builder
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    permissions:
+      contents: write
+      packages: read
+    container:
+      image: ${{ needs.prepare-builder.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout source
@@ -61,30 +146,6 @@ jobs:
         run: |
           set -eu
           python3 -m unittest discover -s tests -p 'test_ps3_shader_cache.py' -v
-
-      # Cache downloaded .deb packages. apt indexes are refreshed each run,
-      # but already-cached dependency archives do not need to be downloaded again.
-      - name: Restore host dependency package cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/apt/archives
-          key: ps3-apt-ubuntu-24.04-${{ hashFiles('.github/ps3-host-deps.txt') }}
-          restore-keys: |
-            ps3-apt-ubuntu-24.04-
-
-      - name: Install host build dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          apt_cache="$HOME/.cache/apt/archives"
-          mkdir -p "$apt_cache/partial"
-          sudo apt-get update
-          mapfile -t packages < <(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' .github/ps3-host-deps.txt)
-          sudo apt-get -o "Dir::Cache::archives=$apt_cache" install -y --no-install-recommends "${packages[@]}"
-          # apt creates root-owned lock/partial entries, which prevent the
-          # runner-owned cache action from archiving this directory.
-          sudo rm -rf "$apt_cache/partial" "$apt_cache/lock"
-          mkdir -p "$apt_cache/partial"
 
       # Cache compiler outputs across ephemeral GitHub-hosted runners.
       # The unique SHA key lets each run save an updated cache; restore-keys

@@ -1,4 +1,6 @@
 # Host packages required by the Linux PS3 cross-build and XMB media packaging.
+curl
+ca-certificates
 autoconf
 automake
 bison
