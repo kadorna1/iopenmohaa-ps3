@@ -58,7 +58,7 @@ size_t CG_SaveStateToBuffer(void** out, int svsTime)
 		*out = NULL;
 	}
 
-	archiver.SetupForWriting(0x200000);
+	archiver.SetupForWriting(0x400000);
 	if (archiver.Failed()) {
 #if defined(__PS3__)
 		PS3_TRACEF("SAVE CG snapshot aborted: initial buffer allocation failed");
