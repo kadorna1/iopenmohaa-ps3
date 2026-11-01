@@ -51,6 +51,8 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
         self.assertIn("ps3-build-v3-", self.workflow)
         self.assertIn("--recurse-submodules", self.workflow)
         self.assertIn("changed_union", self.workflow)
+        self.assertNotIn("Link EBOOT.BIN with PSL1GHT", self.workflow)
+        self.assertNotIn("cmake --build build-ps3 --target ps3_self", self.workflow)
 
 
 if __name__ == "__main__":
