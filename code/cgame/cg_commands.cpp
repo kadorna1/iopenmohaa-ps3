@@ -30,6 +30,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../corepp/tiki.h"
 #include <limits.h>
 #include <new>
+#include <stdint.h>
 #include "cg_archive.h"
 #include "memarchiver.h"
 #include "../sys/ps3_step.h"
@@ -5996,26 +5997,35 @@ spawnthing_t *ClientGameCommandManager::SpawnThingForId(int id)
 
 int ClientGameCommandManager::IdForVssSource(const cvssource_t *source)
 {
-    int index;
+    uintptr_t baseAddress;
+    uintptr_t sourceAddress;
+    size_t    sourceOffset;
+    size_t    poolSize;
 
     if (source == &m_active_vsssources) {
         return -1;
     }
 
-    if (!source) {
+    if (!source || !m_vsssources || m_iAllocatedvsssources <= 0) {
         return -2;
     }
 
-    index = source - m_vsssources;
-    if (index < 0 || index >= m_iAllocatedvsssources) {
+    // Do not subtract unrelated pointers: damaged/uninitialized links must not
+    // invoke undefined pointer arithmetic while a checkpoint is being archived.
+    baseAddress   = (uintptr_t)m_vsssources;
+    sourceAddress = (uintptr_t)source;
+    poolSize      = sizeof(cvssource_t) * (size_t)m_iAllocatedvsssources;
+
+    if (sourceAddress < baseAddress) {
         return -2;
     }
 
-    if (source != &m_vsssources[index]) {
+    sourceOffset = (size_t)(sourceAddress - baseAddress);
+    if (sourceOffset >= poolSize || sourceOffset % sizeof(cvssource_t) != 0) {
         return -2;
     }
 
-    return source - m_vsssources;
+    return (int)(sourceOffset / sizeof(cvssource_t));
 }
 
 cvssource_t *ClientGameCommandManager::VssSourceForId(int id)
@@ -6024,7 +6034,12 @@ cvssource_t *ClientGameCommandManager::VssSourceForId(int id)
         return &m_active_vsssources;
     }
 
-    if (id == -2 || id < 0 || id >= m_iAllocatedvsssources || !m_vsssources) {
+    if (id == -2) {
+        return NULL;
+    }
+
+    if (!m_vsssources || id < 0 || id >= m_iAllocatedvsssources) {
+        cgi.Error(ERR_DROP, "Invalid VSS source reference in savegame: %d", id);
         return NULL;
     }
 
@@ -6096,6 +6111,11 @@ void ClientGameCommandManager::ArchiveToMemory(MemArchiver& archiver)
             sp->ArchiveToMemory(archiver);
         }
     }
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_TRACEF("SAVE CG emitter archive complete count=%d", num);
+    }
+#endif
 
     ArchiveTempModelPointerToMemory(archiver, &m_active_tempmodels.prev);
     ArchiveTempModelPointerToMemory(archiver, &m_active_tempmodels.next);
