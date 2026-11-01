@@ -50,6 +50,12 @@ jobs:
 
 
 
+      - name: Test PS3 shader cache generator
+        shell: bash
+        run: |
+          set -eu
+          python3 -m unittest discover -s tests -p 'test_ps3_shader_cache.py' -v
+
       # Cache downloaded .deb packages. apt indexes are refreshed each run,
       # but already-cached dependency archives do not need to be downloaded again.
       - name: Restore host dependency package cache
