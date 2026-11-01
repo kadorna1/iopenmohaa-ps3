@@ -58,7 +58,13 @@ size_t CG_SaveStateToBuffer(void** out, int svsTime)
 		*out = NULL;
 	}
 
+#if defined(__PS3__)
+	// The last checkpoint snapshot reached ~2.47 MiB. Reserve 4 MiB once so
+	// growth does not temporarily hold both the old 2 MiB and new 4 MiB buffers.
 	archiver.SetupForWriting(0x400000);
+#else
+	archiver.SetupForWriting(0x200000);
+#endif
 	if (archiver.Failed()) {
 #if defined(__PS3__)
 		PS3_TRACEF("SAVE CG snapshot aborted: initial buffer allocation failed");
