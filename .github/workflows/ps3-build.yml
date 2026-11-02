@@ -154,6 +154,12 @@ jobs:
           set -eu
           python3 -m unittest discover -s tests -p 'test_ps3_expansion_loading.py' -v
 
+      - name: Test PS3 renderer cache and zone memory diagnostics
+        shell: bash
+        run: |
+          set -eu
+          python3 -m unittest discover -s tests -p 'test_ps3_renderer_memory.py' -v
+
       - name: Test PS3 shader cache generator
         shell: bash
         run: |
