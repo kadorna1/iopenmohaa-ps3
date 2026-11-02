@@ -13,7 +13,7 @@ class Ps3ExpansionLoadingTests(unittest.TestCase):
         cls.ps3_audio = (ROOT / "code/client/snd_ps3audio_new.cpp").read_text()
 
     def test_ps3_defers_eager_wav_and_mp3_alias_cache_by_default(self):
-        start = self.commands.index("void CacheResource(const char *stuff)")
+        start = self.commands.index("void CacheResource(const char *stuff)\\n{")
         end = self.commands.index("//===============\n// Cache", start)
         cache_resource = self.commands[start:end]
         self.assertIn("#if defined(__PS3__)", cache_resource)
