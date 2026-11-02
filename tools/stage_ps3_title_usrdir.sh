@@ -40,6 +40,17 @@ for item in "$source_usrdir"/*; do
     cp -a -- "$item" "$dest_usrdir/"
 done
 
+# The committed cache is generated from Allied Assault's main/*.pk3 files
+# only. Expansion builds have a different merged shader list and must not
+# inherit this base-only file. Expansion caches, when generated, belong under
+# USRDIR/mainta/scripts or USRDIR/maintt/scripts.
+if [[ "$appid" != "OMOHAA020" ]]; then
+    base_shader_cache="$dest_usrdir/main/scripts/ps3_shader_cache.bin"
+    if [[ -f "$base_shader_cache" ]]; then
+        rm -f -- "$base_shader_cache"
+        echo "Removed Allied Assault-only shader cache from $appid package."
+    fi
+fi
 if [[ -n "$expansion_dir" ]]; then
     mkdir -p "$dest_usrdir/$expansion_dir"
     source_expansion="$source_usrdir/$expansion_dir"
