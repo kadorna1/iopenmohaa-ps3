@@ -18,6 +18,16 @@ From the PR branch, run:
 python3 tools/ps3_shader_cache_from_pk3.py \
   --main-dir "/path/to/Allied Assault/main" \
   --output "/tmp/ps3_shader_cache.bin"
+
+# Spearhead: point at the expansion's own PK3 directory and use its cache name.
+python3 tools/ps3_shader_cache_from_pk3.py \
+  --main-dir "/path/to/Spearhead/mainta" \
+  --output "/tmp/ps3_shader_cache_mainta.bin"
+
+# Breakthrough: point at the expansion's own PK3 directory and use its cache name.
+python3 tools/ps3_shader_cache_from_pk3.py \
+  --main-dir "/path/to/Breakthrough/maintt" \
+  --output "/tmp/ps3_shader_cache_maintt.bin"
 ```
 
 The helper follows the engine's archive priority: PK3 names are sorted
@@ -27,12 +37,20 @@ filenames the same way the engine's filesystem listing does, then generates
 the indexed cache. The output reports archive count, unique source-file count,
 definition count and duplicate overrides.
 
-Copy the generated `ps3_shader_cache.bin` to a loose `scripts/` directory
-visible to the PS3 game filesystem, for example:
+Install each generated cache only with the title and data directory from which
+it was built. The renderer chooses a different filename for each target game:
 
 ```text
 /dev_hdd0/game/OMOHAA020/USRDIR/main/scripts/ps3_shader_cache.bin
+/dev_hdd0/game/OMOHAS020/USRDIR/mainta/scripts/ps3_shader_cache_mainta.bin
+/dev_hdd0/game/OMOHAB020/USRDIR/maintt/scripts/ps3_shader_cache_maintt.bin
 ```
+
+The Allied Assault cache is **not** copied into the expansion packages. A base
+cache has only the Allied Assault shader-file manifest and cannot represent the
+extra `.shader` files mounted by Spearhead or Breakthrough. Their caches must be
+generated from their own expansion PK3 files; omitting an expansion cache is
+safe because the normal parser is used as a fallback.
 
 Keep this generated file with your own game data. It contains shader text
 derived from the original game archives and is not included in the repository
@@ -51,7 +69,10 @@ python3 tools/ps3_shader_cache.py \
 
 ## Runtime behavior
 
-On PS3, `R_StartupShaders()` looks for `scripts/ps3_shader_cache.bin`.
+On PS3, `R_StartupShaders()` selects the cache from `com_target_game`: Allied
+Assault looks for `scripts/ps3_shader_cache.bin`, Spearhead for
+`scripts/ps3_shader_cache_mainta.bin`, and Breakthrough for
+`scripts/ps3_shader_cache_maintt.bin`.
 The loader checks the format version, record sizes, all offsets/terminators,
 and the sorted shader-file-name manifest before using it. A missing cache is
 normal. An invalid cache or a different set of shader filenames causes the
