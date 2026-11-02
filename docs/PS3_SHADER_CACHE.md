@@ -52,9 +52,6 @@ extra `.shader` files mounted by Spearhead or Breakthrough. Their caches must be
 generated from their own expansion PK3 files; omitting an expansion cache is
 safe because the normal parser is used as a fallback.
 
-Keep this generated file with your own game data. It contains shader text
-derived from the original game archives and is not included in the repository
-or PKG releases.
 
 ## Generate from an already extracted scripts directory
 
