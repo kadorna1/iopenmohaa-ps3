@@ -6,12 +6,25 @@ aiming and menu cursor movement.
 
 ## Startup configuration
 
-The PS3 package installs these defaults in
-`/dev_hdd0/game/OMOHAA020/USRDIR/main/autoexec.cfg`. OpenMoHAA loads
-`autoexec.cfg` at startup after `omconfig.cfg`, so the packaged values are
-applied each normal startup. The file is maintained in
-`assets/ps3_usrdir/main/autoexec.cfg` and staged into the PKG by the PS3
-workflow.
+Each title package carries the same defaults in its own active game directory:
+
+- Allied Assault: `/dev_hdd0/game/OMOHAA020/USRDIR/main/autoexec.cfg`
+- Spearhead: `/dev_hdd0/game/OMOHAS020/USRDIR/mainta/autoexec.cfg`
+- Breakthrough: `/dev_hdd0/game/OMOHAB020/USRDIR/maintt/autoexec.cfg`
+
+The common `main/autoexec.cfg` is also staged into all three packages. The
+expansion-specific copies ensure the defaults are present in the active
+`mainta` / `maintt` search path as well, instead of relying on fallback to
+the base-game directory. OpenMoHAA loads `autoexec.cfg` after
+`omconfig.cfg`, so these values override an older saved profile at startup.
+The files are maintained under `assets/ps3_usrdir/main/`,
+`assets/ps3_usrdir/mainta/` and `assets/ps3_usrdir/maintt/`. The title-staging
+step copies only the matching expansion directory into each expansion package.
+
+The workflow builds a separate executable for each native target game
+(Allied Assault = 0, Spearhead = 1, Breakthrough = 2). The shared PS3 input,
+game and CGame aim-assist code is compiled into every executable; the
+expansion-specific configs provide the same enabled-by-default settings.
 
 ## Controls
 
@@ -39,8 +52,10 @@ disables the effect and one applies the strongest slowdown and pull.
 
 - Active only during gameplay, with input focus, while the player is turning
   with a controller stick toward a candidate.
-- Supports Allied Assault's scripted `ET_MODELANIM` soldiers as well as
-  `ET_PLAYER` entities. Opposing Allies/Axis flags are used to reject allies.
+- Supports scripted `ET_MODELANIM` soldiers as well as `ET_PLAYER` entities
+  in all three single-player titles. The game module publishes its two faction
+  values as shared Allies/Axis flags, which lets CGame reject friendly actors
+  in Allied Assault, Spearhead and Breakthrough.
 - Dead actors and players are ignored. Scripted actors publish the shared
   `EF_DEAD` flag on death.
 - Candidates must be between 48 and 2048 world units away and within an
@@ -56,7 +71,8 @@ The cone math has host-side unit tests in
 
 ## Hardware test checklist
 
-1. Load a single-player level containing Allied and Axis soldiers.
+1. Test a single-player level in each title, including Breakthrough's
+   British/Commonwealth Allied soldiers and Axis enemies.
 2. Move the right stick toward a living enemy and verify the slight slowdown
    and gentle pull as the reticle approaches.
 3. Repeat while aiming at an ally, a corpse, and an enemy behind a solid wall;
