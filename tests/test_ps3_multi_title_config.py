@@ -18,6 +18,13 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
         cls.q_shared = (ROOT / "code/qcommon/q_shared.h").read_text()
         cls.files = (ROOT / "code/qcommon/files.cpp").read_text()
         cls.workflow = (ROOT / ".github/workflows/ps3-build.yml").read_text()
+        cls.basegame = (ROOT / "cmake/basegame.cmake").read_text()
+        cls.ps3_platform = (ROOT / "cmake/platforms/ps3.cmake").read_text()
+        cls.ps3_input = (ROOT / "code/input/ps3_input.c").read_text()
+        cls.client_input = (ROOT / "code/client/cl_input.cpp").read_text()
+        cls.cgame_main = (ROOT / "code/cgame/cg_main.c").read_text()
+        cls.actor = (ROOT / "code/fgame/actor.cpp").read_text()
+        cls.sentient = (ROOT / "code/fgame/sentient.h").read_text()
         cls.stage_script = ROOT / "tools/stage_ps3_title_usrdir.sh"
 
     def test_title_ids_are_valid_and_distinct(self):
@@ -50,12 +57,41 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
         self.assertIn('Cvar_Get("com_target_game", PS3_DEFAULT_TARGET_GAME,', self.common)
         self.assertIn("PS3_DEFAULT_TARGET_GAME", self.cmake)
         self.assertIn("TITLE_GAME_IDS=(0 2 1)", self.workflow)
+        # Every title build compiles the same PS3 input, game and CGame modules.
+        self.assertIn("input/ps3_input.c", self.ps3_platform)
+        self.assertIn("set(PS3_GAME_OBJ_TARGET", self.basegame)
+        self.assertIn("set(PS3_CGAME_OBJ_TARGET", self.basegame)
+        self.assertIn("target_sources(", self.basegame)
+        self.assertIn('Cvar_Get("ps3_aim_assist", "1", CVAR_ARCHIVE);', self.ps3_input)
+        self.assertIn('Cvar_Get("ps3_aim_assist_strength", "1.0", CVAR_ARCHIVE);', self.ps3_input)
+        self.assertIn("cge->CG_AimAssist", self.client_input)
+        self.assertIn("cge.CG_AimAssist                 = CG_AimAssist;", self.cgame_main)
+        self.assertIn("TEAM_AMERICAN", self.sentient)
+        self.assertIn("TEAM_GERMAN", self.sentient)
+        self.assertIn("edict->s.eFlags |= EF_ALLIES;", self.actor)
+        self.assertIn("edict->s.eFlags |= EF_AXIS;", self.actor)
         # OpenMoHAA's native enum uses MOHTA for Spearhead and MOHTT for Breakthrough.
         self.assertIn('#define PRODUCT_EXTENSION_MOHTA\t\t\t"Spearhead"', self.q_shared)
         self.assertIn('#define GAME_EXTENSION_MOHTA\t\t\t"mainta"', self.q_shared)
         self.assertIn('#define PRODUCT_EXTENSION_MOHTT\t\t\t"Breakthrough"', self.q_shared)
         self.assertIn('#define GAME_EXTENSION_BASE_MOHTT\t\t"maintt"', self.q_shared)
         self.assertIn("TITLE_APPIDS=(OMOHAA020 OMOHAB020 OMOHAS020)", self.workflow)
+
+    def test_aim_assist_defaults_are_installed_in_each_title_directory(self):
+        title_game_dirs = {
+            "OMOHAA020": "main",
+            "OMOHAB020": "maintt",
+            "OMOHAS020": "mainta",
+        }
+        expected = {
+            'seta ps3_aim_assist "1"',
+            'seta ps3_aim_assist_strength "1.0"',
+        }
+        for appid, game_dir in title_game_dirs.items():
+            config = ROOT / "assets/ps3_usrdir" / game_dir / "autoexec.cfg"
+            self.assertTrue(config.is_file(), f"{appid} is missing {game_dir}/autoexec.cfg")
+            lines = set(config.read_text().splitlines())
+            self.assertTrue(expected.issubset(lines), f"{appid} is missing aim-assist defaults")
 
     def test_workflow_builds_packages_and_saves_incremental_manifests(self):
         for appid in ("OMOHAA020", "OMOHAB020", "OMOHAS020"):
@@ -87,10 +123,16 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
             root = pathlib.Path(tmp)
             source = root / "source"
             (source / "main").mkdir(parents=True)
-            (source / "main" / "autoexec.cfg").write_text("set test 1\n")
+            config_text = (
+                'seta ps3_aim_assist "1"\n'
+                'seta ps3_aim_assist_strength "1.0"\n'
+            )
+            (source / "main" / "autoexec.cfg").write_text(config_text)
             (source / "mainta").mkdir()
+            (source / "mainta" / "autoexec.cfg").write_text(config_text)
             (source / "mainta" / "spearhead.pk3").write_bytes(b"spearhead")
             (source / "maintt").mkdir()
+            (source / "maintt" / "autoexec.cfg").write_text(config_text)
             (source / "maintt" / "breakthrough.pk3").write_bytes(b"breakthrough")
 
             staged = {}
@@ -112,9 +154,15 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
             self.assertFalse((staged["OMOHAA020"] / "mainta").exists())
             self.assertFalse((staged["OMOHAA020"] / "maintt").exists())
             self.assertTrue((staged["OMOHAB020"] / "maintt" / "breakthrough.pk3").is_file())
+            self.assertTrue((staged["OMOHAB020"] / "maintt" / "autoexec.cfg").is_file())
             self.assertFalse((staged["OMOHAB020"] / "mainta").exists())
             self.assertTrue((staged["OMOHAS020"] / "mainta" / "spearhead.pk3").is_file())
+            self.assertTrue((staged["OMOHAS020"] / "mainta" / "autoexec.cfg").is_file())
             self.assertFalse((staged["OMOHAS020"] / "maintt").exists())
+            for appid, game_dir in (("OMOHAB020", "maintt"), ("OMOHAS020", "mainta")):
+                config = (staged[appid] / game_dir / "autoexec.cfg").read_text()
+                self.assertIn('seta ps3_aim_assist "1"', config)
+                self.assertIn('seta ps3_aim_assist_strength "1.0"', config)
 
 
 if __name__ == "__main__":
