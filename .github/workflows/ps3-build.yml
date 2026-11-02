@@ -429,13 +429,15 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          import os
           import struct
           from pathlib import Path
 
+          temp = Path(os.environ["RUNNER_TEMP"])
           expected = {
-              "Allied Assault": Path("$RUNNER_TEMP/ps3-usrdir-OMOHAA020/main/scripts/ps3_shader_cache.bin"),
-              "Spearhead": Path("$RUNNER_TEMP/ps3-usrdir-OMOHAS020/mainta/scripts/ps3_shader_cache_mainta.bin"),
-              "Breakthrough": Path("$RUNNER_TEMP/ps3-usrdir-OMOHAB020/maintt/scripts/ps3_shader_cache_maintt.bin"),
+              "Allied Assault": temp / "ps3-usrdir-OMOHAA020/main/scripts/ps3_shader_cache.bin",
+              "Spearhead": temp / "ps3-usrdir-OMOHAS020/mainta/scripts/ps3_shader_cache_mainta.bin",
+              "Breakthrough": temp / "ps3-usrdir-OMOHAB020/maintt/scripts/ps3_shader_cache_maintt.bin",
           }
 
           for title, path in expected.items():
