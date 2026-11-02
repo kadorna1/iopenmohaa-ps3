@@ -4201,6 +4201,37 @@ void CacheResource(const char *stuff)
     real_stuff = stuff;
     real_stuff.tolower();
 
+#if defined(__PS3__)
+    /*
+     * Expansion ubersound scripts contain large aliascache lists. Eagerly
+     * registering every WAV/MP3 here can consume tens of MiB before the world
+     * renderer initializes. Defer those sound allocations until PlaySound
+     * actually requests an alias. Keep the behavior switchable for hardware
+     * comparison and leave TIKI/shader caching unchanged.
+     */
+    {
+        static cvar_t *deferSoundPrecache = NULL;
+        static qboolean reported = qfalse;
+
+        if (!deferSoundPrecache) {
+            deferSoundPrecache = cgi.Cvar_Get(
+                "ps3_defer_sound_precache", "1", CVAR_ARCHIVE
+            );
+        }
+
+        if (deferSoundPrecache && deferSoundPrecache->integer &&
+            (strstr(real_stuff.c_str(), ".wav") || strstr(real_stuff.c_str(), ".mp3"))) {
+            if (!reported) {
+                reported = qtrue;
+                Com_Printf(
+                    "PS3: deferring WAV/MP3 alias precache; set ps3_defer_sound_precache 0 to restore eager precache.\n"
+                );
+            }
+            return;
+        }
+    }
+#endif
+
     if (strstr(real_stuff.c_str(), ".wav")) {
         cgi.S_RegisterSound(real_stuff.c_str(), qfalse);
     } else if (strstr(real_stuff.c_str(), ".mp3")) {
