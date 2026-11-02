@@ -1838,6 +1838,12 @@ Touch all images to make sure they are resident
 */
 void RE_EndRegistration( void ) {
 	R_IssuePendingRenderCommands();
+
+	// Images not referenced by the new registration still occupy RSX local
+	// memory. Release them before warming the incoming map so the old and new
+	// maps do not compete for the same limited texture heap.
+	R_FreeUnusedImages();
+
 	if (r_precacheimages->integer) {
 #if defined(__PS3__)
 		RB_PrecacheImages();
@@ -1850,8 +1856,6 @@ void RE_EndRegistration( void ) {
 		ri.Printf(PRINT_ALL, "RB_ShowImages: %5.2f seconds\n", (float)((end - start) / 1000.f));
 #endif
 	}
-
-	R_FreeUnusedImages();
 }
 
 /*
