@@ -94,7 +94,11 @@ class PS3RendererMemoryTests(unittest.TestCase):
         compress = self.archive_source[start:end]
 
         self.assertIn("#if defined(__PS3__)", compress)
-        self.assertLess(compress.index("return true;"), compress.index("tempbuf = (byte *)gi.Malloc(tempbuf_len);"))
+        ps3_return = compress.index("return true;")
+        desktop_branch = compress.index("#else", ps3_return)
+        desktop_allocation = compress.index("tempbuf_len = (length >> 6)", desktop_branch)
+        self.assertLess(ps3_return, desktop_branch)
+        self.assertLess(desktop_branch, desktop_allocation)
         self.assertIn("if (FileHeader[0] != 'C'", self.archive_source)
         self.assertIn("g_lz77.Decompress(pos, length - 8, tempbuf, &iCSVGLength)", self.archive_source)
         self.assertIn("pos = buffer;", self.archive_source)
