@@ -90,7 +90,7 @@ class PS3RendererMemoryTests(unittest.TestCase):
 
     def test_ps3_save_archives_skip_second_full_size_compression_buffer(self):
         start = self.archive_source.index("qboolean ArchiveFile::Compress()")
-        end = self.archive_source.index("size_t ArchiveFile::Length()", start)
+        end = self.archive_source.index("size_t ArchiveFile::Length(void)", start)
         compress = self.archive_source[start:end]
 
         self.assertIn("#if defined(__PS3__)", compress)
