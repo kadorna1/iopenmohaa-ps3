@@ -243,14 +243,38 @@ static int S_MP3_NextFrame(snd_stream_t *stream,
 
         if (frameInfo->frame_bytes > 0) {
             if (samples <= 0) {
+                /*
+                 * A complete Layer III frame can still produce zero samples
+                 * when minimp3 cannot restore its bit reservoir (or rejects
+                 * the frame's side information). In that case frame_bytes is
+                 * the complete frame length, not merely junk before a sync
+                 * word. Consume that frame so playback can resynchronize on
+                 * the following frame instead of retrying it until encbuf is
+                 * full and muting the stream permanently.
+                 */
+                if (frameInfo->layer == 3 &&
+                    frameInfo->hz > 0 && frameInfo->channels > 0) {
+                    const int droppedBytes = frameInfo->frame_bytes;
+
+                    S_MP3_ConsumeInput(mp3info, droppedBytes);
+                    mp3info->skippedBytes += (unsigned int)droppedBytes;
+                    mp3info->decodeErrors++;
+                    MP3_TRACE("PS3AUDIO: minimp3 skipped undecodable Layer III frame file=%s offset=%d bytes=%d rate=%d channels=%d reservoir=%d errors=%u",
+                              mp3info->filename, frameInfo->frame_offset,
+                              droppedBytes, frameInfo->hz, frameInfo->channels,
+                              mp3info->decoder.reserv, mp3info->decodeErrors);
+                    continue;
+                }
+
                 int discardBytes = frameInfo->frame_bytes;
 
                 /*
-                 * minimp3 reports bytes skipped while looking for a sync word.
-                 * A sync/header/frame may straddle an input refill boundary.
-                 * Until EOF, retain a 16 KiB suffix so the next call can inspect
-                 * that boundary with the recommended 10-frame look-ahead.
-                 * This also lets arbitrarily large ID3 tags be skipped in chunks.
+                 * No complete frame was identified: minimp3 is reporting
+                 * skipped/junk bytes or a sync candidate that needs more
+                 * look-ahead. A sync/header/frame may straddle an input
+                 * refill boundary, so retain a 16 KiB suffix until EOF.
+                 * This also lets arbitrarily large ID3 tags be skipped in
+                 * chunks without repeatedly preserving an entire bad frame.
                  */
                 if (!mp3info->eof) {
                     if (discardBytes > MP3_SYNC_LOOKAHEAD_BYTES)
