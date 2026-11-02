@@ -71,6 +71,16 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
         self.assertIn("changed_union", self.workflow)
         self.assertNotIn("Link EBOOT.BIN with PSL1GHT", self.workflow)
         self.assertNotIn("cmake --build build-ps3 --target ps3_self", self.workflow)
+        self.assertIn("Verify all three installable PKGs", self.workflow)
+        self.assertIn("source revision %s", self.workflow)
+        expected_artifacts = {
+            "Allied Assault": "OMOHAA020",
+            "Breakthrough": "OMOHAB020",
+            "Spearhead": "OMOHAS020",
+        }
+        for product, appid in expected_artifacts.items():
+            self.assertIn(f"Upload {product} PKG", self.workflow)
+            self.assertIn(f"dist/iOpenMOHAA-PS3-{appid}.pkg", self.workflow)
 
     def test_expansion_usrdir_staging_keeps_titles_separate(self):
         with tempfile.TemporaryDirectory() as tmp:
