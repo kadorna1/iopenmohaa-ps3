@@ -25,6 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_local.h"
 #include "tr_vis.h"
 #include "../sys/ps3_step.h"
+#include <limits.h>
 
 /*
 
@@ -2738,9 +2739,9 @@ void RE_LoadWorldMap( const char *name ) {
     R_FreeLump(&lump2);
 #endif
     _R(65);
+    R_FreeLump(&lump);
     _R(66);
     _R(67);
-    R_FreeLump(&lump);
     _R(68);
     numleafsurfaces = R_LoadLump(h, Q_GetLumpByVersion(&header, LUMP_LEAFSURFACES), &lump, sizeof(int));
     _R(69);
