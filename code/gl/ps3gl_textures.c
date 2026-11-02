@@ -320,6 +320,9 @@ static void build_gcm_texture(ps3gl_texture_t *t)
 extern void ps3_log(const char *msg);
 static int ps3gl_teximg_diag_count = 0;
 
+/* RSX linear texture offsets require 128-byte alignment; row pitches use 64. */
+#define PS3GL_TEXTURE_ALIGN 128
+
 void ps3gl_TexImage2D(GLenum target, GLint level, GLint internalformat,
                       GLsizei width, GLsizei height, GLint border,
                       GLenum format, GLenum type, const void *pixels)
@@ -368,7 +371,7 @@ void ps3gl_TexImage2D(GLenum target, GLint level, GLint internalformat,
             PS3GL_ATRACE("tex %d %dx%d bpp=%d: rsxMemalign(64, %u)",
                          (int)t->glname, (int)width, (int)height,
                          (int)t->bpp, (unsigned)size);
-            t->data = (uint8_t *)rsxMemalign(64, size);
+            t->data = (uint8_t *)rsxMemalign(PS3GL_TEXTURE_ALIGN, size);
             PS3GL_ATRACE("tex %d: rsxMemalign -> %p", (int)t->glname, (void *)t->data);
             if (!t->data) {
                 char msg[160];
