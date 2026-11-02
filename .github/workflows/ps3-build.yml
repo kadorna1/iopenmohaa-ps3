@@ -606,8 +606,8 @@ jobs:
               .filter(name => name.endsWith('.pkg'))
               .sort();
 
-            if (packageFiles.length !== 3) {
-              throw new Error(`Expected exactly 3 PS3 PKGs in dist/, found ${packageFiles.length}: ${packageFiles.join(', ')}`);
+            if (packageFiles.length !== 6) {
+              throw new Error(`Expected exactly 6 PS3 PKGs for ${tag} in dist/, found ${packageFiles.length}: ${packageFiles.join(', ')}`);
             }
 
             let release;
