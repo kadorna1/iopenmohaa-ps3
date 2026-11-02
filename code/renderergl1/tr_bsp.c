@@ -1668,6 +1668,391 @@ static	void R_LoadSurfaces(gamelump_t* surfs, gamelump_t* verts, gamelump_t* ind
 
 
 
+#if defined(__PS3__)
+/*
+ * The draw-vertex lump on some Allied Assault expansion maps is larger than
+ * the largest free block in the PS3 PPU heap. Do not keep the complete raw
+ * vertex and index lumps resident while converting surfaces. Read each
+ * surface's range from the BSP streams into reusable scratch buffers instead.
+ *
+ * The streams advance normally when BSP surfaces are laid out in file order.
+ * If a map references an earlier range, seek back to that range; this keeps
+ * the path correct for non-monotonic surface tables as well.
+ */
+static qboolean R_PS3ReadBspRange(
+    fileHandle_t file,
+    int lumpFileOffset,
+    size_t *cursor,
+    size_t start,
+    void *destination,
+    size_t size,
+    int *backwardSeeks
+)
+{
+    static byte skipBuffer[16 * 1024];
+    size_t gap;
+
+    if (start < *cursor) {
+        if (start > (size_t)(INT_MAX - lumpFileOffset)) {
+            return qfalse;
+        }
+        if (ri.FS_Seek(file, (long)lumpFileOffset + (long)start, FS_SEEK_SET) < 0) {
+            return qfalse;
+        }
+        if (backwardSeeks) {
+            ++*backwardSeeks;
+        }
+    } else {
+        gap = start - *cursor;
+        while (gap) {
+            size_t chunk = gap > sizeof(skipBuffer) ? sizeof(skipBuffer) : gap;
+            if (ri.FS_Read(skipBuffer, chunk, file) != chunk) {
+                return qfalse;
+            }
+            gap -= chunk;
+        }
+    }
+
+    if (size && ri.FS_Read(destination, size, file) != size) {
+        return qfalse;
+    }
+
+    *cursor = start + size;
+    return qtrue;
+}
+
+static qboolean R_PS3SurfaceGeometry(
+    const dsurface_t *surface,
+    int totalVertices,
+    int totalIndexes,
+    int *surfaceType,
+    size_t *firstVertex,
+    size_t *vertexCount,
+    size_t *firstIndex,
+    size_t *indexCount
+)
+{
+    int first;
+    int count;
+    int width;
+    int height;
+
+    *surfaceType = LittleLong(surface->surfaceType);
+    *firstVertex = 0;
+    *vertexCount = 0;
+    *firstIndex = 0;
+    *indexCount = 0;
+
+    switch (*surfaceType) {
+    case MST_PLANAR:
+        first = LittleLong(surface->firstVert);
+        count = LittleLong(surface->numVerts);
+        if (count <= 0) {
+            return qfalse;
+        }
+        if (count > MAX_FACE_POINTS) {
+            count = MAX_FACE_POINTS;
+        }
+        if (first < 0 || first > totalVertices || count > totalVertices - first) {
+            return qfalse;
+        }
+        *firstVertex = (size_t)first;
+        *vertexCount = (size_t)count;
+
+        first = LittleLong(surface->firstIndex);
+        count = LittleLong(surface->numIndexes);
+        if (count < 0 || first < 0 || first > totalIndexes || count > totalIndexes - first) {
+            return qfalse;
+        }
+        *firstIndex = (size_t)first;
+        *indexCount = (size_t)count;
+        return qtrue;
+
+    case MST_PATCH:
+        first = LittleLong(surface->firstVert);
+        width = LittleLong(surface->patchWidth);
+        height = LittleLong(surface->patchHeight);
+        if (width <= 0 || height <= 0
+            || width > MAX_PATCH_SIZE || height > MAX_PATCH_SIZE) {
+            return qfalse;
+        }
+        count = width * height;
+        if (first < 0 || first > totalVertices || count > totalVertices - first) {
+            return qfalse;
+        }
+        *firstVertex = (size_t)first;
+        *vertexCount = (size_t)count;
+        return qtrue;
+
+    case MST_TRIANGLE_SOUP:
+        first = LittleLong(surface->firstVert);
+        count = LittleLong(surface->numVerts);
+        if (count < 0 || first < 0 || first > totalVertices || count > totalVertices - first) {
+            return qfalse;
+        }
+        *firstVertex = (size_t)first;
+        *vertexCount = (size_t)count;
+
+        first = LittleLong(surface->firstIndex);
+        count = LittleLong(surface->numIndexes);
+        if (count < 0 || first < 0 || first > totalIndexes || count > totalIndexes - first) {
+            return qfalse;
+        }
+        *firstIndex = (size_t)first;
+        *indexCount = (size_t)count;
+        return qtrue;
+
+    case MST_FLARE:
+        return qtrue;
+
+    default:
+        return qfalse;
+    }
+}
+
+static qboolean R_LoadSurfacesPS3(
+    fileHandle_t vertexFile,
+    const char *mapName,
+    int mapLength,
+    gamelump_t *surfs,
+    lump_t *vertexLump,
+    lump_t *indexLump
+)
+{
+    dsurface_t *in;
+    msurface_t *out;
+    drawVert_t *vertexScratch = NULL;
+    int *indexScratch = NULL;
+    drawVert_t dummyVertex;
+    int dummyIndex = 0;
+    fileHandle_t indexFile = 0;
+    int indexFileLength = 0;
+    int count;
+    int totalVertices;
+    int totalIndexes;
+    int numFaces = 0;
+    int numMeshes = 0;
+    int numTriSurfs = 0;
+    int numFlares = 0;
+    int backwardVertexSeeks = 0;
+    int backwardIndexSeeks = 0;
+    size_t maxVertices = 0;
+    size_t maxIndexes = 0;
+    size_t vertexCursor = 0;
+    size_t indexCursor = 0;
+    int i;
+
+    if (!surfs || !surfs->buffer || !vertexLump || !indexLump
+        || surfs->length < 0 || surfs->length % sizeof(dsurface_t)
+        || vertexLump->fileofs < 0 || vertexLump->filelen < 0
+        || indexLump->fileofs < 0 || indexLump->filelen < 0
+        || vertexLump->fileofs > mapLength
+        || vertexLump->filelen > mapLength - vertexLump->fileofs
+        || indexLump->fileofs > mapLength
+        || indexLump->filelen > mapLength - indexLump->fileofs
+        || vertexLump->filelen % sizeof(drawVert_t)
+        || indexLump->filelen % sizeof(int)) {
+        ri.Error(ERR_DROP, "PS3 BSP streaming: invalid lump bounds or sizes in %s", s_worldData.name);
+        return qfalse;
+    }
+
+    count = surfs->length / sizeof(dsurface_t);
+    totalVertices = vertexLump->filelen / sizeof(drawVert_t);
+    totalIndexes = indexLump->filelen / sizeof(int);
+    in = (dsurface_t *)surfs->buffer;
+
+    /* First pass: validate all source ranges and find the largest single
+     * surface. Scratch storage is sized to that surface, not to the full BSP
+     * vertex/index lumps. */
+    for (i = 0; i < count; ++i) {
+        int surfaceType;
+        size_t firstVertex, vertexCount;
+        size_t firstIndex, indexCount;
+
+        if (!R_PS3SurfaceGeometry(&in[i], totalVertices, totalIndexes,
+                &surfaceType, &firstVertex, &vertexCount, &firstIndex, &indexCount)) {
+            ri.Error(ERR_DROP, "PS3 BSP streaming: invalid surface %d in %s", i, s_worldData.name);
+            return qfalse;
+        }
+        if (vertexCount > maxVertices) {
+            maxVertices = vertexCount;
+        }
+        if (indexCount > maxIndexes) {
+            maxIndexes = indexCount;
+        }
+    }
+
+    if (maxVertices > (size_t)INT_MAX / sizeof(drawVert_t)
+        || maxIndexes > (size_t)INT_MAX / sizeof(int)
+        || (size_t)count > (size_t)INT_MAX / sizeof(*out)) {
+        ri.Error(ERR_DROP, "PS3 BSP streaming: scratch allocation overflow in %s", s_worldData.name);
+        return qfalse;
+    }
+
+    if (vertexLump->filelen) {
+        if (ri.FS_Seek(vertexFile, vertexLump->fileofs, FS_SEEK_SET) < 0) {
+            ri.Error(ERR_DROP, "PS3 BSP streaming: cannot seek to draw vertices in %s", s_worldData.name);
+            return qfalse;
+        }
+    }
+
+    if (indexLump->filelen) {
+        indexFileLength = ri.FS_OpenFile(mapName, &indexFile, qtrue, qtrue);
+        if (indexFileLength <= 0
+            || indexFileLength < indexLump->fileofs + indexLump->filelen) {
+            if (indexFile) {
+                ri.FS_CloseFile(indexFile);
+            }
+            ri.Error(ERR_DROP, "PS3 BSP streaming: cannot reopen %s for draw indexes", s_worldData.name);
+            return qfalse;
+        }
+        if (ri.FS_Seek(indexFile, indexLump->fileofs, FS_SEEK_SET) < 0) {
+            ri.FS_CloseFile(indexFile);
+            ri.Error(ERR_DROP, "PS3 BSP streaming: cannot seek to draw indexes in %s", s_worldData.name);
+            return qfalse;
+        }
+    }
+
+    if (maxVertices) {
+        vertexScratch = (drawVert_t *)ri.Hunk_AllocateTempMemory(
+            (int)(maxVertices * sizeof(drawVert_t)));
+    } else {
+        vertexScratch = &dummyVertex;
+    }
+    if (maxIndexes) {
+        indexScratch = (int *)ri.Hunk_AllocateTempMemory(
+            (int)(maxIndexes * sizeof(int)));
+    } else {
+        indexScratch = &dummyIndex;
+    }
+
+    out = ri.Hunk_Alloc(count * sizeof(*out), h_dontcare);
+    s_worldData.surfaces = out;
+    s_worldData.numsurfaces = count;
+
+    PS3_TRACEF("BSPSTREAM begin map=%s surfaces=%d vertexLump=%d indexLump=%d maxSurfaceVerts=%lu maxSurfaceIndexes=%lu",
+        s_worldData.name, count, vertexLump->filelen, indexLump->filelen,
+        (unsigned long)maxVertices, (unsigned long)maxIndexes);
+
+    for (i = 0; i < count; ++i) {
+        dsurface_t surface = in[i];
+        int surfaceType;
+        size_t firstVertex, vertexCount;
+        size_t firstIndex, indexCount;
+
+        if (!R_PS3SurfaceGeometry(&surface, totalVertices, totalIndexes,
+                &surfaceType, &firstVertex, &vertexCount, &firstIndex, &indexCount)) {
+            ri.Error(ERR_DROP, "PS3 BSP streaming: surface %d changed while loading %s", i, s_worldData.name);
+            return qfalse;
+        }
+
+        if (vertexCount && !R_PS3ReadBspRange(
+                vertexFile, vertexLump->fileofs, &vertexCursor,
+                firstVertex * sizeof(drawVert_t), vertexScratch,
+                vertexCount * sizeof(drawVert_t), &backwardVertexSeeks)) {
+            if (indexFile) {
+                ri.FS_CloseFile(indexFile);
+            }
+            if (maxIndexes) {
+                ri.Hunk_FreeTempMemory(indexScratch);
+            }
+            if (maxVertices) {
+                ri.Hunk_FreeTempMemory(vertexScratch);
+            }
+            ri.Error(ERR_DROP, "PS3 BSP streaming: failed reading draw vertices for surface %d in %s",
+                i, s_worldData.name);
+            return qfalse;
+        }
+
+        if (indexCount && !R_PS3ReadBspRange(
+                indexFile, indexLump->fileofs, &indexCursor,
+                firstIndex * sizeof(int), indexScratch,
+                indexCount * sizeof(int), &backwardIndexSeeks)) {
+            if (indexFile) {
+                ri.FS_CloseFile(indexFile);
+            }
+            if (maxIndexes) {
+                ri.Hunk_FreeTempMemory(indexScratch);
+            }
+            if (maxVertices) {
+                ri.Hunk_FreeTempMemory(vertexScratch);
+            }
+            ri.Error(ERR_DROP, "PS3 BSP streaming: failed reading draw indexes for surface %d in %s",
+                i, s_worldData.name);
+            return qfalse;
+        }
+
+        /* The scratch arrays begin at the selected range, so neutralize the
+         * file-relative indices before invoking the existing surface parsers. */
+        surface.firstVert = 0;
+        surface.firstIndex = 0;
+
+        if ((i % 100) == 0) {
+            PS3_TRACEF("SURFLOAD %d/%d", i, count);
+        }
+
+        switch (surfaceType) {
+        case MST_PATCH:
+            ParseMesh(&surface, vertexScratch, &out[i]);
+            ++numMeshes;
+            break;
+        case MST_TRIANGLE_SOUP:
+            ParseTriSurf(&surface, vertexScratch, &out[i], indexScratch);
+            ++numTriSurfs;
+            break;
+        case MST_PLANAR:
+            ParseFace(&surface, vertexScratch, &out[i], indexScratch);
+            ++numFaces;
+            break;
+        case MST_FLARE:
+            ParseFlare(&surface, vertexScratch, &out[i], indexScratch);
+            ++numFlares;
+            break;
+        default:
+            if (indexFile) {
+                ri.FS_CloseFile(indexFile);
+            }
+            if (maxIndexes) {
+                ri.Hunk_FreeTempMemory(indexScratch);
+            }
+            if (maxVertices) {
+                ri.Hunk_FreeTempMemory(vertexScratch);
+            }
+            ri.Error(ERR_DROP, "Bad surfaceType %d in %s", surfaceType, s_worldData.name);
+            return qfalse;
+        }
+    }
+
+    if (indexFile) {
+        ri.FS_CloseFile(indexFile);
+    }
+    if (maxIndexes) {
+        ri.Hunk_FreeTempMemory(indexScratch);
+    }
+    if (maxVertices) {
+        ri.Hunk_FreeTempMemory(vertexScratch);
+    }
+
+#ifdef PATCH_STITCHING
+    R_StitchAllPatches();
+#endif
+
+    R_FixSharedVertexLodError();
+
+#ifdef PATCH_STITCHING
+    R_MovePatchSurfacesToHunk();
+#endif
+
+    PS3_TRACEF("BSPSTREAM complete map=%s faces=%d meshes=%d trisurfs=%d flares=%d backwardVertexSeeks=%d backwardIndexSeeks=%d",
+        s_worldData.name, numFaces, numMeshes, numTriSurfs, numFlares,
+        backwardVertexSeeks, backwardIndexSeeks);
+
+    ri.Printf(PRINT_ALL, "...loaded %d faces, %i meshes, %i trisurfs, %i flares\n",
+        numFaces, numMeshes, numTriSurfs, numFlares);
+    return qtrue;
+}
+#endif
+
 /*
 =================
 R_LoadSubmodels
@@ -2326,15 +2711,34 @@ void RE_LoadWorldMap( const char *name ) {
     _R(61);
     numDrawSurfaces = R_LoadLump(h, Q_GetLumpByVersion(&header, LUMP_SURFACES), &lump, sizeof(dsurface_t));
     _R(62);
+#if defined(__PS3__)
+    {
+        lump_t *vertexLump = Q_GetLumpByVersion(&header, LUMP_DRAWVERTS);
+        lump_t *indexLump = Q_GetLumpByVersion(&header, LUMP_DRAWINDEXES);
+
+        if (vertexLump->filelen < 0 || vertexLump->filelen % sizeof(drawVert_t)
+            || indexLump->filelen < 0 || indexLump->filelen % sizeof(int)) {
+            ri.Error(ERR_DROP, "RE_LoadWorldMap: invalid draw geometry lump size in %s", name);
+        }
+        numDrawVerts = vertexLump->filelen / sizeof(drawVert_t);
+        _R(63);
+        numDrawIndexes = indexLump->filelen / sizeof(int);
+        _R(64);
+        if (!R_LoadSurfacesPS3(h, name, length, &lump, vertexLump, indexLump)) {
+            ri.Error(ERR_DROP, "RE_LoadWorldMap: streamed surface loading failed for %s", name);
+        }
+    }
+#else
     numDrawVerts = R_LoadLump(h, Q_GetLumpByVersion(&header, LUMP_DRAWVERTS), &lump2, sizeof(drawVert_t));
     _R(63);
     numDrawIndexes = R_LoadLump(h, Q_GetLumpByVersion(&header, LUMP_DRAWINDEXES), &lump3, sizeof(int));
     _R(64);
     R_LoadSurfaces(&lump, &lump2, &lump3);
-    _R(65);
     R_FreeLump(&lump3);
-    _R(66);
     R_FreeLump(&lump2);
+#endif
+    _R(65);
+    _R(66);
     _R(67);
     R_FreeLump(&lump);
     _R(68);
