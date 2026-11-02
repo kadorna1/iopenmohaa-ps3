@@ -1,4 +1,5 @@
 import sys
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -134,6 +135,57 @@ class ShaderCachePk3Tests(unittest.TestCase):
                 archive.writestr("scriptcache/example.psc", b"not a shader source")
             with self.assertRaises(ValueError):
                 build_cache_from_pk3(main)
+
+
+
+class ShaderCacheStagingTests(unittest.TestCase):
+    def test_base_cache_is_only_staged_into_allied_assault_package(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source"
+            base_scripts = source / "main" / "scripts"
+            spearhead_scripts = source / "mainta" / "scripts"
+            breakthrough_scripts = source / "maintt" / "scripts"
+            base_scripts.mkdir(parents=True)
+            spearhead_scripts.mkdir(parents=True)
+            breakthrough_scripts.mkdir(parents=True)
+
+            (base_scripts / "ps3_shader_cache.bin").write_bytes(b"allied-assault")
+            (spearhead_scripts / "ps3_shader_cache_mainta.bin").write_bytes(b"spearhead")
+            (breakthrough_scripts / "ps3_shader_cache_maintt.bin").write_bytes(b"breakthrough")
+
+            script = ROOT / "tools" / "stage_ps3_title_usrdir.sh"
+            outputs = {}
+            for appid in ("OMOHAA020", "OMOHAS020", "OMOHAB020"):
+                destination = root / appid
+                subprocess.run(
+                    ["bash", str(script), appid, str(source), str(destination)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                outputs[appid] = destination
+
+            self.assertEqual(
+                (outputs["OMOHAA020"] / "main/scripts/ps3_shader_cache.bin").read_bytes(),
+                b"allied-assault",
+            )
+            self.assertFalse(
+                (outputs["OMOHAS020"] / "main/scripts/ps3_shader_cache.bin").exists()
+            )
+            self.assertFalse(
+                (outputs["OMOHAB020"] / "main/scripts/ps3_shader_cache.bin").exists()
+            )
+            self.assertEqual(
+                (outputs["OMOHAS020"] / "mainta/scripts/ps3_shader_cache_mainta.bin").read_bytes(),
+                b"spearhead",
+            )
+            self.assertEqual(
+                (outputs["OMOHAB020"] / "maintt/scripts/ps3_shader_cache_maintt.bin").read_bytes(),
+                b"breakthrough",
+            )
+            self.assertFalse((outputs["OMOHAS020"] / "maintt").exists())
+            self.assertFalse((outputs["OMOHAB020"] / "mainta").exists())
 
 
 if __name__ == "__main__":
