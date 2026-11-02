@@ -424,92 +424,32 @@ jobs:
             bash tools/stage_ps3_title_usrdir.sh "$appid" assets/ps3_usrdir "$stage_usrdir"
           done
 
-      # Game-derived material shader caches are kept in a private companion
-      # repository. Never inject them into artifacts from a public repository.
-      - name: Detect private precomputed shader caches
-        id: private-shader-cache
-        shell: bash
-        env:
-          CACHE_REPOSITORY: ${{ secrets.PS3_SHADER_CACHE_REPOSITORY }}
-          CACHE_TOKEN: ${{ secrets.PS3_SHADER_CACHE_TOKEN }}
-          REPOSITORY_VISIBILITY: ${{ github.repository_visibility }}
-        run: |
-          set -euo pipefail
-          if [[ -z "$CACHE_REPOSITORY" && -z "$CACHE_TOKEN" ]]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "No private shader-cache repository configured; caches remain optional."
-            exit 0
-          fi
-          if [[ "$REPOSITORY_VISIBILITY" != "private" ]]; then
-            echo "::error::Private game-derived shader caches cannot be packaged from a public repository. Use a private build repository so PKGs and workflow artifacts stay private."
-            exit 1
-          fi
-          if [[ -z "$CACHE_REPOSITORY" || -z "$CACHE_TOKEN" ]]; then
-            echo "::error::Set both PS3_SHADER_CACHE_REPOSITORY and PS3_SHADER_CACHE_TOKEN."
-            exit 1
-          fi
-          echo "enabled=true" >> "$GITHUB_OUTPUT"
-          echo "Private title-specific shader caches are configured."
-
-      - name: Checkout private precomputed shader caches
-        if: steps.private-shader-cache.outputs.enabled == 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ secrets.PS3_SHADER_CACHE_REPOSITORY }}
-          token: ${{ secrets.PS3_SHADER_CACHE_TOKEN }}
-          path: .ps3-private-shader-caches
-          persist-credentials: false
-
-      - name: Install validated title-specific shader caches
-        if: steps.private-shader-cache.outputs.enabled == 'true'
+      - name: Verify staged title-specific shader caches
         shell: bash
         run: |
           set -euo pipefail
-          cache_root=".ps3-private-shader-caches"
-
-          install_cache() {
-            local source="$1"
-            local destination="$2"
-            local description="$3"
-            if [[ ! -s "$source" ]]; then
-              echo "::error::Missing precomputed shader cache: $source ($description)"
-              exit 1
-            fi
-            python3 - "$source" <<'PY'
+          python3 - <<'PY'
           import struct
-          import sys
           from pathlib import Path
 
-          path = Path(sys.argv[1])
-          data = path.read_bytes()
-          if len(data) < 32:
-              raise SystemExit(f"invalid shader cache (truncated header): {path}")
-          magic, version, entries, sources, text_size, source_record, entry_record = struct.unpack_from("<8sIIIIII", data)
-          expected = 32 + sources * source_record + entries * entry_record + text_size
-          if (magic != b"OMHPSHC1" or version != 1 or not entries or not sources
-              or entries > 262144 or sources > 4096 or text_size <= 0
-              or source_record != 64 or entry_record != 76 or expected != len(data)):
-              raise SystemExit(f"invalid shader-cache format or length: {path}")
-          print(f"Validated {path}: {entries} definitions, {sources} shader files, {len(data)} bytes")
-          PY
-            mkdir -p "$(dirname "$destination")"
-            cp -- "$source" "$destination"
-            sha256sum "$destination"
-            echo "Installed $description -> $destination"
+          expected = {
+              "Allied Assault": Path("$RUNNER_TEMP/ps3-usrdir-OMOHAA020/main/scripts/ps3_shader_cache.bin"),
+              "Spearhead": Path("$RUNNER_TEMP/ps3-usrdir-OMOHAS020/mainta/scripts/ps3_shader_cache_mainta.bin"),
+              "Breakthrough": Path("$RUNNER_TEMP/ps3-usrdir-OMOHAB020/maintt/scripts/ps3_shader_cache_maintt.bin"),
           }
 
-          install_cache \
-            "$cache_root/main/scripts/ps3_shader_cache.bin" \
-            "$RUNNER_TEMP/ps3-usrdir-OMOHAA020/main/scripts/ps3_shader_cache.bin" \
-            "Allied Assault"
-          install_cache \
-            "$cache_root/mainta/scripts/ps3_shader_cache_mainta.bin" \
-            "$RUNNER_TEMP/ps3-usrdir-OMOHAS020/mainta/scripts/ps3_shader_cache_mainta.bin" \
-            "Spearhead"
-          install_cache \
-            "$cache_root/maintt/scripts/ps3_shader_cache_maintt.bin" \
-            "$RUNNER_TEMP/ps3-usrdir-OMOHAB020/maintt/scripts/ps3_shader_cache_maintt.bin" \
-            "Breakthrough"
+          for title, path in expected.items():
+              data = path.read_bytes()
+              if len(data) < 32:
+                  raise SystemExit(f"{title}: cache header is truncated: {path}")
+              magic, version, entries, sources, text_size, source_record, entry_record = struct.unpack_from("<8sIIIIII", data)
+              expected_size = 32 + sources * source_record + entries * entry_record + text_size
+              if (magic != b"OMHPSHC1" or version != 1 or not entries or not sources
+                  or entries > 262144 or sources > 4096 or text_size <= 0
+                  or source_record != 64 or entry_record != 76 or expected_size != len(data)):
+                  raise SystemExit(f"{title}: invalid cache format or length: {path}")
+              print(f"{title}: {entries} definitions, {sources} shader files, {len(data)} bytes")
+          PY
 
       - name: Package three independent PS3 title IDs
         shell: bash
