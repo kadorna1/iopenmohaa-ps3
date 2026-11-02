@@ -3043,7 +3043,7 @@ int R_CountTextureMemory() {
     total_bytes = 0;
 
     for (i = 0; i < tr.numImages; i++) {
-        total_bytes = tr.images[i].bytesUsed;
+        total_bytes += tr.images[i].bytesUsed;
     }
 
     return total_bytes;
