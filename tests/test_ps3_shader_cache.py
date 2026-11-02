@@ -249,5 +249,24 @@ class ShaderCacheStagingTests(unittest.TestCase):
             self.assertFalse((outputs["OMOHAB020"] / "mainta").exists())
 
 
+class ShaderCacheWorkflowTests(unittest.TestCase):
+    def test_build_uses_repository_assets_without_private_cache_checkout(self):
+        workflow = (ROOT / ".github/workflows/ps3-build.yml").read_text(encoding="utf-8")
+        self.assertIn("Verify staged title-specific shader caches", workflow)
+        self.assertIn("assets/ps3_usrdir", workflow)
+        self.assertNotIn("PS3_SHADER_CACHE_REPOSITORY", workflow)
+        self.assertNotIn("PS3_SHADER_CACHE_TOKEN", workflow)
+        self.assertNotIn(".ps3-private-shader-caches", workflow)
+
+    def test_shader_cache_tools_do_not_emit_distribution_notices(self):
+        generator = (ROOT / "tools/ps3_shader_cache_from_pk3.py").read_text(encoding="utf-8")
+        one_shot = (ROOT / "tools/generate_ps3_title_shader_caches.sh").read_text(encoding="utf-8")
+        shader_docs = (ROOT / "docs/PS3_SHADER_CACHE.md").read_text(encoding="utf-8")
+        for source in (generator, one_shot, shader_docs):
+            self.assertNotIn("game-derived shader text", source)
+            self.assertNotIn("keep these generated files with your own game data", source)
+            self.assertNotIn("derived from the original game archives", source)
+
+
 if __name__ == "__main__":
     unittest.main()
