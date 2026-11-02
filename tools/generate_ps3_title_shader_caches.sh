@@ -47,4 +47,3 @@ python3 "$generator" \
 
 echo
 echo "Generated title-specific caches under: $output_root"
-echo "No original PK3 archives were copied. Keep these generated files with your own game data."
