@@ -16,6 +16,8 @@ class PS3RendererMemoryTests(unittest.TestCase):
         cls.texture_backend = (ROOT / "code/gl/ps3gl_textures.c").read_text(encoding="utf-8")
         cls.texture_header = (ROOT / "code/gl/ps3gl.h").read_text(encoding="utf-8")
         cls.world_bsp = (ROOT / "code/renderergl1/tr_bsp.c").read_text(encoding="utf-8")
+        cls.cgame = (ROOT / "code/client/cl_cgame.cpp").read_text(encoding="utf-8")
+        cls.ps3_step = (ROOT / "code/sys/ps3_step.h").read_text(encoding="utf-8")
         cls.memory = (ROOT / "code/qcommon/memory.c").read_text(encoding="utf-8")
         cls.workflow = (ROOT / ".github/workflows/ps3-build.yml").read_text(encoding="utf-8")
 
@@ -66,6 +68,19 @@ class PS3RendererMemoryTests(unittest.TestCase):
         duplicate_copy = self.world_bsp.index("ri.Hunk_Alloc(l->length", fast_path)
         self.assertLess(fast_path, duplicate_copy)
         self.assertIn("s_worldData.lighting = NULL;", self.world_bsp)
+
+    def test_per_tag_snapshots_cover_cgame_map_initialization(self):
+        self.assertIn("void PS3_ZoneDumpTags(const char *where);", self.ps3_step)
+        self.assertIn("PS3_BootTraceFastf( \"ZONE TAGSUMMARY[%s]", self.memory)
+        for stage in (
+            "CGINIT enter",
+            "CGINIT after-shutdown",
+            "CGINIT before-cg-init",
+            "CGINIT after-cg-init",
+            "CGINIT after-tiki-finish",
+            "CGINIT after-end-registration",
+        ):
+            self.assertIn(f'PS3_ZONEDUMP("{stage}")', self.cgame)
 
     def test_workflow_runs_renderer_memory_regressions(self):
         self.assertIn("Test PS3 renderer cache and zone memory diagnostics", self.workflow)
