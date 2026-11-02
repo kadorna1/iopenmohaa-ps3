@@ -21,6 +21,11 @@ class PS3RendererMemoryTests(unittest.TestCase):
         cls.memory = (ROOT / "code/qcommon/memory.c").read_text(encoding="utf-8")
         cls.workflow = (ROOT / ".github/workflows/ps3-build.yml").read_text(encoding="utf-8")
         cls.autoexec = (ROOT / "assets/ps3_usrdir/main/autoexec.cfg").read_text(encoding="utf-8")
+        cls.expansion_autoexecs = {
+            name: (ROOT / f"assets/ps3_usrdir/{name}/autoexec.cfg").read_text(encoding="utf-8")
+            for name in ("mainta", "maintt")
+        }
+        cls.archive_source = (ROOT / "code/fgame/archive.cpp").read_text(encoding="utf-8")
         cls.shader_source = (ROOT / "code/renderergl1/tr_shader.c").read_text(encoding="utf-8")
 
     def test_stale_images_are_freed_before_map_texture_warmup(self):
@@ -74,6 +79,25 @@ class PS3RendererMemoryTests(unittest.TestCase):
     def test_archived_renderer_overrides_are_forced_by_ps3_autoexec(self):
         self.assertIn('seta r_texturebits "16"', self.autoexec)
         self.assertIn('seta r_fastdlights "1"', self.autoexec)
+
+    def test_expansion_autoexecs_force_compact_renderer_settings(self):
+        for name, config in self.expansion_autoexecs.items():
+            with self.subTest(expansion=name):
+                self.assertIn('seta r_texturebits "16"', config)
+                self.assertIn('seta r_fastdlights "1"', config)
+                self.assertIn('seta ps3_aim_assist "1"', config)
+                self.assertNotIn("#", config)
+
+    def test_ps3_save_archives_skip_second_full_size_compression_buffer(self):
+        start = self.archive_source.index("qboolean ArchiveFile::Compress()")
+        end = self.archive_source.index("size_t ArchiveFile::Length()", start)
+        compress = self.archive_source[start:end]
+
+        self.assertIn("#if defined(__PS3__)", compress)
+        self.assertLess(compress.index("return true;"), compress.index("tempbuf = (byte *)gi.Malloc(tempbuf_len);"))
+        self.assertIn("if (FileHeader[0] != 'C'", self.archive_source)
+        self.assertIn("g_lz77.Decompress(pos, length - 8, tempbuf, &iCSVGLength)", self.archive_source)
+        self.assertIn("pos = buffer;", self.archive_source)
 
     def test_shader_cache_is_selected_for_the_running_title(self):
         self.assertIn('ri.Cvar_VariableIntegerValue("com_target_game")', self.shader_source)
