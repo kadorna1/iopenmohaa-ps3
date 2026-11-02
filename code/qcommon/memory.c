@@ -141,7 +141,7 @@ static const char *ps3_zone_tag_name( int tag )
 }
 
 /* Emit a compact per-pool snapshot only on allocation failure. */
-static void ps3_zone_dump_tag_usage( const char *reason )
+static void ps3_zone_dump_tag_usage( const char *reason, int synchronous )
 {
 	int k;
 
@@ -163,9 +163,19 @@ static void ps3_zone_dump_tag_usage( const char *reason )
 			++blocks;
 		}
 
-		PS3_BootTracef( "ZONE TAGSUMMARY[%s] tag=%s id=%d blocks=%d bytes=%u broken=%d",
-			reason, ps3_zone_tag_name( k ), k, blocks, ( unsigned )bytes, broken );
+		if( synchronous ) {
+			PS3_BootTracef( "ZONE TAGSUMMARY[%s] tag=%s id=%d blocks=%d bytes=%u broken=%d",
+				reason, ps3_zone_tag_name( k ), k, blocks, ( unsigned )bytes, broken );
+		} else {
+			PS3_BootTraceFastf( "ZONE TAGSUMMARY[%s] tag=%s id=%d blocks=%d bytes=%u broken=%d",
+				reason, ps3_zone_tag_name( k ), k, blocks, ( unsigned )bytes, broken );
+		}
 	}
+}
+
+void PS3_ZoneDumpTags( const char *where )
+{
+	ps3_zone_dump_tag_usage( where ? where : "snapshot", 0 );
 }
 #endif
 
@@ -296,7 +306,7 @@ void *Z_TagMalloc( int size, int tag ) {
 		PS3_TRACEF( "ZONE malloc failed request=%d total=%d tag=%s(%d)",
 			requestedSize, size, ps3_zone_tag_name( tag ), tag );
 #endif
-		ps3_zone_dump_tag_usage( "malloc-failed" );
+		ps3_zone_dump_tag_usage( "malloc-failed", 1 );
 #endif
 		Com_Error( ERR_FATAL, "Z_TagMalloc: failed to allocate request=%d bytes (total=%d, tag=%d)", requestedSize, size, tag );
 		return NULL;
