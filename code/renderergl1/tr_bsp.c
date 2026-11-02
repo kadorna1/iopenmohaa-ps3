@@ -1914,6 +1914,7 @@ static qboolean R_LoadSurfacesPS3(
         }
     }
 
+    Com_Memset(&dummyVertex, 0, sizeof(dummyVertex));
     if (maxVertices) {
         vertexScratch = (drawVert_t *)ri.Hunk_AllocateTempMemory(
             (int)(maxVertices * sizeof(drawVert_t)));
@@ -1943,6 +1944,15 @@ static qboolean R_LoadSurfacesPS3(
 
         if (!R_PS3SurfaceGeometry(&surface, totalVertices, totalIndexes,
                 &surfaceType, &firstVertex, &vertexCount, &firstIndex, &indexCount)) {
+            if (indexFile) {
+                ri.FS_CloseFile(indexFile);
+            }
+            if (maxIndexes) {
+                ri.Hunk_FreeTempMemory(indexScratch);
+            }
+            if (maxVertices) {
+                ri.Hunk_FreeTempMemory(vertexScratch);
+            }
             ri.Error(ERR_DROP, "PS3 BSP streaming: surface %d changed while loading %s", i, s_worldData.name);
             return qfalse;
         }
