@@ -130,5 +130,36 @@ class PS3RendererMemoryTests(unittest.TestCase):
         self.assertIn("test_ps3_renderer_memory.py", self.workflow)
 
 
+    def test_ps3_bsp_path_streams_vertex_and_index_lumps_by_surface(self):
+        start = self.world_bsp.index(
+            "numDrawSurfaces = R_LoadLump(h, Q_GetLumpByVersion(&header, LUMP_SURFACES)"
+        )
+        ps3_start = self.world_bsp.index("#if defined(__PS3__)", start)
+        fallback_start = self.world_bsp.index("#else", ps3_start)
+        fallback_end = self.world_bsp.index("#endif", fallback_start)
+        ps3_branch = self.world_bsp[ps3_start:fallback_start]
+        fallback_branch = self.world_bsp[fallback_start:fallback_end]
+
+        self.assertIn("R_LoadSurfacesPS3(h, name, length", ps3_branch)
+        self.assertNotIn("LUMP_DRAWVERTS), &lump2", ps3_branch)
+        self.assertNotIn("LUMP_DRAWINDEXES), &lump3", ps3_branch)
+        self.assertIn("LUMP_DRAWVERTS), &lump2", fallback_branch)
+        self.assertIn("LUMP_DRAWINDEXES), &lump3", fallback_branch)
+
+    def test_ps3_bsp_stream_scratch_is_limited_to_the_largest_surface(self):
+        start = self.world_bsp.index("static qboolean R_LoadSurfacesPS3(")
+        end = self.world_bsp.index("\\n#endif", start)
+        streaming = self.world_bsp[start:end]
+
+        self.assertIn("R_PS3ReadBspRange", streaming)
+        self.assertIn("maxVertices * sizeof(drawVert_t)", streaming)
+        self.assertIn("maxIndexes * sizeof(int)", streaming)
+        self.assertIn("backwardVertexSeeks", streaming)
+        self.assertIn("backwardIndexSeeks", streaming)
+        self.assertIn("MAX_PATCH_SIZE", self.world_bsp)
+        self.assertIn("count > totalVertices - first", self.world_bsp)
+        self.assertIn("count > totalIndexes - first", self.world_bsp)
+
+
 if __name__ == "__main__":
     unittest.main()
