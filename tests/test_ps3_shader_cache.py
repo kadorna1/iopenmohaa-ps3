@@ -17,6 +17,8 @@ from ps3_shader_cache import (
 )
 from ps3_shader_cache_from_pk3 import build_cache_from_pk3
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 class ShaderCacheParserTests(unittest.TestCase):
     def test_parses_multiple_materials_with_comments_and_nested_braces(self):
