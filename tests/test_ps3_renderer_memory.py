@@ -148,7 +148,7 @@ class PS3RendererMemoryTests(unittest.TestCase):
 
     def test_ps3_bsp_stream_scratch_is_limited_to_the_largest_surface(self):
         start = self.world_bsp.index("static qboolean R_LoadSurfacesPS3(")
-        end = self.world_bsp.index("\n#endif", start)
+        end = self.world_bsp.index("/*\n=================\nR_LoadSubmodels", start)
         streaming = self.world_bsp[start:end]
 
         self.assertIn("R_PS3ReadBspRange", streaming)
