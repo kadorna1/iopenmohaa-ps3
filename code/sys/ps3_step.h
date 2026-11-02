@@ -19,6 +19,7 @@ void PS3_TraceMemory(const char *tag);
  * block, validating links and the trailing guard word, and logs any corrupt
  * block with its size, tag and allocator addresses. verbose=1 also logs a summary. */
 int PS3_ZoneCheck(const char *where, int verbose);
+void PS3_ZoneDumpTags(const char *where);
 int PS3_TraceLevel(void);
 void PS3_DumpTraceRing(const char *why);
 extern void *ps3_zone_caller_hint;
@@ -46,6 +47,7 @@ void PS3_RearmFrameTrace(int frames);
 #define PS3_TRACEMEM(tag) PS3_TraceMemory(tag)
 #define PS3_ZONECHECK(where) PS3_ZoneCheck((where), 1)
 #define PS3_ZONECHECK_QUIET(where) PS3_ZoneCheck((where), 0)
+#define PS3_ZONEDUMP(where) PS3_ZoneDumpTags((where))
 /* PS3_FTRACE("fmt", ...): synced, but only while the frame-trace window is open. */
 #define PS3_FTRACE(...) do { if (ps3_frame_trace < ps3_frame_trace_limit || PS3_TraceLevel() < 2) PS3_BootTracef("NET " __VA_ARGS__); } while (0)
 #else
@@ -54,6 +56,7 @@ void PS3_RearmFrameTrace(int frames);
 #define PS3_CGF(...) ((void)0)
 #define PS3_ZONECHECK(where) ((void)0)
 #define PS3_ZONECHECK_QUIET(where) ((void)0)
+#define PS3_ZONEDUMP(where) ((void)0)
 #define PS3_FTRACE(...) ((void)0)
 #define PS3_TRACEF(...) ((void)0)
 #define PS3_STEP(msg) ((void)0)
