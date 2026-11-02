@@ -7,9 +7,10 @@ indexing of the game's `scripts/*.shader` material definitions.
 
 ## Generate directly from the game's PK3 archives (recommended)
 
-No `main/scripts` directory or manual extraction is required. The helper reads
-the original `.pk3` archives in your Allied Assault `main` directory and
-extracts only the direct `scripts/*.shader` entries into a temporary folder.
+No `scripts` directory or manual extraction is required. The helper reads the
+original `.pk3` archives in the selected title's data directory (`main` for
+Allied Assault, `mainta` for Spearhead, or `maintt` for Breakthrough) and
+extracts only direct `scripts/*.shader` entries into a temporary folder.
 It does not use `scriptcache/*.psc` files.
 
 From the PR branch, run:
@@ -31,8 +32,7 @@ python3 tools/ps3_shader_cache_from_pk3.py \
 ```
 
 The helper follows the engine's archive priority: PK3 names are sorted
-case-insensitively and later names override earlier ones; loose files in
-`main/scripts`, when present, override archive entries. It removes duplicate
+case-insensitively and later names override earlier ones; loose files in the selected data directory's `scripts/`, when present, override archive entries. It removes duplicate
 filenames the same way the engine's filesystem listing does, then generates
 the indexed cache. The output reports archive count, unique source-file count,
 definition count and duplicate overrides.
