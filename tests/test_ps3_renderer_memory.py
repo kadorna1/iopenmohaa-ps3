@@ -42,7 +42,7 @@ class PS3RendererMemoryTests(unittest.TestCase):
         self.assertNotIn("total_bytes = tr.images[i].bytesUsed;", report)
 
     def test_allocator_failure_reports_pool_breakdown_and_callsite(self):
-        self.assertIn("ps3_zone_dump_tag_usage( \"malloc-failed\" )", self.memory)
+        self.assertIn('ps3_zone_dump_tag_usage( "malloc-failed", 1 )', self.memory)
         self.assertIn("ZONE TAGSUMMARY[%s]", self.memory)
         self.assertIn("tag=%s(%d) caller=%p hint=%p", self.memory)
 
