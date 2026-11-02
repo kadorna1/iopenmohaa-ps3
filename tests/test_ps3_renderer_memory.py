@@ -56,7 +56,7 @@ class PS3RendererMemoryTests(unittest.TestCase):
         self.assertIn("t->bpp, t->gcm_format", self.texture_backend)
         self.assertIn("#define PS3GL_TEXTURE_ALIGN 128", self.texture_backend)
         self.assertIn("rsxMemalign(PS3GL_TEXTURE_ALIGN, size)", self.texture_backend)
-        self.assertIn("t->gcm_format", self.texture_header)
+        self.assertIn("gcm_format; /* GCM_TEXTURE_FORMAT_* without LIN flag */", self.texture_header)
 
     def test_ps3_defaults_to_compact_textures_and_fast_lightmaps(self):
         self.assertIn('r_texturebits = ri.Cvar_Get( "r_texturebits", "16"', self.renderer_init)
