@@ -86,7 +86,8 @@ typedef struct {
     uint32_t        offset;     /* RSX offset */
     uint16_t        width;      /* level 0 (base) dimensions */
     uint16_t        height;
-    uint8_t         bpp;
+    uint8_t         bpp;        /* bytes per texel in RSX storage: 2 or 4 */
+    uint8_t         gcm_format; /* GCM_TEXTURE_FORMAT_* without LIN flag */
     uint8_t         num_levels; /* contiguous mip levels uploaded so far, >=1 */
     uint8_t         wrap_s, wrap_t;
     uint8_t         min_filter, mag_filter;
