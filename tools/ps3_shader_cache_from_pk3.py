@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Build the PS3 shader cache directly from an Allied Assault main directory.
+"""Build a title-specific PS3 shader cache from a game data directory.
 
-The directory should contain the game's .pk3 archives (Pak0.pk3, Pak1.pk3,
-...). Only direct scripts/*.shader entries are indexed. Existing loose files
-in main/scripts are included with normal loose-file search-path priority.
+Point --main-dir at the directory containing that title's .pk3 archives:
+Allied Assault main/, Spearhead mainta/, or Breakthrough maintt/. Only direct
+scripts/*.shader entries are indexed. Existing loose scripts are included
+with normal loose-file search-path priority.
 """
 from __future__ import annotations
 
@@ -106,7 +107,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     )
     parser.add_argument(
         "--main-dir", required=True, type=Path,
-        help="Allied Assault main directory containing Pak*.pk3 archives",
+        help="title data directory (main, mainta, or maintt) containing *.pk3 archives",
     )
     parser.add_argument(
         "--output", required=True, type=Path,
