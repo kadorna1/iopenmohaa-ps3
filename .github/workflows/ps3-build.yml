@@ -575,3 +575,31 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "shader caching enabled" \
             --notes "Shader-caching release for iOpenMOHAA PS3. Publishes separate Allied Assault, Breakthrough and Spearhead EBOOT packages. All variants share the Allied Assault game-data install root and keep configuration, saves, state and logs inside their own TITLE_ID USRDIR. Includes the pre-indexed shader cache, DualShock 3 aim assist, static-free minimp3 audio, streamed audio support, 720p default display configuration, and stripped PS3 binaries."
+
+      - name: Create draft GitHub release
+        if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[draft v0.1.0.0c]')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'NOTES'
+          ### Changes
+
+          - Build separate Allied Assault, Breakthrough and Spearhead PS3 executables and PKGs with cached incremental builds.
+          - Keep expansion data and startup configuration in each title's own USRDIR, with shared Allied Assault data fallback.
+          - Add per-title shader caches, renderer memory diagnostics, texture/lightmap optimizations and streamed BSP surface loading.
+          - Improve expansion audio precaching and MP3/minimp3 recovery; retain the static-free audio fix.
+          - Apply DS3 aim assist consistently across all three titles, enabled by default with an in-game toggle.
+          - Expand automated coverage for packaging, expansion loading, shader caches, renderer memory and aim-assist behaviour.
+
+          ### Validation
+
+          - GitHub Actions run #549 passed all host tests, all three PS3 builds/links, staging checks, and verification of all three installable PKGs.
+          - Real-hardware validation of BSP streaming, rendering quality, expansion stability and aim-assist behaviour remains outstanding.
+          NOTES
+          gh release create v0.1.0.0c dist/*.pkg \
+            --draft \
+            --target "$GITHUB_SHA" \
+            --title "Three-title PS3 build with BSP streaming" \
+            --notes-file release-notes.md
