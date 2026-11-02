@@ -139,6 +139,65 @@ class ShaderCachePk3Tests(unittest.TestCase):
                 build_cache_from_pk3(main)
 
 
+    def test_expansion_overlays_base_but_retains_base_only_shaders(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base = root / "main"
+            expansion = root / "mainta"
+            base.mkdir()
+            expansion.mkdir()
+
+            with zipfile.ZipFile(base / "Pak0.pk3", "w") as archive:
+                archive.writestr("scripts/base_only.shader", "textures/base { map base.tga }")
+                archive.writestr("scripts/shared.shader", "textures/shared { map base-shared.tga }")
+            with zipfile.ZipFile(expansion / "Pak0.pk3", "w") as archive:
+                archive.writestr("scripts/shared.shader", "textures/shared { map expansion-shared.tga }")
+                archive.writestr("scripts/expansion_only.shader", "textures/expansion { map expansion.tga }")
+
+            cache, stats = build_cache_from_pk3(base, expansion)
+
+            self.assertEqual(stats["data_directories"], 2)
+            self.assertEqual(stats["pk3_archives"], 2)
+            self.assertEqual(stats["source_files"], 3)
+            self.assertEqual(stats["overridden_shader_files"], 1)
+            self.assertIn(b"map base.tga", cache)
+            self.assertIn(b"map expansion-shared.tga", cache)
+            self.assertIn(b"map expansion.tga", cache)
+            self.assertNotIn(b"map base-shared.tga", cache)
+
+    def test_one_shot_generator_writes_all_three_title_cache_paths(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base = root / "main"
+            spearhead = root / "mainta"
+            breakthrough = root / "maintt"
+            output = root / "generated"
+            for directory in (base, spearhead, breakthrough):
+                directory.mkdir()
+                with zipfile.ZipFile(directory / "Pak0.pk3", "w") as archive:
+                    archive.writestr(
+                        f"scripts/{directory.name}.shader",
+                        f"textures/{directory.name} {{ map {directory.name}.tga }}",
+                    )
+
+            script = ROOT / "tools" / "generate_ps3_title_shader_caches.sh"
+            subprocess.run(
+                ["bash", str(script), str(base), str(spearhead), str(breakthrough), str(output)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            expected = (
+                output / "main/scripts/ps3_shader_cache.bin",
+                output / "mainta/scripts/ps3_shader_cache_mainta.bin",
+                output / "maintt/scripts/ps3_shader_cache_maintt.bin",
+            )
+            for path in expected:
+                self.assertTrue(path.is_file())
+                self.assertGreater(path.stat().st_size, HEADER_STRUCT.size)
+
+
 
 class ShaderCacheStagingTests(unittest.TestCase):
     def test_base_cache_is_only_staged_into_allied_assault_package(self):
