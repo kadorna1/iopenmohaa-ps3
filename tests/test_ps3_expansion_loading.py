@@ -32,6 +32,14 @@ class Ps3ExpansionLoadingTests(unittest.TestCase):
         self.assertIn("encbuf[tail + 3]", self.mp3)
         self.assertIn("FS_FTell(stream->file)", self.mp3)
 
+    def test_complete_layer_iii_frames_are_consumed_after_reservoir_failure(self):
+        self.assertIn("if (frameInfo->layer == 3 &&", self.mp3)
+        self.assertIn("S_MP3_ConsumeInput(mp3info, droppedBytes)", self.mp3)
+        self.assertIn("skipped undecodable Layer III frame", self.mp3)
+        self.assertIn("mp3info->decoder.reserv", self.mp3)
+        # Keep the separate look-ahead handling for incomplete/junk input.
+        self.assertIn("MP3_SYNC_LOOKAHEAD_BYTES", self.mp3)
+
     def test_streaming_driver_keeps_decoder_reads_on_main_update_path(self):
         # The MP3 decoder is refilled into a ring; the output thread mixes the
         # ring rather than owning or concurrently reading the file handle.
