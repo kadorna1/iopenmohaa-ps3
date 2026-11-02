@@ -667,3 +667,124 @@ jobs:
               throw new Error(`Draft release is missing assets: ${missing.join(', ')}`);
             }
             core.notice(`Draft release ${tag} is ready with ${packageFiles.length} verified PKG assets: ${release.html_url}`);
+
+      - name: Publish GitHub release v0.1.0.0c
+        if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish v0.1.0.0c]')
+        uses: actions/github-script@v7
+        env:
+          RELEASE_NOTES: |
+            ## What's new since v0.1.0.0b
+
+            - **Three independent game packages:** build Allied Assault, Breakthrough and Spearhead with their own executable configuration, target-game selection and PS3 TITLE_ID.
+            - **Expansion-local data and state:** stage Breakthrough in its own USRDIR/maintt and Spearhead in its own USRDIR/mainta, while retaining shared Allied Assault base-game lookup and separate per-title saves, configuration and logs.
+            - **BSP surface streaming:** read draw vertices and indexes per surface using reusable bounded scratch buffers, reducing peak memory pressure during level loading.
+            - **Renderer and memory work:** add per-title shader caches, safer cache validation and generation, compact texture/lightmap handling, unused-image cleanup, texture-memory reporting, zone-allocation diagnostics and a lower-memory PS3 save-archive path.
+            - **DualShock 3 aim assist across all titles:** support scripted soldiers and players, reject friendly/dead/occluded targets, enable aim assist by default at strength 1.0 and provide an L2 toggle with on-screen state feedback.
+            - **Expansion audio robustness:** improve MP3 stream/frame recovery and expansion audio precaching while retaining the native libaudio mixer and minimp3-based static-free playback.
+            - **Incremental Linux CI:** persist three separate Ninja build trees and share the cached PS3 toolchain, host dependencies and compiler cache; expand automated coverage for aim assist, expansion paths, renderer memory, BSP streaming and shader caches.
+
+            ## Validation
+
+            - The release workflow builds and links all three PS3 title variants, runs the PS3 regression tests, validates title-specific shader caches and stages all three packages.
+            - Six package assets are attached: standard PKG and GNPDRM PKG for each title.
+            - CI success verifies compilation, tests and package generation; physical-console validation of campaign stability, performance, BSP streaming and memory behavior remains ongoing.
+            - Build run: https://github.com/kadorna1/iopenmohaa-ps3/actions/runs/${{ github.run_id }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { owner, repo } = context.repo;
+            const tag = 'v0.1.0.0c';
+            const packageDir = path.join(process.env.GITHUB_WORKSPACE || process.cwd(), 'dist');
+            const expectedFiles = [
+              'iOpenMOHAA-PS3-OMOHAA020.pkg',
+              'iOpenMOHAA-PS3-OMOHAA020.gnpdrm.pkg',
+              'iOpenMOHAA-PS3-OMOHAB020.pkg',
+              'iOpenMOHAA-PS3-OMOHAB020.gnpdrm.pkg',
+              'iOpenMOHAA-PS3-OMOHAS020.pkg',
+              'iOpenMOHAA-PS3-OMOHAS020.gnpdrm.pkg'
+            ];
+            const packageFiles = fs.readdirSync(packageDir)
+              .filter(name => name.endsWith('.pkg'))
+              .sort();
+
+            const missingFiles = expectedFiles.filter(name => !packageFiles.includes(name));
+            if (packageFiles.length !== expectedFiles.length || missingFiles.length) {
+              throw new Error(
+                'Expected exactly six title PKG/GNPDRM files; found ' +
+                packageFiles.length + ': ' + packageFiles.join(', ') +
+                '. Missing: ' + missingFiles.join(', ')
+              );
+            }
+
+            let release;
+            try {
+              const existing = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              release = existing.data;
+              if (!release.draft) {
+                throw new Error('Release ' + tag + ' already exists as a published release; refusing to replace it.');
+              }
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              const created = await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                target_commitish: context.sha,
+                name: 'Three-title build with BSP streaming',
+                body: process.env.RELEASE_NOTES,
+                draft: true,
+                prerelease: false
+              });
+              release = created.data;
+            }
+
+            let assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner,
+              repo,
+              release_id: release.id,
+              per_page: 100
+            });
+
+            for (const name of packageFiles) {
+              if (assets.some(asset => asset.name === name)) continue;
+              const filePath = path.join(packageDir, name);
+              const stat = fs.statSync(filePath);
+              await github.rest.repos.uploadReleaseAsset({
+                owner,
+                repo,
+                release_id: release.id,
+                name,
+                data: fs.readFileSync(filePath),
+                headers: {
+                  'content-type': 'application/octet-stream',
+                  'content-length': stat.size
+                }
+              });
+            }
+
+            assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner,
+              repo,
+              release_id: release.id,
+              per_page: 100
+            });
+            const missingAssets = packageFiles.filter(name => !assets.some(asset => asset.name === name));
+            if (missingAssets.length) {
+              throw new Error('Release is missing package assets: ' + missingAssets.join(', '));
+            }
+
+            const published = await github.rest.repos.updateRelease({
+              owner,
+              repo,
+              release_id: release.id,
+              name: 'Three-title build with BSP streaming',
+              body: process.env.RELEASE_NOTES,
+              draft: false,
+              prerelease: false
+            });
+            core.notice(
+              'Published ' + tag + ' with ' + packageFiles.length +
+              ' verified package assets: ' + published.data.html_url
+            );
