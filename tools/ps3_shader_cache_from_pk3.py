@@ -170,7 +170,6 @@ def main(argv: Iterable[str] | None = None) -> int:
         f"{stats['loose_shader_files']} loose files; "
         f"{stats['cache_bytes']} bytes -> {args.output}"
     )
-    print("The cache contains game-derived shader text; keep it with your own game data.")
     return 0
 
 
