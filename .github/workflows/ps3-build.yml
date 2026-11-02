@@ -578,28 +578,92 @@ jobs:
 
       - name: Create draft GitHub release
         if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[draft v0.1.0.0c]')
-        shell: bash
+        uses: actions/github-script@v7
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          cat > release-notes.md <<'NOTES'
-          ### Changes
+          RELEASE_NOTES: |
+            ### Changes
 
-          - Build separate Allied Assault, Breakthrough and Spearhead PS3 executables and PKGs with cached incremental builds.
-          - Keep expansion data and startup configuration in each title's own USRDIR, with shared Allied Assault data fallback.
-          - Add per-title shader caches, renderer memory diagnostics, texture/lightmap optimizations and streamed BSP surface loading.
-          - Improve expansion audio precaching and MP3/minimp3 recovery; retain the static-free audio fix.
-          - Apply DS3 aim assist consistently across all three titles, enabled by default with an in-game toggle.
-          - Expand automated coverage for packaging, expansion loading, shader caches, renderer memory and aim-assist behaviour.
+            - Build separate Allied Assault, Breakthrough and Spearhead PS3 executables and PKGs with cached incremental builds.
+            - Keep expansion data and startup configuration in each title's own USRDIR, with shared Allied Assault data fallback.
+            - Add per-title shader caches, renderer memory diagnostics, texture/lightmap optimizations and streamed BSP surface loading.
+            - Improve expansion audio precaching and MP3/minimp3 recovery; retain the static-free audio fix.
+            - Apply DS3 aim assist consistently across all three titles, enabled by default with an in-game toggle.
+            - Expand automated coverage for packaging, expansion loading, shader caches, renderer memory and aim-assist behaviour.
 
-          ### Validation
+            ### Validation
 
-          - GitHub Actions run #549 passed all host tests, all three PS3 builds/links, staging checks, and verification of all three installable PKGs.
-          - Real-hardware validation of BSP streaming, rendering quality, expansion stability and aim-assist behaviour remains outstanding.
-          NOTES
-          gh release create v0.1.0.0c dist/*.pkg \
-            --draft \
-            --target "$GITHUB_SHA" \
-            --title "Three-title PS3 build with BSP streaming" \
-            --notes-file release-notes.md
+            - GitHub Actions run #549 passed all host tests, all three PS3 builds/links, staging checks, and verification of all three installable PKGs.
+            - Real-hardware validation of BSP streaming, rendering quality, expansion stability and aim-assist behaviour remains outstanding.
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { owner, repo } = context.repo;
+            const tag = 'v0.1.0.0c';
+            const packageDir = path.join(process.env.GITHUB_WORKSPACE || process.cwd(), 'dist');
+            const packageFiles = fs.readdirSync(packageDir)
+              .filter(name => name.endsWith('.pkg'))
+              .sort();
+
+            if (packageFiles.length !== 3) {
+              throw new Error(`Expected exactly 3 PS3 PKGs in dist/, found ${packageFiles.length}: ${packageFiles.join(', ')}`);
+            }
+
+            let release;
+            try {
+              const existing = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              release = existing.data;
+              if (!release.draft) {
+                throw new Error(`Release ${tag} already exists and is not a draft; refusing to replace it.`);
+              }
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              const created = await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                target_commitish: context.sha,
+                name: 'Three-title PS3 build with BSP streaming',
+                body: process.env.RELEASE_NOTES,
+                draft: true,
+                prerelease: false
+              });
+              release = created.data;
+            }
+
+            let assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner,
+              repo,
+              release_id: release.id,
+              per_page: 100
+            });
+
+            for (const name of packageFiles) {
+              if (assets.some(asset => asset.name === name)) continue;
+              const filePath = path.join(packageDir, name);
+              const stat = fs.statSync(filePath);
+              await github.rest.repos.uploadReleaseAsset({
+                owner,
+                repo,
+                release_id: release.id,
+                name,
+                data: fs.readFileSync(filePath),
+                headers: {
+                  'content-type': 'application/octet-stream',
+                  'content-length': stat.size
+                }
+              });
+            }
+
+            assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner,
+              repo,
+              release_id: release.id,
+              per_page: 100
+            });
+            const missing = packageFiles.filter(name => !assets.some(asset => asset.name === name));
+            if (missing.length) {
+              throw new Error(`Draft release is missing assets: ${missing.join(', ')}`);
+            }
+            core.notice(`Draft release ${tag} is ready with ${packageFiles.length} verified PKG assets: ${release.html_url}`);
