@@ -1,4 +1,5 @@
 import sys
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -15,6 +16,8 @@ from ps3_shader_cache import (
     parse_shader_definitions,
 )
 from ps3_shader_cache_from_pk3 import build_cache_from_pk3
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class ShaderCacheParserTests(unittest.TestCase):
@@ -134,6 +137,135 @@ class ShaderCachePk3Tests(unittest.TestCase):
                 archive.writestr("scriptcache/example.psc", b"not a shader source")
             with self.assertRaises(ValueError):
                 build_cache_from_pk3(main)
+
+
+    def test_expansion_overlays_base_but_retains_base_only_shaders(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base = root / "main"
+            expansion = root / "mainta"
+            base.mkdir()
+            expansion.mkdir()
+
+            with zipfile.ZipFile(base / "Pak0.pk3", "w") as archive:
+                archive.writestr("scripts/base_only.shader", "textures/base { map base.tga }")
+                archive.writestr("scripts/shared.shader", "textures/shared { map base-shared.tga }")
+            with zipfile.ZipFile(expansion / "Pak0.pk3", "w") as archive:
+                archive.writestr("scripts/shared.shader", "textures/shared { map expansion-shared.tga }")
+                archive.writestr("scripts/expansion_only.shader", "textures/expansion { map expansion.tga }")
+
+            cache, stats = build_cache_from_pk3(base, expansion)
+
+            self.assertEqual(stats["data_directories"], 2)
+            self.assertEqual(stats["pk3_archives"], 2)
+            self.assertEqual(stats["source_files"], 3)
+            self.assertEqual(stats["overridden_shader_files"], 1)
+            self.assertIn(b"map base.tga", cache)
+            self.assertIn(b"map expansion-shared.tga", cache)
+            self.assertIn(b"map expansion.tga", cache)
+            self.assertNotIn(b"map base-shared.tga", cache)
+
+    def test_one_shot_generator_writes_all_three_title_cache_paths(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base = root / "main"
+            spearhead = root / "mainta"
+            breakthrough = root / "maintt"
+            output = root / "generated"
+            for directory in (base, spearhead, breakthrough):
+                directory.mkdir()
+                with zipfile.ZipFile(directory / "Pak0.pk3", "w") as archive:
+                    archive.writestr(
+                        f"scripts/{directory.name}.shader",
+                        f"textures/{directory.name} {{ map {directory.name}.tga }}",
+                    )
+
+            script = ROOT / "tools" / "generate_ps3_title_shader_caches.sh"
+            subprocess.run(
+                ["bash", str(script), str(base), str(spearhead), str(breakthrough), str(output)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            expected = (
+                output / "main/scripts/ps3_shader_cache.bin",
+                output / "mainta/scripts/ps3_shader_cache_mainta.bin",
+                output / "maintt/scripts/ps3_shader_cache_maintt.bin",
+            )
+            for path in expected:
+                self.assertTrue(path.is_file())
+                self.assertGreater(path.stat().st_size, HEADER_STRUCT.size)
+
+
+
+class ShaderCacheStagingTests(unittest.TestCase):
+    def test_base_cache_is_only_staged_into_allied_assault_package(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source"
+            base_scripts = source / "main" / "scripts"
+            spearhead_scripts = source / "mainta" / "scripts"
+            breakthrough_scripts = source / "maintt" / "scripts"
+            base_scripts.mkdir(parents=True)
+            spearhead_scripts.mkdir(parents=True)
+            breakthrough_scripts.mkdir(parents=True)
+
+            (base_scripts / "ps3_shader_cache.bin").write_bytes(b"allied-assault")
+            (spearhead_scripts / "ps3_shader_cache_mainta.bin").write_bytes(b"spearhead")
+            (breakthrough_scripts / "ps3_shader_cache_maintt.bin").write_bytes(b"breakthrough")
+
+            script = ROOT / "tools" / "stage_ps3_title_usrdir.sh"
+            outputs = {}
+            for appid in ("OMOHAA020", "OMOHAS020", "OMOHAB020"):
+                destination = root / appid
+                subprocess.run(
+                    ["bash", str(script), appid, str(source), str(destination)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                outputs[appid] = destination
+
+            self.assertEqual(
+                (outputs["OMOHAA020"] / "main/scripts/ps3_shader_cache.bin").read_bytes(),
+                b"allied-assault",
+            )
+            self.assertFalse(
+                (outputs["OMOHAS020"] / "main/scripts/ps3_shader_cache.bin").exists()
+            )
+            self.assertFalse(
+                (outputs["OMOHAB020"] / "main/scripts/ps3_shader_cache.bin").exists()
+            )
+            self.assertEqual(
+                (outputs["OMOHAS020"] / "mainta/scripts/ps3_shader_cache_mainta.bin").read_bytes(),
+                b"spearhead",
+            )
+            self.assertEqual(
+                (outputs["OMOHAB020"] / "maintt/scripts/ps3_shader_cache_maintt.bin").read_bytes(),
+                b"breakthrough",
+            )
+            self.assertFalse((outputs["OMOHAS020"] / "maintt").exists())
+            self.assertFalse((outputs["OMOHAB020"] / "mainta").exists())
+
+
+class ShaderCacheWorkflowTests(unittest.TestCase):
+    def test_build_uses_repository_assets_without_private_cache_checkout(self):
+        workflow = (ROOT / ".github/workflows/ps3-build.yml").read_text(encoding="utf-8")
+        self.assertIn("Verify staged title-specific shader caches", workflow)
+        self.assertIn("assets/ps3_usrdir", workflow)
+        self.assertNotIn("PS3_SHADER_CACHE_REPOSITORY", workflow)
+        self.assertNotIn("PS3_SHADER_CACHE_TOKEN", workflow)
+        self.assertNotIn(".ps3-private-shader-caches", workflow)
+
+    def test_shader_cache_tools_do_not_emit_distribution_notices(self):
+        generator = (ROOT / "tools/ps3_shader_cache_from_pk3.py").read_text(encoding="utf-8")
+        one_shot = (ROOT / "tools/generate_ps3_title_shader_caches.sh").read_text(encoding="utf-8")
+        shader_docs = (ROOT / "docs/PS3_SHADER_CACHE.md").read_text(encoding="utf-8")
+        for source in (generator, one_shot, shader_docs):
+            self.assertNotIn("game-derived shader text", source)
+            self.assertNotIn("keep these generated files with your own game data", source)
+            self.assertNotIn("derived from the original game archives", source)
 
 
 if __name__ == "__main__":

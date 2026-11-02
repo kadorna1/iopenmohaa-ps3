@@ -26,10 +26,16 @@ void ps3gl_textures_init(void)
 
 static uint32_t mip_total_size(uint32_t pitch, uint32_t w0, uint32_t h0);
 
+static uint32_t texture_pitch(const ps3gl_texture_t *t)
+{
+    uint32_t row_bytes = (uint32_t)t->width * t->bpp;
+    return (row_bytes + 63u) & ~63u;
+}
+
 /* RSX memory held by textures, for the log (ps3_prof.c) */
 static void tex_free_data(ps3gl_texture_t *t)
 {
-    uint32_t size = mip_total_size((uint32_t)t->width * 4, t->width, t->height);
+    uint32_t size = mip_total_size(texture_pitch(t), t->width, t->height);
 
     ps3gl_tex_bytes = ps3gl_tex_bytes > size ? ps3gl_tex_bytes - size : 0;
     rsxFree(t->data);
@@ -151,24 +157,101 @@ static int gl_format_bpp(GLenum format)
     }
 }
 
-/* Convert source pixels to ARGB8888 for RSX. src_bpp: 1=L/A, 2=LA, 3=RGB, 4=RGBA.
- * dst_stride can exceed width*4 -- RSX mip levels share the base level's pitch, so smaller levels get padded rows instead of tight packing. */
-static void convert_pixels(uint8_t *dst, uint32_t dst_stride, const uint8_t *src,
-                           int width, int height, int src_bpp,
-                           GLenum src_format)
+/* Match the GL1 renderer's requested precision to a native RSX texture format. */
+static void gl_storage_format(GLint internalformat, uint8_t *bpp, uint8_t *gcm_format)
 {
-    if (src_bpp == 4) {
-        /* Fast path: Upload32() is always GL_RGBA/GL_UNSIGNED_BYTE, so one packed
-         * 32-bit store matches PS3's big-endian byte order for free (see below). */
+    switch (internalformat) {
+    case GL_RGB:
+    case GL_RGB5:
+    case 3: /* legacy GL three-component internal format */
+        *bpp = 2;
+        *gcm_format = GCM_TEXTURE_FORMAT_R5G6B5;
+        break;
+    case GL_RGBA4:
+        *bpp = 2;
+        *gcm_format = GCM_TEXTURE_FORMAT_A4R4G4B4;
+        break;
+    default:
+        *bpp = 4;
+        *gcm_format = GCM_TEXTURE_FORMAT_A8R8G8B8;
+        break;
+    }
+}
+
+static void decode_pixel(const uint8_t *src, int src_bpp, GLenum src_format,
+                         uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *a)
+{
+    switch (src_bpp) {
+    case 1:
+        if (src_format == GL_ALPHA) {
+            *r = *g = *b = 255;
+            *a = src[0];
+        } else {
+            *r = *g = *b = src[0];
+            *a = 255;
+        }
+        break;
+    case 2:
+        *r = *g = *b = src[0];
+        *a = src[1];
+        break;
+    case 3:
+        *r = src[0];
+        *g = src[1];
+        *b = src[2];
+        *a = 255;
+        break;
+    default:
+        *r = src[0];
+        *g = src[1];
+        *b = src[2];
+        *a = src[3];
+        break;
+    }
+}
+
+/* PPU is big-endian: these packed words have the byte order expected by RSX. */
+static void store_pixel(uint8_t *dst, uint8_t dst_bpp, uint8_t gcm_format,
+                        uint8_t r, uint8_t g, uint8_t b, uint8_t a)
+{
+    if (dst_bpp == 2) {
+        uint16_t packed;
+        if (gcm_format == GCM_TEXTURE_FORMAT_R5G6B5) {
+            packed = (uint16_t)(((uint16_t)(r >> 3) << 11) |
+                                ((uint16_t)(g >> 2) << 5) |
+                                (uint16_t)(b >> 3));
+        } else {
+            packed = (uint16_t)(((uint16_t)(a >> 4) << 12) |
+                                ((uint16_t)(r >> 4) << 8) |
+                                ((uint16_t)(g >> 4) << 4) |
+                                (uint16_t)(b >> 4));
+        }
+        dst[0] = (uint8_t)(packed >> 8);
+        dst[1] = (uint8_t)packed;
+        return;
+    }
+
+    /* RSX A8R8G8B8 in big-endian memory: byte order A R G B. */
+    dst[0] = a;
+    dst[1] = r;
+    dst[2] = g;
+    dst[3] = b;
+}
+
+/* Every mip row uses the base level's 64-byte-aligned pitch. */
+static void convert_pixels(uint8_t *dst, uint32_t dst_stride, const uint8_t *src,
+                           int width, int height, int src_bpp, GLenum src_format,
+                           uint8_t dst_bpp, uint8_t gcm_format)
+{
+    if (dst_bpp == 4 && src_bpp == 4) {
         for (int row = 0; row < height; row++) {
             uint32_t *drow = (uint32_t *)(dst + (uint32_t)row * dst_stride);
             const uint8_t *srow = src + (size_t)row * width * 4;
             for (int col = 0; col < width; col++) {
-                uint8_t r = srow[col * 4 + 0];
-                uint8_t g = srow[col * 4 + 1];
-                uint8_t b = srow[col * 4 + 2];
-                uint8_t a = srow[col * 4 + 3];
-                drow[col] = ((uint32_t)a << 24) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+                drow[col] = ((uint32_t)srow[col * 4 + 3] << 24) |
+                            ((uint32_t)srow[col * 4 + 0] << 16) |
+                            ((uint32_t)srow[col * 4 + 1] << 8) |
+                            (uint32_t)srow[col * 4 + 2];
             }
         }
         return;
@@ -179,40 +262,8 @@ static void convert_pixels(uint8_t *dst, uint32_t dst_stride, const uint8_t *src
         const uint8_t *srow = src + (size_t)row * width * src_bpp;
         for (int col = 0; col < width; col++) {
             uint8_t r, g, b, a;
-            switch (src_bpp) {
-            case 1:
-                if (src_format == GL_ALPHA) {
-                    r = g = b = 255;
-                    a = srow[col];
-                } else {
-                    /* Luminance */
-                    r = g = b = srow[col];
-                    a = 255;
-                }
-                break;
-            case 2:
-                r = g = b = srow[col * 2];
-                a = srow[col * 2 + 1];
-                break;
-            case 3:
-                r = srow[col * 3 + 0];
-                g = srow[col * 3 + 1];
-                b = srow[col * 3 + 2];
-                a = 255;
-                break;
-            case 4:
-            default:
-                r = srow[col * 4 + 0];
-                g = srow[col * 4 + 1];
-                b = srow[col * 4 + 2];
-                a = srow[col * 4 + 3];
-                break;
-            }
-            /* RSX A8R8G8B8 in big-endian memory: byte order A R G B */
-            drow[col * 4 + 0] = a;
-            drow[col * 4 + 1] = r;
-            drow[col * 4 + 2] = g;
-            drow[col * 4 + 3] = b;
+            decode_pixel(srow + (size_t)col * src_bpp, src_bpp, src_format, &r, &g, &b, &a);
+            store_pixel(drow + (size_t)col * dst_bpp, dst_bpp, gcm_format, r, g, b, a);
         }
     }
 }
@@ -253,7 +304,7 @@ static uint32_t mip_total_size(uint32_t pitch, uint32_t w0, uint32_t h0)
 static void build_gcm_texture(ps3gl_texture_t *t)
 {
     memset(&t->gcm_tex, 0, sizeof(t->gcm_tex));
-    t->gcm_tex.format    = GCM_TEXTURE_FORMAT_A8R8G8B8 | GCM_TEXTURE_FORMAT_LIN;
+    t->gcm_tex.format    = t->gcm_format | GCM_TEXTURE_FORMAT_LIN;
     t->gcm_tex.mipmap    = t->num_levels ? t->num_levels : 1;
     t->gcm_tex.dimension = GCM_TEXTURE_DIMS_2D;
     t->gcm_tex.cubemap   = GCM_FALSE;
@@ -262,12 +313,15 @@ static void build_gcm_texture(ps3gl_texture_t *t)
     t->gcm_tex.height    = t->height;
     t->gcm_tex.depth     = 1;
     t->gcm_tex.location  = GCM_LOCATION_RSX;
-    t->gcm_tex.pitch     = t->width * 4;
+    t->gcm_tex.pitch     = texture_pitch(t);
     t->gcm_tex.offset    = t->offset;
 }
 
 extern void ps3_log(const char *msg);
 static int ps3gl_teximg_diag_count = 0;
+
+/* RSX linear texture offsets require 128-byte alignment; row pitches use 64. */
+#define PS3GL_TEXTURE_ALIGN 128
 
 void ps3gl_TexImage2D(GLenum target, GLint level, GLint internalformat,
                       GLsizei width, GLsizei height, GLint border,
@@ -296,27 +350,36 @@ void ps3gl_TexImage2D(GLenum target, GLint level, GLint internalformat,
 #endif
 
     if (level == 0) {
-        /* Free old data if base dimensions changed */
-        if (t->data && (t->width != (uint16_t)width || t->height != (uint16_t)height)) {
+        uint8_t new_bpp, new_gcm_format;
+        gl_storage_format(internalformat, &new_bpp, &new_gcm_format);
+
+        /* A redefinition may change precision even when dimensions stay fixed. */
+        if (t->data && (t->width != (uint16_t)width || t->height != (uint16_t)height ||
+                        t->bpp != new_bpp || t->gcm_format != new_gcm_format)) {
             tex_free_data(t);
         }
 
         t->width      = (uint16_t)width;
         t->height     = (uint16_t)height;
-        t->bpp        = 4; /* always store as ARGB8888 */
-        t->num_levels = 0; /* becomes 1 once this level's data lands below */
+        t->bpp        = new_bpp;
+        t->gcm_format = new_gcm_format;
+        t->num_levels = 0;
 
         if (!t->data) {
-            uint32_t pitch = (uint32_t)width * 4;
-            uint32_t size  = mip_total_size(pitch, (uint32_t)width, (uint32_t)height);
-            PS3GL_ATRACE("tex %d level %d %dx%d: rsxMemalign(64, %u)", (int)t->glname, (int)level, (int)width, (int)height, (unsigned)size);
-            t->data = (uint8_t *)rsxMemalign(64, size);
+            uint32_t pitch = texture_pitch(t);
+            uint32_t size = mip_total_size(pitch, (uint32_t)width, (uint32_t)height);
+            PS3GL_ATRACE("tex %d %dx%d bpp=%d: rsxMemalign(64, %u)",
+                         (int)t->glname, (int)width, (int)height,
+                         (int)t->bpp, (unsigned)size);
+            t->data = (uint8_t *)rsxMemalign(PS3GL_TEXTURE_ALIGN, size);
             PS3GL_ATRACE("tex %d: rsxMemalign -> %p", (int)t->glname, (void *)t->data);
             if (!t->data) {
-                char msg[128];
-                if (ps3gl_tex_failed++ < 8) {
-                    snprintf(msg, sizeof(msg), "[ps3gl] WARNING: out of RSX memory: texture %d, %u bytes "
-                             "(textures hold %u KB)", t->glname, size, ps3gl_tex_bytes / 1024);
+                char msg[160];
+                if (ps3gl_tex_failed++ < 16) {
+                    snprintf(msg, sizeof(msg),
+                             "[ps3gl] WARNING: out of RSX memory: texture %d, %u bytes bpp=%u "
+                             "(textures hold %u KB)",
+                             t->glname, size, (unsigned)t->bpp, ps3gl_tex_bytes / 1024);
                     ps3_log(msg);
                 }
                 return;
@@ -325,23 +388,24 @@ void ps3gl_TexImage2D(GLenum target, GLint level, GLint internalformat,
             PS3GL_ATRACE("tex %d: before rsxAddressToOffset", (int)t->glname);
             {
                 int ps3_off_ret = rsxAddressToOffset(t->data, &t->offset);
-                PS3GL_ATRACE("tex %d: rsxAddressToOffset ret=0x%x offset=0x%x", (int)t->glname, (unsigned)ps3_off_ret, (unsigned)t->offset);
+                PS3GL_ATRACE("tex %d: rsxAddressToOffset ret=0x%x offset=0x%x",
+                             (int)t->glname, (unsigned)ps3_off_ret, (unsigned)t->offset);
             }
         }
     }
 
-    if (!t->data) return; /* level>0 arrived before level 0 -- ignore */
-    if (level >= mip_num_levels(t->width, t->height)) return; /* beyond the allocated pyramid */
+    if (!t->data) return;
+    if (level >= mip_num_levels(t->width, t->height)) return;
 
-    uint32_t pitch   = (uint32_t)t->width * 4;
+    uint32_t pitch = texture_pitch(t);
     uint32_t lvl_off = mip_level_offset(pitch, t->height, level);
 
     if (pixels) {
         int src_bpp = gl_format_bpp(format);
-        PS3GL_ATRACE("tex %d level %d: before convert_pixels bpp=%d", (int)t->glname, (int)level, src_bpp);
+        PS3GL_ATRACE("tex %d level %d: convert srcbpp=%d dstbpp=%d",
+                     (int)t->glname, (int)level, src_bpp, (int)t->bpp);
         convert_pixels(t->data + lvl_off, pitch, (const uint8_t *)pixels,
-                       width, height, src_bpp, format);
-        PS3GL_ATRACE("tex %d level %d: after convert_pixels", (int)t->glname, (int)level);
+                       width, height, src_bpp, format, t->bpp, t->gcm_format);
     } else {
         memset(t->data + lvl_off, 0, pitch * mip_level_dim(t->height, level));
     }
@@ -366,6 +430,7 @@ void ps3gl_TexSubImage2D(GLenum target, GLint level, GLint xoff, GLint yoff,
 
     int src_bpp = gl_format_bpp(format);
     const uint8_t *src = (const uint8_t *)pixels;
+    uint32_t dst_pitch = texture_pitch(t);
 
     for (int row = 0; row < h; row++) {
         int dy = yoff + row;
@@ -375,26 +440,10 @@ void ps3gl_TexSubImage2D(GLenum target, GLint level, GLint xoff, GLint yoff,
             if (dx < 0 || dx >= t->width) continue;
 
             uint8_t r, g, b, a;
-            int si = (row * w + col) * src_bpp;
-            switch (src_bpp) {
-            case 1:
-                if (format == GL_ALPHA) { r = g = b = 255; a = src[si]; }
-                else { r = g = b = src[si]; a = 255; }
-                break;
-            case 3:
-                r = src[si]; g = src[si+1]; b = src[si+2]; a = 255;
-                break;
-            case 4:
-            default:
-                r = src[si]; g = src[si+1]; b = src[si+2]; a = src[si+3];
-                break;
-            }
-
-            int di = (dy * t->width + dx) * 4;
-            t->data[di + 0] = a;
-            t->data[di + 1] = r;
-            t->data[di + 2] = g;
-            t->data[di + 3] = b;
+            size_t si = ((size_t)row * w + col) * src_bpp;
+            decode_pixel(src + si, src_bpp, format, &r, &g, &b, &a);
+            store_pixel(t->data + (size_t)dy * dst_pitch + (size_t)dx * t->bpp,
+                        t->bpp, t->gcm_format, r, g, b, a);
         }
     }
 

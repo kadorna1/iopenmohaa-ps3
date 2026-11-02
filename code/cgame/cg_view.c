@@ -788,7 +788,7 @@ qboolean CG_AimAssist(
         }
     }
 
-    /* Allied Assault's single-player campaign is played on the Allied side. */
+    /* All three single-player campaigns use the Allied faction for the player. */
     if (!selfTeam && cgs.gametype == GT_SINGLE_PLAYER) {
         selfTeam = EF_ALLIES;
     }

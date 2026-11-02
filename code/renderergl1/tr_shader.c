@@ -3943,7 +3943,23 @@ static void CreateExternalShaders( void ) {
  * material entries, then the NUL-terminated shader text blocks. Renderer
  * pointers and image/lightmap state are intentionally not serialized.
  */
-#define PS3_SHADER_CACHE_PATH "scripts/ps3_shader_cache.bin"
+/*
+ * Each title has a different mounted shader-file set. Never try to use the
+ * Allied Assault cache for an expansion: its filename manifest is incomplete.
+ * Expansion caches are optional and belong beside the corresponding expansion
+ * data (mainta/scripts or maintt/scripts).
+ */
+static const char *PS3_ShaderCachePath(void)
+{
+    switch (ri.Cvar_VariableIntegerValue("com_target_game")) {
+    case TG_MOHTA:
+        return "scripts/ps3_shader_cache_mainta.bin";
+    case TG_MOHTT:
+        return "scripts/ps3_shader_cache_maintt.bin";
+    default:
+        return "scripts/ps3_shader_cache.bin";
+    }
+}
 #define PS3_SHADER_CACHE_HEADER_SIZE 32
 #define PS3_SHADER_CACHE_SOURCE_SIZE 64
 #define PS3_SHADER_CACHE_ENTRY_SIZE 76
@@ -3980,19 +3996,21 @@ static qboolean PS3_LoadShaderCache(void)
     unsigned long long expectedLength;
     unsigned int i;
     const char *failure = NULL;
+    const char *cachePath = PS3_ShaderCachePath();
 
-    rawLength = ri.FS_ReadFile(PS3_SHADER_CACHE_PATH, &rawData);
+    ri.Printf(PRINT_ALL, "PS3 material shader cache selected: '%s'\n", cachePath);
+    rawLength = ri.FS_ReadFile(cachePath, &rawData);
     if (rawLength < 0 || !rawData) {
         ri.Printf(PRINT_WARNING,
-                  "PS3 material shader cache unavailable: '%s' (FS_ReadFile=%ld, buffer=%s); using normal shader parser\\n",
-                  PS3_SHADER_CACHE_PATH, rawLength,
+                  "PS3 material shader cache unavailable: '%s' (FS_ReadFile=%ld, buffer=%s); using normal shader parser\n",
+                  cachePath, rawLength,
                   rawData ? "non-null" : "null");
         return qfalse; /* Cache is optional; the normal parser is the fallback. */
     }
 
     ri.Printf(PRINT_ALL,
-              "PS3 material shader cache found: '%s' (%ld bytes)\\n",
-              PS3_SHADER_CACHE_PATH, rawLength);
+              "PS3 material shader cache found: '%s' (%ld bytes)\n",
+              cachePath, rawLength);
 
     data = (const unsigned char *)rawData;
     if (rawLength < PS3_SHADER_CACHE_HEADER_SIZE
@@ -4034,7 +4052,7 @@ static qboolean PS3_LoadShaderCache(void)
     if (!shaderFiles || numShaderFiles != (int)sourceCount
         || numShaderFiles > MAX_SHADER_FILES) {
         ri.Printf(PRINT_WARNING,
-                  "PS3 material shader cache source count mismatch: cache=%u, filesystem=%d\\n",
+                  "PS3 material shader cache source count mismatch: cache=%u, filesystem=%d\n",
                   sourceCount, numShaderFiles);
         failure = "shader file list differs from the cache manifest";
         goto reject;
@@ -4046,16 +4064,16 @@ static qboolean PS3_LoadShaderCache(void)
     manifest = data + PS3_SHADER_CACHE_HEADER_SIZE;
     for (i = 0; i < sourceCount; ++i) {
         const char *expectedName = (const char *)(manifest + i * sourceRecordSize);
-        if (!memchr(expectedName, '\\0', sourceRecordSize)) {
+        if (!memchr(expectedName, '\0', sourceRecordSize)) {
             ri.Printf(PRINT_WARNING,
-                      "PS3 material shader cache manifest entry %u has no filename terminator\\n",
+                      "PS3 material shader cache manifest entry %u has no filename terminator\n",
                       i);
             failure = "invalid shader filename in cache manifest";
             goto reject;
         }
         if (Q_stricmp(shaderFiles[i], expectedName) != 0) {
             ri.Printf(PRINT_WARNING,
-                      "PS3 material shader cache manifest mismatch at %u: cache='%s', filesystem='%s'\\n",
+                      "PS3 material shader cache manifest mismatch at %u: cache='%s', filesystem='%s'\n",
                       i, expectedName, shaderFiles[i]);
             failure = "shader file list differs from the cache manifest";
             goto reject;

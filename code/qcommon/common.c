@@ -3344,8 +3344,12 @@ void Com_InitTargetGameWithType(target_game_e target_game, qboolean bIsDemo)
 Com_InitTargetGame
 ===============
 */
+#ifndef PS3_DEFAULT_TARGET_GAME
+#define PS3_DEFAULT_TARGET_GAME "0"
+#endif
+
 void Com_InitTargetGame() {
-	com_target_game = Cvar_Get("com_target_game", "0", CVAR_INIT|CVAR_PROTECTED);
+	com_target_game = Cvar_Get("com_target_game", PS3_DEFAULT_TARGET_GAME, CVAR_INIT|CVAR_PROTECTED);
 	com_target_demo = Cvar_Get("com_target_demo", "0", CVAR_INIT|CVAR_PROTECTED);
 	com_target_shortversion = Cvar_Get("com_target_shortversion", "0.00", CVAR_ROM);
 	com_target_version = Cvar_Get("com_target_version", "", CVAR_ROM);

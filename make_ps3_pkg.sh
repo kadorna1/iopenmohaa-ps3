@@ -56,9 +56,9 @@ Usage: make_ps3_pkg.sh [options]
                       Pillow is available (default: assets/xmb/ICON0.PNG).
   --pic1 FILE         optional PIC1.PNG (background, 1920x1080).
   --snd0 FILE         optional PS3 XMB hover sound (RIFF ATRAC3/ATRAC3+); copied as SND0.AT3 only.
-  --extra-usrdir DIR  copy DIR's contents into the package's USRDIR (game data).
-                      Not recommended: MOHAA data is large. Copy it over FTP or
-                      USB instead.
+  --extra-usrdir DIR  copy DIR's contents into the package's USRDIR. The
+                      multi-title workflow uses this for common runtime files
+                      plus the matching expansion payload, not base-game archives.
   --sfo-xml FILE      SFO template (default: $PS3DEV/bin/sfo.xml).
   --service-id ID     content-id prefix (default: UP0001).
   --out-dir DIR       where the .pkg files go (default: current directory).

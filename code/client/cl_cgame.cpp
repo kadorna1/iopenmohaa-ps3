@@ -949,11 +949,13 @@ void CL_InitCGame( void ) {
 
 	PS3_TRACEF("CGINIT enter map=%s", cl.mapname);
 	PS3_TRACEMEM("enter");
+	PS3_ZONEDUMP("CGINIT enter");
 	S_BeginRegistration();
 	PS3_TRACEF("CGINIT after S_BeginRegistration");
 	CL_ShutdownCGame();
 	PS3_TRACEF("CGINIT after CL_ShutdownCGame");
 	PS3_TRACEMEM("after-shutdown");
+	PS3_ZONEDUMP("CGINIT after-shutdown");
 	CL_InitCGameDLL( &cgi, &cge );
 	PS3_TRACEF("CGINIT after CL_InitCGameDLL cge=%p", (void *)cge);
 	clc.state = CA_LOADING;
@@ -968,6 +970,7 @@ void CL_InitCGame( void ) {
 
 	PS3_TRACEF("CGINIT before CG_Init snapValid=%d", (int)cl.snap.valid);
 	PS3_TRACEMEM("before-cg-init");
+	PS3_ZONEDUMP("CGINIT before-cg-init");
 	if (cl.snap.valid) {
 		// init for this gamestate
 		// use the lastExecutedServerCommand instead of the serverCommandSequence
@@ -982,10 +985,13 @@ void CL_InitCGame( void ) {
 
 	PS3_TRACEF("CGINIT after CG_Init");
 	PS3_TRACEMEM("after-cg-init");
+	PS3_ZONEDUMP("CGINIT after-cg-init");
 	ClearNewConfigFlag();
 	PS3_TRACEF("CGINIT before TIKI_FinishLoad");
 	TIKI_FinishLoad();
 	PS3_TRACEF("CGINIT after TIKI_FinishLoad");
+	PS3_TRACEMEM("after-tiki-finish");
+	PS3_ZONEDUMP("CGINIT after-tiki-finish");
 
 	// reset any CVAR_CHEAT cvars registered by cgame
 	if( !clc.demoplaying && !cl_connectedToCheatServer )
@@ -999,6 +1005,7 @@ void CL_InitCGame( void ) {
 	CL_EndRegistration();
 	PS3_TRACEF("CGINIT after CL_EndRegistration");
 	PS3_TRACEMEM("after-end-registration");
+	PS3_ZONEDUMP("CGINIT after-end-registration");
 
 	t2 = Sys_Milliseconds();
 

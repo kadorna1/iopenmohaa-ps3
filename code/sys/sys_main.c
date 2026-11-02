@@ -892,7 +892,7 @@ int main( int argc, char **argv )
 	Sys_ParseArgs( argc, argv );
 #if defined(__PS3__)
 	Sys_SetBinaryPath( PS3_USRDIR );
-	Sys_SetDefaultInstallPath( PS3_USRDIR );
+	Sys_SetDefaultInstallPath( PS3_DATA_USRDIR );
 #else
 	Sys_SetBinaryPath( Sys_Dirname( argv[ 0 ] ) );
 	Sys_SetDefaultInstallPath( DEFAULT_BASEDIR );

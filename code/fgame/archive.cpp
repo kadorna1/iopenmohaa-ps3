@@ -109,6 +109,13 @@ const char *ArchiveFile::Filename(void)
 
 qboolean ArchiveFile::Compress()
 {
+#if defined(__PS3__)
+    // The PS3 save heap cannot reliably hold the complete archive and a
+    // second archive-sized LZ77 output buffer at the same time. The reader
+    // already accepts raw archives without the CSVG wrapper, and continues
+    // to support older compressed saves, so keep new PS3 saves uncompressed.
+    return true;
+#else
     byte  *tempbuf;
     size_t out_len;
     size_t tempbuf_len;
@@ -137,6 +144,7 @@ qboolean ArchiveFile::Compress()
     bufferlength = tempbuf_len;
 
     return true;
+#endif
 }
 
 size_t ArchiveFile::Length(void)

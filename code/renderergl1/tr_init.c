@@ -1354,7 +1354,12 @@ void R_Register( void )
 	r_colorMipLevels = ri.Cvar_Get ("r_colorMipLevels", "0", CVAR_LATCH );
 	ri.Cvar_CheckRange( r_picmip, 0, 16, qtrue );
 	r_textureDetails = ri.Cvar_Get("r_textureDetails", "1", 33);
+#if defined(__PS3__)
+	/* ps3gl stores the renderer's RGB5/RGBA4 requests in native 16-bit RSX formats. */
+	r_texturebits = ri.Cvar_Get( "r_texturebits", "16", CVAR_ARCHIVE | CVAR_LATCH );
+#else
 	r_texturebits = ri.Cvar_Get( "r_texturebits", "0", CVAR_ARCHIVE | CVAR_LATCH );
+#endif
 	r_colorbits = ri.Cvar_Get( "r_colorbits", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_stereo = ri.Cvar_Get( "r_stereo", "0", CVAR_ARCHIVE | CVAR_LATCH );
 #ifdef __linux__
@@ -1410,7 +1415,16 @@ void R_Register( void )
 	ri.Cvar_CheckRange( r_znear, 0.001f, 200, qtrue );
 	r_ignoreGLErrors = ri.Cvar_Get( "r_ignoreGLErrors", "1", CVAR_ARCHIVE );
 	r_fastsky = ri.Cvar_Get( "r_fastsky", "0", 0 );
+#if defined(__PS3__)
+	/* Avoid duplicating the entire raw RGB lightmap lump in TAG_STATIC_RENDERER. */
+	r_fastdlights = ri.Cvar_Get("r_fastdlights", "1", CVAR_ARCHIVE | CVAR_LATCH);
+#else
 	r_fastdlights = ri.Cvar_Get("r_fastdlights", "0", CVAR_ARCHIVE | CVAR_LATCH);
+#endif
+#if defined(__PS3__)
+	Com_Printf("PS3 renderer memory policy: texturebits=%d fastdlights=%d\n",
+		r_texturebits->integer, r_fastdlights->integer);
+#endif
 	r_drawSun = ri.Cvar_Get( "r_drawSun", "0", CVAR_ARCHIVE );
 	r_dlightBacks = ri.Cvar_Get( "r_dlightBacks", "1", CVAR_ARCHIVE );
 	r_finish = ri.Cvar_Get ("r_finish", "0", CVAR_ARCHIVE);
@@ -1838,6 +1852,12 @@ Touch all images to make sure they are resident
 */
 void RE_EndRegistration( void ) {
 	R_IssuePendingRenderCommands();
+
+	// Images not referenced by the new registration still occupy RSX local
+	// memory. Release them before warming the incoming map so the old and new
+	// maps do not compete for the same limited texture heap.
+	R_FreeUnusedImages();
+
 	if (r_precacheimages->integer) {
 #if defined(__PS3__)
 		RB_PrecacheImages();
@@ -1850,8 +1870,6 @@ void RE_EndRegistration( void ) {
 		ri.Printf(PRINT_ALL, "RB_ShowImages: %5.2f seconds\n", (float)((end - start) / 1000.f));
 #endif
 	}
-
-	R_FreeUnusedImages();
 }
 
 /*
