@@ -73,9 +73,14 @@ static inline int mprotect(void *addr, size_t len, int prot) {
 #ifndef PS3_APPID
 #define PS3_APPID "OMOHAA020"
 #endif
-/* Everything (game data, config, saves, log) lives in the game's USRDIR. */
-#define PS3_USRDIR   "/dev_hdd0/game/" PS3_APPID "/USRDIR"
-#define PS3_LOG_PATH PS3_USRDIR "/openmohaa-ps3.log"
+#ifndef PS3_DATA_APPID
+#define PS3_DATA_APPID "OMOHAA020"
+#endif
+/* Writable state and title-specific expansion files stay package-local. */
+#define PS3_USRDIR      "/dev_hdd0/game/" PS3_APPID "/USRDIR"
+/* Shared basepath fallback for common Allied Assault game assets. */
+#define PS3_DATA_USRDIR "/dev_hdd0/game/" PS3_DATA_APPID "/USRDIR"
+#define PS3_LOG_PATH    PS3_USRDIR "/openmohaa-ps3.log"
 
 /* ---- Memory ------------------------------------------------------------- */
 /* Hunk/zone sizes for common.c (iortcw SP wants a 128 MB minimum hunk, which
