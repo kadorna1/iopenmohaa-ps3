@@ -1421,6 +1421,10 @@ void R_Register( void )
 #else
 	r_fastdlights = ri.Cvar_Get("r_fastdlights", "0", CVAR_ARCHIVE | CVAR_LATCH);
 #endif
+#if defined(__PS3__)
+	Com_Printf("PS3 renderer memory policy: texturebits=%d fastdlights=%d\\n",
+		r_texturebits->integer, r_fastdlights->integer);
+#endif
 	r_drawSun = ri.Cvar_Get( "r_drawSun", "0", CVAR_ARCHIVE );
 	r_dlightBacks = ri.Cvar_Get( "r_dlightBacks", "1", CVAR_ARCHIVE );
 	r_finish = ri.Cvar_Get ("r_finish", "0", CVAR_ARCHIVE);
