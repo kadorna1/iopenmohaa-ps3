@@ -124,6 +124,49 @@ static int ps3_zone_ptr_ok( const void *p )
 {
 	return p != NULL && ( ( unsigned long )p & 3 ) == 0 && ( unsigned long )p >= 0x10000UL && ( unsigned long )p < 0xD0000000UL;
 }
+
+static const char *ps3_zone_tag_name( int tag )
+{
+	static const char *const names[TAG_NUM_TOTAL_TAGS] = {
+		"free", "const", "general", "botlib", "renderer", "game", "cgame",
+		"client", "tiki", "strings_commands", "sound", "static",
+		"static_renderer", "skel", "temp", "exe"
+	};
+
+	if( tag < 0 || tag >= TAG_NUM_TOTAL_TAGS ) {
+		return "invalid";
+	}
+
+	return names[tag];
+}
+
+/* Emit a compact per-pool snapshot only on allocation failure. */
+static void ps3_zone_dump_tag_usage( const char *reason )
+{
+	int k;
+
+	for( k = 0; k < TAG_NUM_TOTAL_TAGS; ++k ) {
+		memblock_t *head = &mem_blocks[k];
+		memblock_t *block;
+		size_t bytes = 0;
+		int blocks = 0;
+		int broken = 0;
+
+		for( block = head->next; block != head; block = block->next ) {
+			if( !ps3_zone_ptr_ok( block ) || block->id != ZONEID
+				|| block->size < sizeof( memblock_t ) + sizeof( int )
+				|| block->size > 0x10000000UL || blocks >= 1000000 ) {
+				broken = 1;
+				break;
+			}
+			bytes += block->size;
+			++blocks;
+		}
+
+		PS3_BootTracef( "ZONE TAGSUMMARY[%s] tag=%s id=%d blocks=%d bytes=%u broken=%d",
+			reason, ps3_zone_tag_name( k ), k, blocks, ( unsigned )bytes, broken );
+	}
+}
 #endif
 
 /*
@@ -172,15 +215,32 @@ void Z_FreeTags( int tag )
 {
 	memblock_t *block;
 	memblock_t *next;
+#if defined(__PS3__)
+	size_t freedBytes = 0;
+	int freedBlocks = 0;
+#endif
 
 	for( block = mem_blocks[ tag ].next; block != &mem_blocks[ tag ]; block = next )
 	{
 		next = block->next;
+#if defined(__PS3__)
+		if( block->id == ZONEID ) {
+			freedBytes += block->size;
+			++freedBlocks;
+		}
+#endif
 		Z_Free( ( ( byte * )block + sizeof( memblock_t ) ) );
 	}
 
 	mem_blocks[ tag ].prev = &mem_blocks[ tag ];
 	mem_blocks[ tag ].next = &mem_blocks[ tag ];
+
+#if defined(__PS3__)
+	if( freedBlocks > 0 ) {
+		PS3_BootTracef( "ZONE FREETAGS tag=%s id=%d blocks=%d bytes=%u",
+			ps3_zone_tag_name( tag ), tag, freedBlocks, ( unsigned )freedBytes );
+	}
+#endif
 }
 
 /*
@@ -229,7 +289,14 @@ void *Z_TagMalloc( int size, int tag ) {
 	block = ( memblock_t * )malloc( size );
 	if( !block ) {
 #if defined(__PS3__)
-		PS3_TRACEF( "ZONE malloc failed request=%d total=%d tag=%d", requestedSize, size, tag );
+#if !defined(ZONE_DEBUG)
+		PS3_TRACEF( "ZONE malloc failed request=%d total=%d tag=%s(%d) caller=%p hint=%p",
+			requestedSize, size, ps3_zone_tag_name( tag ), tag, caller, ps3_zone_caller_hint );
+#else
+		PS3_TRACEF( "ZONE malloc failed request=%d total=%d tag=%s(%d)",
+			requestedSize, size, ps3_zone_tag_name( tag ), tag );
+#endif
+		ps3_zone_dump_tag_usage( "malloc-failed" );
 #endif
 		Com_Error( ERR_FATAL, "Z_TagMalloc: failed to allocate request=%d bytes (total=%d, tag=%d)", requestedSize, size, tag );
 		return NULL;
