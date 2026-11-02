@@ -13,6 +13,9 @@ class PS3RendererMemoryTests(unittest.TestCase):
     def setUpClass(cls):
         cls.renderer_init = (ROOT / "code/renderergl1/tr_init.c").read_text(encoding="utf-8")
         cls.renderer_image = (ROOT / "code/renderergl1/tr_image.c").read_text(encoding="utf-8")
+        cls.texture_backend = (ROOT / "code/gl/ps3gl_textures.c").read_text(encoding="utf-8")
+        cls.texture_header = (ROOT / "code/gl/ps3gl.h").read_text(encoding="utf-8")
+        cls.world_bsp = (ROOT / "code/renderergl1/tr_bsp.c").read_text(encoding="utf-8")
         cls.memory = (ROOT / "code/qcommon/memory.c").read_text(encoding="utf-8")
         cls.workflow = (ROOT / ".github/workflows/ps3-build.yml").read_text(encoding="utf-8")
 
@@ -44,6 +47,22 @@ class PS3RendererMemoryTests(unittest.TestCase):
     def test_zone_tag_cleanup_reports_released_bytes(self):
         self.assertIn("ZONE FREETAGS tag=%s id=%d blocks=%d bytes=%u", self.memory)
         self.assertIn("freedBytes += block->size;", self.memory)
+
+    def test_ps3gl_uses_native_16_bit_formats_and_padded_pitch(self):
+        self.assertIn("GCM_TEXTURE_FORMAT_R5G6B5", self.texture_backend)
+        self.assertIn("GCM_TEXTURE_FORMAT_A4R4G4B4", self.texture_backend)
+        self.assertIn("t->gcm_format | GCM_TEXTURE_FORMAT_LIN", self.texture_backend)
+        self.assertIn("return (row_bytes + 63u) & ~63u;", self.texture_backend)
+        self.assertIn("t->bpp, t->gcm_format", self.texture_backend)
+        self.assertIn("t->gcm_format", self.texture_header)
+
+    def test_ps3_defaults_to_compact_textures_and_fast_lightmaps(self):
+        self.assertIn('r_texturebits = ri.Cvar_Get( "r_texturebits", "16"', self.renderer_init)
+        self.assertIn('r_fastdlights = ri.Cvar_Get("r_fastdlights", "1"', self.renderer_init)
+        fast_path = self.world_bsp.index("if (r_fastdlights->integer)")
+        duplicate_copy = self.world_bsp.index("ri.Hunk_Alloc(l->length", fast_path)
+        self.assertLess(fast_path, duplicate_copy)
+        self.assertIn("s_worldData.lighting = NULL;", self.world_bsp)
 
     def test_workflow_runs_renderer_memory_regressions(self):
         self.assertIn("Test PS3 renderer cache and zone memory diagnostics", self.workflow)
