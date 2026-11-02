@@ -116,9 +116,20 @@ static int S_MP3_ReadMore(snd_stream_t *stream,
         return 0;
 
     if (leftover >= (int)sizeof(mp3info->encbuf)) {
-        MP3_TRACE("PS3AUDIO: minimp3 input buffer full file=%s phase=%s kept=%d capacity=%u",
+        const int filePosition = FS_FTell(stream->file);
+        const int tail = mp3info->encbuflen - 4;
+
+        MP3_TRACE("PS3AUDIO: minimp3 input buffer full file=%s phase=%s kept=%d capacity=%u file_pos=%d frames=%u skipped=%u errors=%u freefmt=%d prevhdr=%02x%02x%02x%02x input=%02x%02x%02x%02x tail=%02x%02x%02x%02x",
                   mp3info->filename, mp3info->scanning ? "scan" : "play",
-                  leftover, (unsigned int)sizeof(mp3info->encbuf));
+                  leftover, (unsigned int)sizeof(mp3info->encbuf), filePosition,
+                  mp3info->frameCount, mp3info->skippedBytes, mp3info->decodeErrors,
+                  mp3info->decoder.free_format_bytes,
+                  mp3info->decoder.header[0], mp3info->decoder.header[1],
+                  mp3info->decoder.header[2], mp3info->decoder.header[3],
+                  mp3info->encbuf[0], mp3info->encbuf[1],
+                  mp3info->encbuf[2], mp3info->encbuf[3],
+                  mp3info->encbuf[tail], mp3info->encbuf[tail + 1],
+                  mp3info->encbuf[tail + 2], mp3info->encbuf[tail + 3]);
         return -1;
     }
 
