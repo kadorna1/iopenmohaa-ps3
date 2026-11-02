@@ -1,109 +1,519 @@
-# OpenMoHAA
+# iOpenMoHAA-PS3
 
-[![Build](https://github.com/openmoh/openmohaa/actions/workflows/branches-build.yml/badge.svg?branch=main)](https://github.com/openmoh/openmohaa/actions/workflows/branches-build.yml) [![Release](https://img.shields.io/github/v/release/openmoh/openmohaa)](https://github.com/openmoh/openmohaa/releases) [![Downloads](https://img.shields.io/github/downloads/openmoh/openmohaa/total)](https://github.com/openmoh/openmohaa/releases)
+**OpenMoHAA port for the PlayStation 3 (PS3), powered by PSL1GHT.**
 
-![License](https://img.shields.io/github/license/openmoh/openmohaa) ![Commits](https://img.shields.io/github/commit-activity/t/openmoh/openmohaa)
+iOpenMoHAA-PS3 is a native PlayStation 3 port of [OpenMoHAA](https://github.com/openmoh/openmohaa), targeting the original *Medal of Honor: Allied Assault* and its two expansions, *Spearhead* and *Breakthrough*.
 
-![Discord](https://img.shields.io/discord/596049712579215361?logo=discord&logoColor=white&color=5865F2)
+The port adapts the engine to the PS3's PowerPC PPU and RSX architecture using the PSL1GHT development environment. Its platform implementation draws on the PS3 work in ioQuake3 and ioRTCW.
 
-![logo](misc/openmohaa-text-sm.png)
+The project focuses on getting the original game and its expansions running natively on PS3, with dedicated platform support, controller integration, audio playback, renderer optimizations, memory management improvements and automated PKG generation.
 
-## What is OpenMoHAA?
+> **Development status:** Work in progress. The three title variants compile and package through GitHub Actions. Runtime performance, rendering consistency and complete campaign stability are still being tested on physical hardware.
 
-OpenMoHAA is an open-source project aimed at preserving and enhancing **Medal of Honor: Allied Assault** (including Spearhead and Breakthrough expansions) by providing more features and bugfixes, across modern platforms and architectures.
+---
 
-Powered by [ioquake3](https://github.com/ioquake/ioq3) and the [F.A.K.K SDK](https://code.idtech.space/ritual/fakk2-sdk), OpenMoHAA provides:
-- Full compatibility with the original game: assets, scripts and multiplayer
-- Better support for modern systems
-- Cross-platform support (Linux, Windows, macOS)
-- Support for both single-player and multiplayer modes
-- Includes all fixes from Spearhead 2.15 and Breakthrough 2.40b
-- More fixes and features, such as bots and a ban system
+## Implemented PS3 features
 
-*OpenMoHAA is an independent project and is not affiliated with or endorsed by Electronic Arts.*
+### 1. Native PS3 platform support
 
-## Getting started
+- Dedicated PSL1GHT/PS3DEV cross-compilation toolchain.
+- Native PowerPC PPU executable generation.
+- PS3 system initialization and shutdown handling.
+- RSX/GCM graphics initialization and framebuffer management.
+- Triple-buffered display with vertical synchronization.
+- PS3 system utility integration, including XMB exit handling.
+- Native PS3 filesystem paths and package-specific configuration directories.
+- IPv4 socket adaptation.
+- PS3 on-screen keyboard (OSK) integration.
+- Early boot tracing, runtime logging and PPU exception diagnostics.
+- Dedicated PS3 screen logging and diagnostic output.
 
-- 📦 [Installing OpenMoHAA](docs/markdown/01-intro/01-installation.md)
-- ▶️ [How to play: Launching the game, expansions & file locations](docs/markdown/02-running/01-running.md)
-- ❓ [FAQ & Troubleshooting](docs/markdown/02-running/03-faq.md)
-- 🌐 [Setting up a game server](docs/markdown/02-running/02-running-server.md)
+The PS3 build disables unnecessary desktop-specific dependencies and uses a dedicated platform configuration instead of the standard SDL/OpenAL desktop path.
 
-## Reporting Issues
+### 2. RSX graphics and renderer optimizations
 
-> [!NOTE]
-> OpenMoHAA hasn't hit version 1.0.0 yet. Think of it like a beta build from the golden age of LAN parties. Features are being added, bugs are getting squashed, and more things are being tweaked. Things might change, break, or get even better over time.
-> 
-> If that sounds like your kind of mission, gear up, frag some bots, and help level up OpenMoHAA!
+The standard PS3 rendering implementation uses the existing OpenGL 1 compatibility renderer (`ps3gl`) backed by the PS3's GCM/RSX interface.
 
-If you encounter a bug or a problem, you can do one of the following:
-- Submit an [issue](https://github.com/openmoh/openmohaa/issues) on GitHub (use the template).
-- Join the [OpenMoHAA Discord](https://discord.gg/NYtH58R) for a quick help.
+Implemented improvements include:
 
-## Additional documentation
+- Native RSX framebuffer and depth-buffer allocation.
+- Dedicated RSX command-buffer and vertex-ring management.
+- Triple-buffered rendering and frame synchronization.
+- 1280x720 default display resolution, with optional 1080p selection.
+- Adjustable screen fitting for displays with overscan.
+- Preassembled RSX vertex and fragment shader programs.
+- PS3-specific texture allocation, alignment and format handling.
+- Native 16-bit texture formats where applicable.
+- Optimized lightmap handling.
+- Unused renderer image cleanup before texture precaching.
 
-- 📖 [Documentation](https://openmoh.github.io/openmohaa)
-- ⚙️ [Game settings & configuration](docs/markdown/03-configuration/01-configuration.md)
-- 📝 [Code & Scripting reference](docs/markdown/04-coding/02-coding.md)
-- 📜 [Contributing guidelines](CONTRIBUTING.md)
+The default PS3 renderer configuration uses:
 
-## Current state
+```cfg
+seta r_texturebits "16"
+seta r_fastdlights "1"
+```
 
-- 🧰 [List of differences](docs/markdown/01-intro/04-differences.md)
+These settings reduce renderer memory requirements and avoid unnecessary texture and lighting allocations.
 
-### Single-player
+### 3. BSP streaming and memory management
 
-The entire single-player campaign should work (Allied Assault, Spearhead and Breakthrough). If you encounter any bug, please create a new [GitHub issue](https://github.com/openmoh/openmohaa/issues) describing them.
+Dedicated PS3 memory optimizations have been implemented to address the console's relatively limited available memory.
 
-### Multiplayer
+These include:
 
-- Almost fully stable
-- All official game modes are supported, including those from Spearhead and Breakthrough:
-  - Free-For-All
-  - Team-Deathmatch
-  - Round-based match
-  - Objective match
-  - Tug-of-War (Spearhead)
-  - Liberation (Breakthrough)
-- Popular mods like **Freeze-Tag** are supported
-- Built-in bots for offline practice and for testing
-  - 🔧 [Setting up bots](docs/markdown/02-running/01-running.md#Playing-with-bots)
+- Streaming BSP surface geometry rather than retaining complete raw vertex and index lumps during conversion.
+- Reusable temporary vertex and index buffers sized according to the largest surface being processed.
+- Reduced peak memory consumption during map loading.
+- Renderer texture-memory accounting.
+- Zone allocator diagnostics, including allocation tags and caller information.
+- Memory-release reporting when allocator tags are freed.
+- Improved renderer image-cache cleanup.
+- Avoidance of an additional full-size compression buffer in the PS3 save-archive path.
+- Additional memory diagnostics around CGame initialization and map transitions.
 
-You can host your own [OpenMoHAA server](docs/markdown/02-running/02-running-server.md#) or join others using OpenMoHAA.
+The BSP streaming implementation specifically targets peak PPU memory consumption during level loading.
 
-## Screenshots
+### 4. Pre-indexed material shader caches
 
-|                                                                                   |                                                                            |
-|-----------------------------------------------------------------------------------|----------------------------------------------------------------------------|
-| ![](docs/assets/images/v0.60.0-x86_64/mohdm1_1.png)                                      | ![](docs/assets/images/v0.60.0-x86_64/training_1.png)                               |
-| ![](docs/assets/images/v0.60.0-x86_64/flughafen_1.png)                                   | ![](docs/assets/images/v0.60.0-x86_64/flughafen_2.png)                            |
-| ![](docs/assets/images/v0.60.0-x86_64/mohdm2_1.png "Playing Freeze-Tag mode with bots")  | ![](docs/assets/images/v0.60.0-x86_64/training_3.png "Single-Player training")    |
+A PS3-specific material shader cache system is implemented to reduce the cost of loading and indexing the game's material definitions.
 
-*More screenshots [here](docs/assets/images)*
+The cache avoids repeated shader-file enumeration, concatenation and initial token-level indexing.
 
-## Development & Compiling
+Separate caches are supported for all three titles:
 
-- 💻 [Building from source](docs/markdown/04-coding/01-compiling.md)
+| Game | Cache location |
+|---|---|
+| Allied Assault | `USRDIR/main/scripts/ps3_shader_cache.bin` |
+| Spearhead | `USRDIR/mainta/scripts/ps3_shader_cache_mainta.bin` |
+| Breakthrough | `USRDIR/maintt/scripts/ps3_shader_cache_maintt.bin` |
 
-## Third party librairies
+The runtime validates the cache format and source-file manifest before using it. If a cache is missing or invalid, the original shader-loading implementation remains available as a fallback.
 
-The following third party tools and libraries are used by the project
+The caches contain indexed material shader definitions, not preloaded textures or runtime renderer objects. Their main purpose is reducing startup and initial shader-registration overhead rather than increasing steady-state frame rates.
 
-- [Flex](https://github.com/westes/flex)
-- [Bison](https://savannah.gnu.org/projects/bison/)
-- [SDL](http://www.libsdl.org/)
-- [OpenAL](https://www.openal.org/)
-- [LibMAD](http://www.underbit.com/products/mad/)
-- [cURL](https://curl.se/)
-- [Libogg](https://github.com/gcp/libogg)
-- [Libvorbis](https://xiph.org/vorbis/)
-- [Libopus](https://opus-codec.org/)
+### 5. DualShock 3 and USB input support
 
-## Resources
+A dedicated PS3 input implementation provides:
 
-- 🔗 [GitHub Repository](https://github.com/openmoh/openmohaa/)
-- 🌐 [MOH-DB](https://www.moh-db.com/)
-- 🕹️ [333networks](https://333networks.com/)
-- 📂 [ModDB](https://www.moddb.com/games/medal-of-honor-allied-assault)
-- 📂 [GameBanana](https://gamebanana.com/games/720)
-- 💬 [Join us on Discord](https://discord.gg/NYtH58R)
+- Native DualShock 3 button handling.
+- Analog left and right stick support.
+- Correct right-stick yaw and pitch axis routing.
+- D-pad navigation.
+- Bindable controller buttons.
+- Trigger and pressure-sensitive button handling.
+- Menu navigation and automatic directional repeat.
+- Left-stick menu pointer movement.
+- USB keyboard support.
+- USB mouse support, including buttons and scroll wheel.
+- Separate mouse sensitivity handling for gameplay and menu navigation.
+
+The default controller mappings are integrated into the engine's normal input and binding systems.
+
+### 6. DualShock 3 aim assist
+
+An optional in-game aim-assist implementation is available for the DualShock 3 right analog stick.
+
+It is enabled by default in all three packages, base game and both expansions.
+
+Default settings:
+
+```cfg
+seta ps3_aim_assist "1"
+seta ps3_aim_assist_strength "1.0"
+```
+
+**Controls**
+
+Press L2 during gameplay to toggle aim assist (SEEMS TO BE WORKING). A notification appears in the upper-left corner (CURRENTLY NOT WORKING):
+
+- `AIM ASSIST ON`
+- `AIM ASSIST OFF`
+
+The toggle is edge-triggered, so holding L2 does not repeatedly change its state.
+
+**Targeting behavior**
+
+- Supports scripted soldier entities and player entities.
+- Rejects friendly actors.
+- Ignores dead targets.
+- Uses a configurable strength between 0.0 and 1.0.
+- Evaluates targets within a defined distance and aiming cone.
+- Rejects targets obstructed by solid world geometry.
+- Applies a combination of stick slowdown and subtle angular correction.
+- Does not automatically lock onto targets or fire weapons.
+
+The system is implemented in shared PS3 input, game and CGame code and applies to Allied Assault, Spearhead and Breakthrough.
+
+USB mouse aiming and menu navigation remain independent of the aim-assist system.
+
+Documentation: [`docs/PS3_AIM_ASSIST.md`](docs/PS3_AIM_ASSIST.md).
+
+### 7. Native PS3 audio implementation
+
+A native sound driver has been implemented using the PSL1GHT `libaudio` interface.
+
+It replaces the silent PS3 null-audio backend with a software mixer running on the PPU.
+
+Implemented functionality includes:
+
+- Native stereo audio output at 48 kHz.
+- PCM sound-effect playback.
+- IMA ADPCM decoding.
+- Multiple simultaneous sound voices.
+- Looping and positional sound effects.
+- Stereo panning and distance attenuation.
+- Decoder-backed streamed audio.
+- WAV, MP3, Vorbis and Opus streaming support.
+- Soundtrack music playback.
+- Triggered music support.
+- RoQ cinematic companion audio.
+
+**MP3 playback**
+
+The MP3 codec uses minimp3 instead of the previous libmad implementation.
+
+The PS3 implementation includes additional handling for:
+
+- Stream-buffer refilling.
+- MP3 frame synchronization.
+- Decoder recovery after invalid frames.
+- Corrupted or incomplete input data.
+- Stream position and decoder state management.
+
+This addresses the static and white-noise playback problem encountered during earlier PS3 audio testing.
+
+A diagnostic audio test-tone command is also available:
+
+```text
+ps3audiotest 1
+ps3audiotest 0
+```
+
+The first command enables a diagnostic tone, while the second restores normal game audio.
+
+### 8. Independent Allied Assault, Spearhead and Breakthrough packages
+
+The build system produces three independent PS3 executables and packages.
+
+| Game | PS3 TITLE_ID | Target game | Data directory |
+|---|---|---:|---|
+| Allied Assault | `OMOHAA020` | 0 | `main` |
+| Breakthrough | `OMOHAB020` | 2 | `maintt` |
+| Spearhead | `OMOHAS020` | 1 | `mainta` |
+
+Each title is compiled separately with its own CMake build configuration, application ID and default target game.
+
+**Expansion data separation**
+
+Each expansion receives its required files in its own package's `USRDIR`:
+
+```text
+Breakthrough:
+ /dev_hdd0/game/OMOHAB020/USRDIR/maintt/
+
+Spearhead:
+ /dev_hdd0/game/OMOHAS020/USRDIR/mainta/
+```
+
+The expansion executables can also access shared Allied Assault base-game assets from:
+
+```text
+/dev_hdd0/game/OMOHAA020/USRDIR/main/
+```
+
+This avoids unnecessarily duplicating the base game's archives in the expansion packages.
+
+**Independent writable directories**
+
+Each title maintains its own configuration, savegames, screenshots, state files and runtime logs under its own application directory.
+
+This prevents the expansions from sharing writable configuration and save data unintentionally.
+
+More information: [`docs/PS3_MULTI_TITLE_PACKAGING.md`](docs/PS3_MULTI_TITLE_PACKAGING.md).
+
+### 9. Automated PKG generation
+
+The repository includes a PS3 packaging script:
+
+`make_ps3_pkg.sh`
+
+It automates:
+
+- ELF stripping.
+- SPRX linking.
+- EBOOT.BIN generation.
+- PARAM.SFO creation.
+- PS3 PKG generation.
+- Optional GNPDRM package finalization.
+
+When `package_finalize` is available, both standard `.pkg` and finalized `.gnpdrm.pkg` variants can be produced.
+
+The workflow generates packages for all three game titles.
+
+### 10. XMB customization
+
+Optional PlayStation 3 XMB assets can be supplied through:
+
+```text
+assets/xmb/
+```
+
+The packaging script accepts the contents of this directory without requiring a fixed set of source filenames.
+
+Recognized PS3 assets receive the appropriate handling:
+
+| Filename | Purpose |
+|---|---|
+| `ICON0.PNG` | XMB application icon |
+| `PIC1.PNG` | XMB background |
+| `SND0.AT3` | XMB hover sound |
+
+The packaging script handles PNG resizing for the expected PS3 dimensions and validates the ATRAC audio structure before installing `SND0.AT3`.
+
+Other supplied files are copied to the package root unchanged. The directory's `README.md` is excluded from runtime content.
+
+### 11. Automated Linux build system
+
+The repository contains a dedicated GitHub Actions workflow:
+
+`.github/workflows/ps3-build.yml`
+
+The workflow builds the PS3 binaries and packages on Linux using Ubuntu 24.04 runners.
+
+Implemented CI features include:
+
+- Pinned PS3DEV/PSL1GHT Linux toolchain.
+- Toolchain checksum verification.
+- Persistent host dependency image.
+- Cached extracted PS3 development environment.
+- Persistent compiler cache using ccache.
+- Three independent cached CMake/Ninja build directories.
+- Source-hash-based incremental rebuild detection.
+- Separate executable linking for all three titles.
+- Automated expansion-path and package-staging tests.
+- Aim-assist mathematical regression tests.
+- Renderer memory regression tests.
+- Shader-cache validation.
+- PKG existence and integrity checks.
+
+Unchanged source files can reuse previously compiled objects across successive workflow executions.
+
+The workflow supports pushes, pull requests and manual execution.
+
+It also supports a manually enabled experimental SPU audio build option, which is disabled by default.
+
+---
+
+## Repository layout
+
+```text
+iopenmohaa-ps3/
+│
+├── .github/
+│   ├── docker/
+│   │   └── ps3-builder.Dockerfile
+│   └── workflows/
+│       └── ps3-build.yml
+│
+├── assets/
+│   ├── ps3_usrdir/
+│   │   ├── main/
+│   │   │   ├── autoexec.cfg
+│   │   │   └── scripts/
+│   │   ├── mainta/
+│   │   │   ├── autoexec.cfg
+│   │   │   └── scripts/
+│   │   └── maintt/
+│   │       ├── autoexec.cfg
+│   │       └── scripts/
+│   │
+│   └── xmb/
+│
+├── cmake/
+│   └── ps3-psl1ght.cmake
+│
+├── code/
+│   ├── gl/
+│   ├── input/
+│   ├── renderergl1/
+│   ├── sys/
+│   └── client/
+│
+├── docs/
+│   ├── PS3_AIM_ASSIST.md
+│   ├── PS3_MULTI_TITLE_PACKAGING.md
+│   └── PS3_SHADER_CACHE.md
+│
+├── tests/
+│   ├── test_ps3_aim_assist_math.c
+│   ├── test_ps3_expansion_loading.py
+│   ├── test_ps3_multi_title_config.py
+│   ├── test_ps3_renderer_memory.py
+│   └── test_ps3_shader_cache.py
+│
+├── tools/
+│   ├── ps3-debug/
+│   ├── ps3_shader_cache.py
+│   ├── ps3_shader_cache_from_pk3.py
+│   └── stage_ps3_title_usrdir.sh
+│
+├── make_ps3_pkg.sh
+└── CMakeLists.txt
+```
+
+---
+
+## Building
+
+### Requirements
+
+- Linux x86-64.
+- PS3DEV and PSL1GHT development environment.
+- PowerPC PPU GCC/G++ compiler.
+- PS3 RSX/GCM development headers and libraries.
+- CMake and Ninja.
+- Bison and Flex.
+- Python 3.
+- Required host development libraries and packaging utilities.
+
+The repository's GitHub Actions workflow prepares the required Linux build dependencies and PS3 toolchain automatically.
+
+### Manual compilation
+
+Export the PS3 toolchain environment:
+
+```bash
+export PS3DEV=/path/to/ps3dev
+export PSL1GHT="$PS3DEV"
+```
+
+Example configuration for Allied Assault:
+
+```bash
+cmake -S . -B build-ps3-OMOHAA020 -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/ps3-psl1ght.cmake \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DOPENMOHAA_PS3_APPID=OMOHAA020 \
+  -DOPENMOHAA_PS3_DATA_APPID=OMOHAA020 \
+  -DOPENMOHAA_PS3_TARGET_GAME=0 \
+  -DBUILD_SERVER=OFF \
+  -DBUILD_CLIENT=ON \
+  -DBUILD_RENDERER_GL2=OFF \
+  -DBUILD_GAME_LIBRARIES=OFF \
+  -DBUILD_GAME_QVMS=OFF \
+  -DUSE_RENDERER_DLOPEN=OFF \
+  -DUSE_OPENAL=OFF \
+  -DUSE_HTTP=OFF \
+  -DUSE_FREETYPE=OFF \
+  -DUSE_INTERNAL_LIBS=ON \
+  -DUSE_INTERNAL_SDL=OFF
+```
+
+Compile and link the PS3 executable:
+
+```bash
+cmake --build build-ps3-OMOHAA020 --parallel 2
+
+cmake --build build-ps3-OMOHAA020 \
+  --target ps3_self \
+  --parallel 2
+```
+
+The resulting executable is:
+
+```text
+build-ps3-OMOHAA020/EBOOT.BIN
+```
+
+For the expansions, create separate build directories and change the application ID and target game:
+
+| Game | `OPENMOHAA_PS3_APPID` | `OPENMOHAA_PS3_TARGET_GAME` |
+|---|---|---:|
+| Allied Assault | `OMOHAA020` | 0 |
+| Breakthrough | `OMOHAB020` | 2 |
+| Spearhead | `OMOHAS020` | 1 |
+
+Keep `OPENMOHAA_PS3_DATA_APPID=OMOHAA020` for all three builds so the expansion executables use the shared Allied Assault data installation.
+
+For normal development, the recommended approach is to use the automated GitHub Actions workflow, which handles all three configurations and their respective packages.
+
+---
+
+## Game data and installation
+
+Original game data is not distributed by this repository.
+
+Supply game data from your own legally acquired copy of Medal of Honor: Allied Assault and its expansions.
+
+The expected base-game installation root is:
+
+```text
+/dev_hdd0/game/OMOHAA020/USRDIR/main/
+```
+
+Expansion-specific data belongs in (yes, this is intentional):
+
+```text
+/dev_hdd0/game/OMOHAA020/USRDIR/maintt/
+/dev_hdd0/game/OMOHAA020/USRDIR/mainta/
+```
+
+Install the appropriate PKG using the PS3 package installer.
+
+Keep the base Allied Assault installation available when running either expansion.
+
+---
+
+## Testing and current limitations
+
+GitHub Actions validates compilation, executable linking, automated regression tests, package staging and PKG generation.
+
+The integrated three-title build was validated by GitHub Actions workflow run **#549**.
+
+However, a successful CI build does not guarantee complete gameplay stability on physical hardware.
+
+The following areas remain under active investigation:
+
+- Overall frame rate and gameplay performance.
+- PPU and RSX memory consumption during extended gameplay.
+- Stability during manual saves and automatic checkpoint saves.
+- Stability when transitioning between levels.
+- Expansion loading and rendering consistency.
+- BSP streaming behavior on physical hardware.
+- Aim-assist behavior across all three campaigns.
+- Long-session memory usage and resource cleanup.
+
+The goal is to improve stability and performance on the PS3's limited available system and graphics memory without compromising the original game's behavior.
+
+---
+
+## Experimental development
+
+The normal build retains the `ps3gl` renderer and PPU-based native audio mixer.
+
+An optional SPUKit-backed audio-mixing path is available for experimental builds. It is disabled by default and falls back to PPU mixing when unsupported conditions are encountered.
+
+RSXKit is present as an experimental integration dependency, but it does not replace the current production renderer. A complete renderer replacement would require a separate GL1 compatibility implementation and substantial rendering and lifecycle changes.
+
+Experimental integration notes:
+
+[`PS3_EXPERIMENTAL_RSXKIT_SPUKIT.md`](PS3_EXPERIMENTAL_RSXKIT_SPUKIT.md)
+
+---
+
+## Acknowledgements
+
+- [OpenMoHAA](https://github.com/openmoh/openmohaa) — original engine and game compatibility.
+- [ioQuake3-PS3](https://github.com) — PS3 platform and RSX implementation reference.
+- ioRTCW-PS3 — additional PS3 platform and rendering reference.
+- [PSL1GHT](https://github.com/ps3dev/PSL1GHT) — open-source PS3 development environment.
+- [PS3DEV](https://github.com/ps3dev) — PS3 development toolchain.
+
+## Disclaimer
+
+This is an independent, community-developed port. It is not affiliated with or endorsed by Electronic Arts or the original Medal of Honor developers.
+
+All original game assets must be obtained and supplied by the user.
+
+Link to the original readme for the openmohaa project, with stuff that still isn't implemented, can be found in https://github.com/kadorna1/iopenmohaa-ps3/blob/main/README_ORIGINAL.md
