@@ -524,7 +524,6 @@ functions exported to the main executable
 
         /* Optional platform input assistance; appended to preserve existing offsets. */
         qboolean (*CG_AimAssist)(const vec3_t viewAngles, float *yawError, float *pitchError, float *targetWeight);
-        void (*CG_AimAssistNotify)(qboolean enabled);
 
     } clientGameExport_t;
 
