@@ -52,7 +52,7 @@ R_ToggleSmpFrame
 ====================
 */
 void R_InitNextFrame( void ) {
-	backEndData->commands.used = 0;
+	frontEndData->commands.used = 0;
 
 	r_firstSceneDrawSurf = 0;
 	r_firstSceneSpriteSurf = 0;
@@ -137,11 +137,11 @@ qboolean RE_AddPolyToScene(qhandle_t hShader, int numVerts, const polyVert_t* ve
 		return qfalse;
 	}
 
-	poly = &backEndData->polys[r_numpolys];
+	poly = &frontEndData->polys[r_numpolys];
 	poly->surfaceType = SF_POLY;
 	poly->hShader = hShader;
 	poly->numVerts = numVerts;
-	poly->verts = &backEndData->polyVerts[r_numpolyverts];
+	poly->verts = &frontEndData->polyVerts[r_numpolyverts];
 	poly->renderfx = renderfx;
 
 	Com_Memcpy(poly->verts, verts, sizeof(polyVert_t) * numVerts);
@@ -188,11 +188,11 @@ void RE_AddTerrainMarkToScene(int iTerrainIndex, qhandle_t hShader, int numVerts
         return;
     }
 
-    terMark = &backEndData->terMarks[r_numtermarks];
+    terMark = &frontEndData->terMarks[r_numtermarks];
     terMark->surfaceType = hShader;
     terMark->iIndex = iTerrainIndex;
     terMark->numVerts = numVerts;
-    terMark->verts = &backEndData->polyVerts[r_numpolyverts];
+    terMark->verts = &frontEndData->polyVerts[r_numpolyverts];
     memcpy(terMark->verts, verts, sizeof(polyVert_t) * numVerts);
 
     r_numtermarks++;
@@ -210,8 +210,8 @@ refEntity_t* RE_GetRenderEntity(int entityNumber) {
     int i;
 
     for (i = 0; i < r_numentities; i++) {
-        if (backEndData->entities[i].e.entityNumber == entityNumber) {
-            return &backEndData->entities[i].e;
+        if (frontEndData->entities[i].e.entityNumber == entityNumber) {
+            return &frontEndData->entities[i].e;
         }
     }
 
@@ -236,9 +236,9 @@ void RE_AddRefEntityToScene( const refEntity_t *ent, int parentEntityNumber) {
 		ri.Error( ERR_DROP, "RE_AddRefEntityToScene: bad reType %i", ent->reType );
 	}
 
-	backEndData->entities[r_numentities].e = *ent;
-	backEndData->entities[r_numentities].bLightGridCalculated = qfalse;
-	backEndData->entities[r_numentities].sphereCalculated = qfalse;
+	frontEndData->entities[r_numentities].e = *ent;
+	frontEndData->entities[r_numentities].bLightGridCalculated = qfalse;
+	frontEndData->entities[r_numentities].sphereCalculated = qfalse;
 
 	if (parentEntityNumber != ENTITYNUM_NONE)
 	{
@@ -249,20 +249,20 @@ void RE_AddRefEntityToScene( const refEntity_t *ent, int parentEntityNumber) {
 		//
 		for (i = r_firstSceneEntity; i < r_numentities; i++)
 		{
-			if (backEndData->entities[i].e.entityNumber == parentEntityNumber)
+			if (frontEndData->entities[i].e.entityNumber == parentEntityNumber)
 			{
-				backEndData->entities[r_numentities].e.parentEntity = i - r_firstSceneEntity;
+				frontEndData->entities[r_numentities].e.parentEntity = i - r_firstSceneEntity;
 				break;
 			}
 		}
 
 		if (i == r_numentities) {
-			backEndData->entities[i].e.parentEntity = ENTITYNUM_NONE;
+			frontEndData->entities[i].e.parentEntity = ENTITYNUM_NONE;
 		}
 	}
 	else
 	{
-		backEndData->entities[r_numentities].e.parentEntity = ENTITYNUM_NONE;
+		frontEndData->entities[r_numentities].e.parentEntity = ENTITYNUM_NONE;
 	}
 
 	r_numentities++;
@@ -280,7 +280,7 @@ void RE_AddRefSpriteToScene(const refEntity_t* ent) {
 		return;
 	}
 
-	spr = &backEndData->sprites[r_numsprites];
+	spr = &frontEndData->sprites[r_numsprites];
 	VectorCopy(ent->origin, spr->origin);
 	spr->surftype = SF_SPRITE;
     spr->hModel = ent->hModel;
@@ -314,7 +314,7 @@ void RE_AddDynamicLightToScene( const vec3_t org, float intensity, float r, floa
 	if ( intensity <= 0 ) {
 		return;
 	}
-	dl = &backEndData->dlights[r_numdlights++];
+	dl = &frontEndData->dlights[r_numdlights++];
 	VectorCopy (org, dl->origin);
 	dl->radius = intensity;
 	dl->color[0] = r;
@@ -515,27 +515,27 @@ void RE_RenderScene( const refdef_t *fd ) {
 	tr.refdef.floatTime = tr.refdef.time * 0.001f;
 
 	tr.refdef.numDrawSurfs = r_firstSceneDrawSurf;
-	tr.refdef.drawSurfs = backEndData->drawSurfs;
+	tr.refdef.drawSurfs = frontEndData->drawSurfs;
 
     tr.refdef.numSpriteSurfs = r_firstSceneSpriteSurf;
-    tr.refdef.spriteSurfs = backEndData->spriteSurfs;
+    tr.refdef.spriteSurfs = frontEndData->spriteSurfs;
 
 	tr.refdef.num_entities = r_numentities - r_firstSceneEntity;
-	tr.refdef.entities = &backEndData->entities[r_firstSceneEntity];
+	tr.refdef.entities = &frontEndData->entities[r_firstSceneEntity];
 
 	tr.refdef.num_sprites = r_numsprites - r_firstSceneSprite;
-	tr.refdef.sprites = &backEndData->sprites[r_firstSceneSprite];
+	tr.refdef.sprites = &frontEndData->sprites[r_firstSceneSprite];
 
 	tr.refdef.num_dlights = r_numdlights - r_firstSceneDlight;
-	tr.refdef.dlights = &backEndData->dlights[r_firstSceneDlight];
+	tr.refdef.dlights = &frontEndData->dlights[r_firstSceneDlight];
 
 	tr.refdef.numTerMarks = r_numtermarks - r_firstSceneTerMark;
-	tr.refdef.terMarks = &backEndData->terMarks[r_firstSceneTerMark];
+	tr.refdef.terMarks = &frontEndData->terMarks[r_firstSceneTerMark];
 
 	tr.refdef.numPolys = r_numpolys - r_firstScenePoly;
-	tr.refdef.polys = &backEndData->polys[r_firstScenePoly];
+	tr.refdef.polys = &frontEndData->polys[r_firstScenePoly];
 
-	backEndData->staticModelData = tr.refdef.staticModelData;
+	frontEndData->staticModelData = tr.refdef.staticModelData;
 
 	// turn off dynamic lighting globally by clearing all the
 	// dlights if it needs to be disabled or if vertex lighting is enabled
