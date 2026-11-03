@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <math.h>
 #include "client.h"
 #include "cl_ui.h"
+#include "../uilib/ui_public.h"
 
 unsigned	frame_msec;
 int			old_com_frameTime;
@@ -805,8 +806,8 @@ void CL_FinishMove( usercmd_t *cmd ) {
 =================
 CL_PS3ToggleAimAssist
 
-Called from the physical DS3 L2 key-down edge. This deliberately does not
-depend on the saved binding for K_JOY7, so user configs cannot bypass it.
+Called from the physical DS3 R1 key-down edge. This deliberately does not
+depend on the saved binding for K_JOY6, so user configs cannot bypass it.
 =================
 */
 qboolean CL_PS3ToggleAimAssist(void)
@@ -823,9 +824,9 @@ qboolean CL_PS3ToggleAimAssist(void)
     enabled = !Cvar_VariableIntegerValue("ps3_aim_assist");
     Cvar_Set("ps3_aim_assist", enabled ? "1" : "0");
 
-    if (cge && cge->CG_AimAssistNotify) {
-        cge->CG_AimAssistNotify(enabled);
-    }
+    /* Match the same center-print route used by svc_centerprint/Game Saved:
+     * CL_ParseCenterprint -> UI_UpdateCenterPrint. */
+    UI_UpdateCenterPrint(enabled ? "AIM ASSIST ON" : "AIM ASSIST OFF", 1.0f);
 
     Com_Printf("PS3 aim assist: %s\n", enabled ? "ON" : "OFF");
     return qtrue;
