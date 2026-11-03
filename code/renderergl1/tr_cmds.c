@@ -20,6 +20,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 #include "tr_local.h"
+#if defined(__PS3__)
+#include "../sys/ps3_platform.h"
+#endif
 
 static backEndCounters_t pc_save;
 
@@ -111,10 +114,19 @@ void R_IssueRenderCommands( qboolean runPerformanceCounters ) {
 		R_PerformanceCounters();
 	}
 
-	// actually start the commands going
+	// The PS3 backend remains synchronous until terrain, skeletal, static
+	// model and swipe scratch data have independent frame storage. Measure the
+	// complete backend here so real mission traces identify the limiting phase.
 	if ( !r_skipBackEnd->integer ) {
-		// let it start on the new batch
+#if defined(__PS3__)
+		unsigned long long backendStart = PS3_ProfTick();
+#endif
 		RB_ExecuteRenderCommands( cmdList->cmds );
+#if defined(__PS3__)
+		PS3_ProfAdd(PS3_PROF_BACKEND, PS3_ProfTick() - backendStart);
+		if (runPerformanceCounters)
+			PS3_ProfReportFrame();
+#endif
 	}
 }
 
