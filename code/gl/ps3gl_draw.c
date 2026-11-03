@@ -204,6 +204,7 @@ static void ps3gl_DrawElements_(GLenum mode, GLsizei count, GLenum type,
             (!cp  || rsxAddressToOffset((void *)cp,  &off_col) == 0);
 
         if (direct) {
+            ps3gl_stats.direct_draws++;
             /* Bind Q3's arrays straight from main memory — zero PPE copy. */
             rsxBindVertexArrayAttrib(ctx, GCM_VERTEX_ATTRIB_POS, 0,
                                      off_pos, vs,
@@ -231,6 +232,9 @@ static void ps3gl_DrawElements_(GLenum mode, GLsizei count, GLenum type,
             uint32_t vb_offset;
             ps3gl_vertex_t *verts = ps3gl_vring_alloc(num_verts, &vb_offset);
             if (!verts) return;
+            ps3gl_stats.copy_draws++;
+            ps3gl_stats.copy_verts += (unsigned)num_verts;
+            ps3gl_stats.copy_bytes += (unsigned)num_verts * (unsigned)PS3GL_VERTEX_SIZE;
 
             const uint32_t imm_c = ps3gl.imm.color;
 
