@@ -31,25 +31,35 @@ void PS3_ProfSyscall(const char *module, const intptr_t *args, unsigned long lon
 void PS3_ProfReportFrame(void)
 {
     static unsigned frames;
+    static unsigned long long windowStart;
     unsigned long long sample[PS3_PROF_COUNT];
+    unsigned long long now;
     double divisor;
+    double fps;
     unsigned i;
 
-    if (++frames < PS3_PROF_REPORT_FRAMES)
+    if (frames == 0)
+        windowStart = PS3_ProfTick();
+    ++frames;
+    if (frames < PS3_PROF_REPORT_FRAMES)
         return;
 
+    now = PS3_ProfTick();
     for (i = 0; i < PS3_PROF_COUNT; ++i) {
         sample[i] = ps3_prof_ticks[i];
         ps3_prof_ticks[i] = 0;
     }
 
     divisor = (double)frames * PS3_PPU_TICKS_PER_MS;
-    PS3_Logf("[fps] samples=%u smp=%d backend=%.2fms fence=%.2fms flip=%.2fms "
+    fps = (now > windowStart)
+        ? ((double)(frames - 1u) * 79800000.0 / (double)(now - windowStart))
+        : 0.0;
+    PS3_Logf("[fps] avg=%.1f samples=%u smp=%d backend=%.2fms fence=%.2fms flip=%.2fms "
              "shade=%.2fms draw=%.2fms vcopy=%.2fms surf=%.2fms anim=%.2fms "
              "bones=%.2fms colors=%.2fms tc=%.2fms "
              "draws=%u direct=%u copied=%u verts=%u copyKB=%u ringKB=%u dropped=%u "
              "texMB=%u texfail=%u",
-             frames, ps3_prof_smp,
+             fps, frames, ps3_prof_smp,
              sample[PS3_PROF_BACKEND] / divisor,
              sample[PS3_PROF_FENCEWAIT] / divisor,
              sample[PS3_PROF_FLIPWAIT] / divisor,
