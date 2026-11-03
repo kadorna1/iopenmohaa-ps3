@@ -102,7 +102,7 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
         self.assertIn("if (key == K_JOY6 && down", self.client_keys)
         self.assertNotIn("if (key == K_JOY7 && down", self.client_keys)
         self.assertIn('UI_UpdateCenterPrint(enabled ? "AIM ASSIST ON" : "AIM ASSIST OFF", 1.0f);', self.client_input)
-        self.assertIn("UI_UpdateCenterPrint(string, 1.0);", self.client_parse)
+        self.assertIn("UI_UpdateCenterPrint( string, 1.0 );", self.client_parse)
         self.assertNotIn("CG_AimAssistNotify", self.client_input)
         self.assertNotIn("CG_AimAssistNotify", self.cgame_public)
         self.assertNotIn("CG_DrawAimAssistStatus", self.cgame_drawtools)
