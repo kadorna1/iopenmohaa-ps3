@@ -881,7 +881,6 @@ clientGameExport_t *GetCGameAPI(void)
     cge.CG_EyeAngles                = CG_EyeAngles;
     cge.CG_SensitivityScale         = CG_SensitivityScale;
     cge.CG_AimAssist                 = CG_AimAssist;
-    cge.CG_AimAssistNotify           = CG_AimAssistNotify;
     cge.CG_RefreshHudDrawElements   = CG_RefreshHudDrawElements;
     cge.CG_HudDrawShader            = CG_HudDrawShader;
     cge.CG_HudDrawFont              = CG_HudDrawFont;
