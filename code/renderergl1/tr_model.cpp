@@ -756,7 +756,7 @@ void R_AddSkelSurfaces(trRefEntity_t *ent)
     R_UpdatePoseInternal(&ent->e);
 
     // don't add third_person objects if in a portal
-    personalModel = (ent->e.renderfx & RF_THIRD_PERSON) && !tr.viewParms.isPortal;
+    personalModel = (ent->e.renderfx & RF_THIRD_PERSON) && !backEnd.viewParms.isPortal;
 
     outbones = &TIKI_Skel_Bones[TIKI_Skel_Bones_Index];
 
@@ -803,13 +803,13 @@ void R_AddSkelSurfaces(trRefEntity_t *ent)
     }
 
     if (tiki->a->bIsCharacter) {
-        if (tr.viewParms.isPortal) {
+        if (backEnd.viewParms.isPortal) {
             ent->lodpercentage[1] = R_CalcLod(tiki_worldorigin, 92.f / ent->e.scale);
         } else {
             ent->lodpercentage[0] = R_CalcLod(tiki_worldorigin, 92.f / ent->e.scale);
         }
     } else {
-        if (tr.viewParms.isPortal) {
+        if (backEnd.viewParms.isPortal) {
             ent->lodpercentage[1] = R_CalcLod(tiki_worldorigin, radius / ent->e.scale);
         } else {
             ent->lodpercentage[0] = R_CalcLod(tiki_worldorigin, radius / ent->e.scale);
@@ -1830,7 +1830,7 @@ static float ProjectRadius(float r, const vec3_t location)
     separation      = Vector(tr.viewParms.ori.origin) - Vector(location);
     projectedRadius = separation.length();
 
-    return fabs(r) * (100.0 / tr.viewParms.fovX) / projectedRadius;
+    return fabs(r) * (100.0 / backEnd.viewParms.fovX) / projectedRadius;
 }
 
 /*
