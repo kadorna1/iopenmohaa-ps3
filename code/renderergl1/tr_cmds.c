@@ -477,6 +477,7 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 	glState.finishCalled = qfalse;
 
 	tr.frameCount++;
+	tr.smpFrame = tr.frameCount % SMP_FRAMES;
 	tr.frameSceneNum = 0;
 	g_nStaticSurfaces = 0;
 
