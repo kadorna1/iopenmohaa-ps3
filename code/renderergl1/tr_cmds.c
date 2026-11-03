@@ -317,6 +317,11 @@ void	R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 	cmd->drawSurfs = drawSurfs;
 	cmd->numDrawSurfs = numDrawSurfs;
+	cmd->frameCount = tr.frameCount;
+	cmd->smpFrame = tr.smpFrame;
+	cmd->portalRendered = tr.portalRendered;
+	cmd->skyRendered = tr.skyRendered;
+	cmd->farclip = tr.farclip;
 
 	cmd->refdef = tr.refdef;
 	cmd->viewParms = tr.viewParms;
@@ -340,6 +345,11 @@ void	R_AddSpriteSurfCmd(drawSurf_t* drawSurfs, int numDrawSurfs) {
 
     cmd->drawSurfs = drawSurfs;
     cmd->numDrawSurfs = numDrawSurfs;
+    cmd->frameCount = tr.frameCount;
+    cmd->smpFrame = tr.smpFrame;
+    cmd->portalRendered = tr.portalRendered;
+    cmd->skyRendered = tr.skyRendered;
+    cmd->farclip = tr.farclip;
 
     cmd->refdef = tr.refdef;
     cmd->viewParms = tr.viewParms;
