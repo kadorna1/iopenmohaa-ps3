@@ -77,12 +77,12 @@ void R_InitCommandBuffers(backEndData_t *secondFrame, qboolean enableSmp)
 	if (enableSmp && secondFrame) {
 		if (GLimp_SpawnRenderThread(RB_RenderThread)) {
 			renderThreadActive = qtrue;
-			ri.Printf(PRINT_ALL, "[smp] double-buffered renderer backend enabled\\n");
+			ri.Printf(PRINT_ALL, "[smp] double-buffered renderer backend enabled\n");
 			return;
 		}
-		ri.Printf(PRINT_WARNING, "[smp] renderer worker unavailable; using synchronous backend\\n");
+		ri.Printf(PRINT_WARNING, "[smp] renderer worker unavailable; using synchronous backend\n");
 	} else if (enableSmp) {
-		ri.Printf(PRINT_WARNING, "[smp] second frame buffer unavailable; using synchronous backend\\n");
+		ri.Printf(PRINT_WARNING, "[smp] second frame buffer unavailable; using synchronous backend\n");
 	}
 #else
 	(void)secondFrame;
@@ -270,7 +270,7 @@ make sure there is enough command space
 void *R_GetCommandBufferReserved( int bytes, int reservedBytes ) {
 	renderCommandList_t	*cmdList;
 
-	cmdList = &backEndData->commands;
+	cmdList = &frontEndData->commands;
 	bytes = PAD(bytes, sizeof(void *));
 
 	// always leave room for the end of list command
