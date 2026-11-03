@@ -20,94 +20,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 #include "tr_local.h"
-#if defined(__PS3__)
-#include "../sys/ps3_platform.h"
-#endif
 
 static backEndCounters_t pc_save;
-
-volatile qboolean renderThreadActive = qfalse;
-volatile renderCommandList_t *renderCommandList = NULL;
-
-#if defined(__PS3__)
-typedef struct {
-	backEndData_t *frameData;
-	const void *commands;
-	qboolean reportFrame;
-} ps3RenderJob_t;
-
-static backEndData_t *s_frameData[2];
-static unsigned s_frontFrame;
-static ps3RenderJob_t s_renderJob;
-
-static void RB_ExecuteRenderCommandsTimed(const void *commands)
-{
-	unsigned long long start = PS3_ProfTick();
-	RB_ExecuteRenderCommands(commands);
-	PS3_ProfAdd(PS3_PROF_BACKEND, PS3_ProfTick() - start);
-}
-
-static void RB_RenderThread(void)
-{
-	ps3RenderJob_t *job;
-
-	while ((job = (ps3RenderJob_t *)GLimp_RendererSleep()) != NULL) {
-		/* The game thread owns frontEndData; only this worker changes the
-		 * backend pointer while executing the frame's immutable command list. */
-		backEndData = job->frameData;
-		renderCommandList = &job->frameData->commands;
-		RB_ExecuteRenderCommandsTimed(job->commands);
-		if (job->reportFrame)
-			PS3_ProfReportFrame();
-	}
-}
-#endif
-
-void R_InitCommandBuffers(backEndData_t *secondFrame, qboolean enableSmp)
-{
-	renderThreadActive = qfalse;
-	renderCommandList = NULL;
-	frontEndData = backEndData;
-
-#if defined(__PS3__)
-	s_frameData[0] = backEndData;
-	s_frameData[1] = secondFrame;
-	s_frontFrame = 0;
-
-	if (enableSmp && secondFrame) {
-		if (GLimp_SpawnRenderThread(RB_RenderThread)) {
-			renderThreadActive = qtrue;
-			ri.Printf(PRINT_ALL, "[smp] double-buffered renderer backend enabled\n");
-			return;
-		}
-		ri.Printf(PRINT_WARNING, "[smp] renderer worker unavailable; using synchronous backend\n");
-	} else if (enableSmp) {
-		ri.Printf(PRINT_WARNING, "[smp] second frame buffer unavailable; using synchronous backend\n");
-	}
-#else
-	(void)secondFrame;
-	(void)enableSmp;
-#endif
-}
-
-void R_SyncRenderThread(void)
-{
-#if defined(__PS3__)
-	if (renderThreadActive)
-		GLimp_FrontEndSleep();
-#endif
-}
-
-void R_ShutdownCommandBuffers(void)
-{
-#if defined(__PS3__)
-	if (renderThreadActive)
-		GLimp_ShutdownRenderThread();
-#endif
-	renderThreadActive = qfalse;
-	renderCommandList = NULL;
-	frontEndData = backEndData;
-}
 
 /*
 =====================
@@ -184,65 +98,24 @@ R_IssueRenderCommands
 */
 void R_IssueRenderCommands( qboolean runPerformanceCounters ) {
 	renderCommandList_t	*cmdList;
-	backEndData_t *frameData;
 
-	frameData = frontEndData;
-	cmdList = &frameData->commands;
+	cmdList = &backEndData->commands;
 	assert(cmdList);
-	/* Add an end-of-list command while this frame's buffer is still owned by
-	 * the front end. The worker receives the immutable command stream below. */
+	// add an end-of-list command
 	*(int *)(cmdList->cmds + cmdList->used) = RC_END_OF_LIST;
-	cmdList->used = 0;
-	renderCommandList = cmdList;
 
-#if defined(__PS3__)
-	/* Counters describe the previous submitted frame. Wait for that backend
-	 * before reading/resetting its counters, then submit this frame. */
-	if (renderThreadActive && runPerformanceCounters)
-		GLimp_FrontEndSleep();
-#endif
+	// clear it out, in case this is a sync and not a buffer flip
+	cmdList->used = 0;
+
 	if ( runPerformanceCounters ) {
 		R_PerformanceCounters();
 	}
 
+	// actually start the commands going
 	if ( !r_skipBackEnd->integer ) {
-#if defined(__PS3__)
-		if (renderThreadActive) {
-			s_renderJob.frameData = frameData;
-			s_renderJob.commands = cmdList->cmds;
-			s_renderJob.reportFrame = runPerformanceCounters;
-			GLimp_WakeRenderer(&s_renderJob);
-
-			if (runPerformanceCounters) {
-				/* RE_EndFrame will now reset/build the next frame in the
-				 * other storage block while this one is being rendered. */
-				s_frontFrame ^= 1u;
-				frontEndData = s_frameData[s_frontFrame];
-			} else {
-				/* R_IssuePendingRenderCommands is a synchronization point:
-				 * preserve this frame's scene storage and wait for the batch. */
-				GLimp_FrontEndSleep();
-			}
-		} else
-#endif
-		{
-			backEndData = frameData;
-#if defined(__PS3__)
-			RB_ExecuteRenderCommandsTimed(cmdList->cmds);
-			if (runPerformanceCounters)
-				PS3_ProfReportFrame();
-#else
-			RB_ExecuteRenderCommands(cmdList->cmds);
-#endif
-		}
+		// let it start on the new batch
+		RB_ExecuteRenderCommands( cmdList->cmds );
 	}
-#if defined(__PS3__)
-	else if (renderThreadActive && !runPerformanceCounters) {
-		/* Even a skipped sync batch must not let the front end outrun a
-		 * previously queued backend frame. */
-		GLimp_FrontEndSleep();
-	}
-#endif
 }
 
 
@@ -270,7 +143,7 @@ make sure there is enough command space
 void *R_GetCommandBufferReserved( int bytes, int reservedBytes ) {
 	renderCommandList_t	*cmdList;
 
-	cmdList = &frontEndData->commands;
+	cmdList = &backEndData->commands;
 	bytes = PAD(bytes, sizeof(void *));
 
 	// always leave room for the end of list command
@@ -317,11 +190,6 @@ void	R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 	cmd->drawSurfs = drawSurfs;
 	cmd->numDrawSurfs = numDrawSurfs;
-	cmd->frameCount = tr.frameCount;
-	cmd->smpFrame = tr.smpFrame;
-	cmd->portalRendered = tr.portalRendered;
-	cmd->skyRendered = tr.skyRendered;
-	cmd->farclip = tr.farclip;
 
 	cmd->refdef = tr.refdef;
 	cmd->viewParms = tr.viewParms;
@@ -345,11 +213,6 @@ void	R_AddSpriteSurfCmd(drawSurf_t* drawSurfs, int numDrawSurfs) {
 
     cmd->drawSurfs = drawSurfs;
     cmd->numDrawSurfs = numDrawSurfs;
-    cmd->frameCount = tr.frameCount;
-    cmd->smpFrame = tr.smpFrame;
-    cmd->portalRendered = tr.portalRendered;
-    cmd->skyRendered = tr.skyRendered;
-    cmd->farclip = tr.farclip;
 
     cmd->refdef = tr.refdef;
     cmd->viewParms = tr.viewParms;
@@ -477,7 +340,6 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 	glState.finishCalled = qfalse;
 
 	tr.frameCount++;
-	tr.smpFrame = tr.frameCount % SMP_FRAMES;
 	tr.frameSceneNum = 0;
 	g_nStaticSurfaces = 0;
 
