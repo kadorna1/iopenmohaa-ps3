@@ -388,6 +388,54 @@ static void DrawMultitextured( shaderCommands_t *input, int stage ) {
 
 	GL_State( pStage->stateBits );
 
+	/* The PS3GL path has a single-texture ADD shader but does not have a
+	 * dual-texture ADD program. Reproduce fixed-function GL_ADD as two
+	 * depth-coherent passes instead of silently selecting dual MODULATE. */
+	if (pStage->multitextureEnv == GL_ADD) {
+		unsigned long additiveState = pStage->stateBits;
+
+		/* Disable unit 1 before either draw so ps3gl selects a single-texture
+		 * fragment program and the secondary coordinates cannot leak. */
+		GL_SelectTexture(1);
+		qglDisable(GL_TEXTURE_2D);
+		qglDisableClientState(GL_TEXTURE_COORD_ARRAY);
+		GL_SelectTexture(0);
+
+		if (r_lightmap->integer && pStage->bundle[1].isLightmap) {
+			GL_TexEnv(GL_REPLACE);
+			R_BindAnimatedImage(&pStage->bundle[1]);
+			R_DrawElements(input->numIndexes, input->indexes);
+			GL_TexEnv(GL_MODULATE);
+			return;
+		}
+
+		GL_TexEnv(GL_MODULATE);
+		qglTexCoordPointer(2, GL_FLOAT, 0, input->svars.texcoords[0]);
+		R_BindAnimatedImage(&pStage->bundle[0]);
+		GL_State(pStage->stateBits);
+		R_DrawElements(input->numIndexes, input->indexes);
+
+		/* Add the secondary map over the base. If the base pass wrote depth,
+		 * compare equal and suppress depth writes for the additive pass. */
+		additiveState &= ~(GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS | GLS_DEPTHMASK_TRUE);
+		additiveState |= GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE;
+		if (pStage->stateBits & GLS_DEPTHMASK_TRUE)
+			additiveState |= GLS_DEPTHFUNC_EQUAL;
+
+		GL_State(additiveState);
+		GL_TexEnv(GL_MODULATE);
+		qglTexCoordPointer(2, GL_FLOAT, 0, input->svars.texcoords[1]);
+		if (!input->dlightMap || !pStage->bundle[1].isLightmap)
+			R_BindAnimatedImage(&pStage->bundle[1]);
+		else
+			GL_Bind(tr.dlightImages[input->dlightMap - 1]);
+		R_DrawElements(input->numIndexes, input->indexes);
+
+		GL_State(pStage->stateBits);
+		GL_TexEnv(GL_MODULATE);
+		return;
+	}
+
 	// this is an ugly hack to work around a GeForce driver
 	// bug with multitexture and clip planes
 	if ( backEnd.viewParms.isPortal ) {
