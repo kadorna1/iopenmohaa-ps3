@@ -1292,10 +1292,6 @@ typedef struct {
 	trRefEntity_t entity2D;	// currentEntity will point at this when doing 2D rendering
     int backEndMsec;
     float shaderStartTime;
-	int			frameCount;
-	qboolean	portalRendered;
-	qboolean	skyRendered;
-	int			farclip;
 } backEndState_t;
 
 /*
@@ -1871,9 +1867,6 @@ qboolean	GLimp_SpawnRenderThread( void (*function)( void ) );
 void		*GLimp_RendererSleep( void );
 void		GLimp_FrontEndSleep( void );
 void		GLimp_WakeRenderer( void *data );
-#if defined(__PS3__)
-void		GLimp_ShutdownRenderThread( void );
-#endif
 
 void		GLimp_LogComment( char *comment );
 
@@ -2415,11 +2408,6 @@ typedef struct {
 	viewParms_t	viewParms;
 	drawSurf_t *drawSurfs;
 	int		numDrawSurfs;
-	int		frameCount;
-	int		smpFrame;
-	qboolean	portalRendered;
-	qboolean	skyRendered;
-	int		farclip;
 } drawSurfsCommand_t;
 
 typedef struct {
@@ -2497,8 +2485,7 @@ extern	int		max_polys;
 extern	int		max_polyverts;
 extern	int		max_termarks;
 
-extern	backEndData_t	*backEndData;	// render-thread-owned frame data
-extern	backEndData_t	*frontEndData;	// game-thread-owned frame data
+extern	backEndData_t	*backEndData;	// the second one may not be allocated
 
 extern	volatile renderCommandList_t	*renderCommandList;
 
@@ -2511,7 +2498,7 @@ void R_AddSpriteSurfCmd( drawSurf_t* drawSurfs, int numDrawSurfs );
 void RB_ExecuteRenderCommands( const void *data );
 
 void R_SavePerformanceCounters(void);
-void R_InitCommandBuffers( backEndData_t *secondFrame, qboolean enableSmp );
+void R_InitCommandBuffers( void );
 void R_ShutdownCommandBuffers( void );
 
 void R_SyncRenderThread( void );
