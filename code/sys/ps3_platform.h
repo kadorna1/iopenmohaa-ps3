@@ -132,6 +132,7 @@ static inline unsigned long long PS3_ProfTick(void)
     return tb;
 }
 void PS3_ProfAdd(int slot, unsigned long long ticks);
+void PS3_ProfReportFrame(void);
 extern int ps3_prof_smp;     /* the render thread is up (set by ps3_glimp.c) */
 void PS3_PlatformPump(void);
 int PS3_PlatformRunning(void);
@@ -145,6 +146,10 @@ typedef struct {
     unsigned indices;       /* inline indices written to the command buffer */
     unsigned vring_peak;    /* bytes of the ring segment used */
     unsigned dropped;       /* draws dropped because the ring segment was full */
+    unsigned direct_draws;  /* vertex arrays read directly from IO-mapped XDR */
+    unsigned copy_draws;    /* vertex batches interleaved into the RSX ring */
+    unsigned copy_verts;    /* vertices copied into the ring */
+    unsigned copy_bytes;    /* bytes written into the ring for vertex batches */
 } ps3gl_stats_t;
 extern ps3gl_stats_t ps3gl_stats;
 extern unsigned ps3gl_tex_bytes;    /* RSX memory held by textures */
