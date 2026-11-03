@@ -22,7 +22,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_local.h"
 
 backEndData_t	*backEndData;
-backEndData_t	*frontEndData;
 backEndState_t	backEnd;
 
 
@@ -66,7 +65,7 @@ void GL_Bind( image_t *image ) {
 
 	if ( glState.currenttextures[glState.currenttmu] != texnum ) {
 		if (image) {
-			image->frameUsed = backEnd.frameCount;
+			image->frameUsed = tr.frameCount;
 		}
 		glState.currenttextures[glState.currenttmu] = texnum;
 		qglBindTexture (GL_TEXTURE_2D, texnum);
@@ -119,13 +118,13 @@ void GL_BindMultitexture( image_t *image0, GLuint env0, image_t *image1, GLuint 
 
 	if ( glState.currenttextures[1] != texnum1 ) {
 		GL_SelectTexture( 1 );
-		image1->frameUsed = backEnd.frameCount;
+		image1->frameUsed = tr.frameCount;
 		glState.currenttextures[1] = texnum1;
 		qglBindTexture( GL_TEXTURE_2D, texnum1 );
 	}
 	if ( glState.currenttextures[0] != texnum0 ) {
 		GL_SelectTexture( 0 );
-		image0->frameUsed = backEnd.frameCount;
+		image0->frameUsed = tr.frameCount;
 		glState.currenttextures[0] = texnum0;
 		qglBindTexture( GL_TEXTURE_2D, texnum0 );
 	}
@@ -633,7 +632,7 @@ void RB_BeginDrawingView (void) {
 
 	if (!( backEnd.refdef.rdflags & RDF_NOWORLDMODEL))
 	{
-		if ((backEnd.viewParms.farplane_distance && !backEnd.skyRendered && !backEnd.portalRendered) || backEnd.farclip)
+		if ((backEnd.viewParms.farplane_distance && !tr.skyRendered && !tr.portalRendered) || tr.farclip)
 		{
 			clearBits |= GL_COLOR_BUFFER_BIT;
 			qglClearColor(glState.fFogColor[0], glState.fFogColor[1], glState.fFogColor[2], glState.fFogColor[3]);
@@ -838,7 +837,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			}
 			else if (shader->needsLSpherical)
 			{
-				if (backEnd.refdef.rdflags & RDF_HUD)
+				if (tr.refdef.rdflags & RDF_HUD)
 				{
 					backEnd.currentSphere = &backEnd.hudSphere;
 					backEnd.hudSphere.TessFunction = 0;
@@ -1230,11 +1229,6 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 	backEnd.refdef = cmd->refdef;
 	backEnd.viewParms = cmd->viewParms;
-	backEnd.frameCount = cmd->frameCount;
-	backEnd.smpFrame = cmd->smpFrame;
-	backEnd.portalRendered = cmd->portalRendered;
-	backEnd.skyRendered = cmd->skyRendered;
-	backEnd.farclip = cmd->farclip;
 
 	RB_SetupFog();
 	RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs );
@@ -1261,11 +1255,6 @@ const void* RB_SpriteSurfs(const void* data) {
 
     backEnd.refdef = cmd->refdef;
     backEnd.viewParms = cmd->viewParms;
-    backEnd.frameCount = cmd->frameCount;
-    backEnd.smpFrame = cmd->smpFrame;
-    backEnd.portalRendered = cmd->portalRendered;
-    backEnd.skyRendered = cmd->skyRendered;
-    backEnd.farclip = cmd->farclip;
 	
 	RB_SetupFog();
     RB_RenderSpriteSurfList(cmd->drawSurfs, cmd->numDrawSurfs);
