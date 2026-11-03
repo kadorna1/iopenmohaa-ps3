@@ -1292,6 +1292,10 @@ typedef struct {
 	trRefEntity_t entity2D;	// currentEntity will point at this when doing 2D rendering
     int backEndMsec;
     float shaderStartTime;
+	int			frameCount;
+	qboolean	portalRendered;
+	qboolean	skyRendered;
+	int			farclip;
 } backEndState_t;
 
 /*
@@ -2411,6 +2415,11 @@ typedef struct {
 	viewParms_t	viewParms;
 	drawSurf_t *drawSurfs;
 	int		numDrawSurfs;
+	int		frameCount;
+	int		smpFrame;
+	qboolean	portalRendered;
+	qboolean	skyRendered;
+	int		farclip;
 } drawSurfsCommand_t;
 
 typedef struct {
