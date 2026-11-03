@@ -113,6 +113,7 @@ cvar_t	*r_primitives;
 cvar_t	*r_largemap;
 cvar_t	*r_textureDetails;
 cvar_t	*r_texturebits;
+cvar_t	*r_smp;
 
 cvar_t	*r_drawBuffer;
 cvar_t  *r_glDriver;
@@ -1360,6 +1361,11 @@ void R_Register( void )
 #else
 	r_texturebits = ri.Cvar_Get( "r_texturebits", "0", CVAR_ARCHIVE | CVAR_LATCH );
 #endif
+#if defined(__PS3__)
+	r_smp = ri.Cvar_Get( "r_smp", "1", CVAR_ARCHIVE | CVAR_LATCH );
+#else
+	r_smp = ri.Cvar_Get( "r_smp", "0", CVAR_ARCHIVE | CVAR_LATCH );
+#endif
 	r_colorbits = ri.Cvar_Get( "r_colorbits", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_stereo = ri.Cvar_Get( "r_stereo", "0", CVAR_ARCHIVE | CVAR_LATCH );
 #ifdef __linux__
@@ -1648,6 +1654,10 @@ void R_Init( void ) {
 	int	err;
 	int i;
 	byte *ptr;
+	size_t frameDataSize;
+	backEndData_t *secondBackEndData;
+
+	secondBackEndData = NULL;
 
 	PS3_RENDER_TRACE("RENDERER: R_Init entered");
 	ri.Printf( PRINT_ALL, "----- R_Init -----\n" );
@@ -1720,13 +1730,37 @@ void R_Init( void ) {
 	if (max_termarks < MAX_TERMARKS)
 		max_termarks = MAX_TERMARKS;
 
-	ptr = ri.Malloc(sizeof(*backEndData) + sizeof(srfPoly_t) * max_polys + sizeof(polyVert_t) * max_polyverts + sizeof(srfMarkFragment_t) * max_termarks);
-	backEndData = (backEndData_t*)ptr;
-	backEndData->polys = (srfPoly_t*)((char*)ptr + sizeof(*backEndData));
-	backEndData->polyVerts = (polyVert_t*)((char*)ptr + sizeof(*backEndData) + sizeof(srfPoly_t) * max_polys);
-	backEndData->terMarks = (srfMarkFragment_t*)((char*)ptr + sizeof(*backEndData) + sizeof(srfPoly_t) * max_polys + sizeof(polyVert_t) * max_polyverts);
+	frameDataSize = sizeof(*backEndData) + sizeof(srfPoly_t) * max_polys
+		+ sizeof(polyVert_t) * max_polyverts
+		+ sizeof(srfMarkFragment_t) * max_termarks;
+	ptr = (byte *)ri.Malloc(frameDataSize * (r_smp->integer ? 2 : 1));
+	if (!ptr) {
+		ri.Error(ERR_FATAL, "R_Init: couldn't allocate renderer frame data (%u bytes)",
+			(unsigned)(frameDataSize * (r_smp->integer ? 2 : 1)));
+		return;
+	}
+
+	backEndData = (backEndData_t *)ptr;
+	backEndData->polys = (srfPoly_t *)(ptr + sizeof(*backEndData));
+	backEndData->polyVerts = (polyVert_t *)(ptr + sizeof(*backEndData) + sizeof(srfPoly_t) * max_polys);
+	backEndData->terMarks = (srfMarkFragment_t *)(ptr + sizeof(*backEndData)
+		+ sizeof(srfPoly_t) * max_polys + sizeof(polyVert_t) * max_polyverts);
 	backEndData->staticModels = NULL;
 	backEndData->staticModelData = NULL;
+
+	if (r_smp->integer) {
+		byte *secondPtr = ptr + frameDataSize;
+		secondBackEndData = (backEndData_t *)secondPtr;
+		secondBackEndData->polys = (srfPoly_t *)(secondPtr + sizeof(*secondBackEndData));
+		secondBackEndData->polyVerts = (polyVert_t *)(secondPtr + sizeof(*secondBackEndData)
+			+ sizeof(srfPoly_t) * max_polys);
+		secondBackEndData->terMarks = (srfMarkFragment_t *)(secondPtr + sizeof(*secondBackEndData)
+			+ sizeof(srfPoly_t) * max_polys + sizeof(polyVert_t) * max_polyverts);
+		secondBackEndData->staticModels = NULL;
+		secondBackEndData->staticModelData = NULL;
+	}
+
+	frontEndData = backEndData;
 	R_InitNextFrame();
 
 	PS3_RENDER_TRACE("RENDERER: before InitOpenGL");
@@ -1754,6 +1788,7 @@ void R_Init( void ) {
 	if ( err != GL_NO_ERROR )
 		ri.Printf (PRINT_ALL, "glGetError() = 0x%x\n", err);
 
+	R_InitCommandBuffers(secondBackEndData, r_smp->integer ? qtrue : qfalse);
 	PS3_RENDER_TRACE("RENDERER: R_Init complete");
 	ri.Printf( PRINT_ALL, "----- finished R_Init -----\n" );
 }
@@ -1782,6 +1817,8 @@ void RE_Shutdown( qboolean destroyWindow ) {
 		R_IssuePendingRenderCommands();
 		R_DeleteTextures();
 	}
+
+	R_ShutdownCommandBuffers();
 
 	// shut down platform specific OpenGL stuff
 	if ( destroyWindow ) {
