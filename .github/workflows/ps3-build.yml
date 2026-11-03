@@ -161,6 +161,12 @@ jobs:
           set -eu
           python3 -m unittest discover -s tests -p 'test_ps3_renderer_memory.py' -v
 
+      - name: Test PS3 SMP renderer and material regressions
+        shell: bash
+        run: |
+          set -eu
+          python3 -m unittest discover -s tests -p 'test_ps3_renderer_smp.py' -v
+
       - name: Test PS3 shader cache generator
         shell: bash
         run: |
