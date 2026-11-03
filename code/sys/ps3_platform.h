@@ -114,7 +114,7 @@ enum {
     PS3_PROF_FENCEWAIT, /* waiting for the GPU to release vertex ring memory */
     PS3_PROF_SOUND,     /* S_Update: mixing */
     PS3_PROF_IDLE,      /* com_maxfps sleep */
-    PS3_PROF_RWAIT,     /* r_smp: game thread waiting for the render thread */
+    PS3_PROF_RWAIT,     /* reserved: game thread waiting for a future render worker */
     PS3_PROF_ANIM,      /* inside backend: CPU skinning of MDS (character) models */
     PS3_PROF_SHADE,     /* inside backend: shading + drawing batches (RB_EndSurface) */
     PS3_PROF_GLDRAW,    /* inside shade: ps3gl DrawElements */
