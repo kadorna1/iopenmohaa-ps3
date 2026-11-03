@@ -11,6 +11,7 @@ class Ps3ExpansionLoadingTests(unittest.TestCase):
         cls.commands = (ROOT / "code/cgame/cg_commands.cpp").read_text()
         cls.mp3 = (ROOT / "code/client/snd_codec_mp3.c").read_text()
         cls.ps3_audio = (ROOT / "code/client/snd_ps3audio_new.cpp").read_text()
+        cls.ps3_audio_compat = (ROOT / "code/client/snd_ps3_compat.cpp").read_text()
 
     def test_ps3_defers_eager_wav_and_mp3_alias_cache_by_default(self):
         start = self.commands.index("void CacheResource(const char *stuff)\n{")
@@ -45,6 +46,15 @@ class Ps3ExpansionLoadingTests(unittest.TestCase):
         # ring rather than owning or concurrently reading the file handle.
         self.assertIn("S_CodecReadStream(d, request, raw)", self.ps3_audio)
         self.assertIn("ps3a_stream_refill(i)", self.ps3_audio)
+
+
+    def test_ps3_sounddone_callbacks_track_the_assigned_voice_or_stream(self):
+        self.assertIn("S_FLAG_DO_CALLBACK", self.ps3_audio)
+        self.assertIn("PS3_CompatSoundCallback(entnum, callbackChannel, sfx->name)", self.ps3_audio)
+        self.assertIn("PS3AUDIO_IsSoundPlaying", self.ps3_audio)
+        self.assertIn("S_PS3AUDIO_IsSoundPlaying(channel_number, sfxName)", self.ps3_audio_compat)
+        self.assertNotIn("return S_PS3AUDIO_IsStreamActive(1)", self.ps3_audio_compat)
+        self.assertIn("SV_SoundCallback(entnum, channel_number, name)", self.ps3_audio_compat)
 
 
 if __name__ == "__main__":
