@@ -1830,7 +1830,7 @@ static float ProjectRadius(float r, const vec3_t location)
     separation      = Vector(tr.viewParms.ori.origin) - Vector(location);
     projectedRadius = separation.length();
 
-    return fabs(r) * (100.0 / backEnd.viewParms.fovX) / projectedRadius;
+    return fabs(r) * (100.0 / tr.viewParms.fovX) / projectedRadius;
 }
 
 /*
