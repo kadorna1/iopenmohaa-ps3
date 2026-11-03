@@ -5,6 +5,9 @@
 #include "snd_public.h"
 #include "client.h"
 #include "../qcommon/alias.h"
+#include "../server/server.h"
+
+extern "C" void SV_SoundCallback(int entnum, int channel_number, const char *name);
 
 #include <stdlib.h>
 #include <string.h>
@@ -178,11 +181,18 @@ void PS3_CompatAudioInit(void)
 }
 
 
+void PS3_CompatSoundCallback(int entnum, int channel_number, const char *name)
+{
+    if (!com_sv_running || !com_sv_running->integer
+        || entnum < 0 || entnum >= MAX_GENTITIES || !name || !name[0]) {
+        return;
+    }
+    SV_SoundCallback(entnum, channel_number, name);
+}
+
 qboolean S_IsSoundPlaying(int channel_number, const char *sfxName)
 {
-    (void)channel_number;
-    (void)sfxName;
-    return S_PS3AUDIO_IsStreamActive(1);
+    return S_PS3AUDIO_IsSoundPlaying(channel_number, sfxName);
 }
 
 void S_FadeSound(float fTime)

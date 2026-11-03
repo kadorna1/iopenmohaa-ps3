@@ -22,6 +22,10 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
         cls.ps3_platform = (ROOT / "cmake/platforms/ps3.cmake").read_text()
         cls.ps3_input = (ROOT / "code/input/ps3_input.c").read_text()
         cls.client_input = (ROOT / "code/client/cl_input.cpp").read_text()
+        cls.client_keys = (ROOT / "code/client/cl_keys.cpp").read_text()
+        cls.client_parse = (ROOT / "code/client/cl_parse.cpp").read_text()
+        cls.cgame_drawtools = (ROOT / "code/cgame/cg_drawtools.cpp").read_text()
+        cls.cgame_public = (ROOT / "code/cgame/cg_public.h").read_text()
         cls.cgame_main = (ROOT / "code/cgame/cg_main.c").read_text()
         cls.actor = (ROOT / "code/fgame/actor.cpp").read_text()
         cls.sentient = (ROOT / "code/fgame/sentient.h").read_text()
@@ -92,6 +96,16 @@ class Ps3MultiTitleConfigTests(unittest.TestCase):
             self.assertTrue(config.is_file(), f"{appid} is missing {game_dir}/autoexec.cfg")
             lines = set(config.read_text().splitlines())
             self.assertTrue(expected.issubset(lines), f"{appid} is missing aim-assist defaults")
+
+
+    def test_aim_assist_uses_r1_and_the_game_saved_centerprint_path(self):
+        self.assertIn("if (key == K_JOY6 && down", self.client_keys)
+        self.assertNotIn("if (key == K_JOY7 && down", self.client_keys)
+        self.assertIn('UI_UpdateCenterPrint(enabled ? "AIM ASSIST ON" : "AIM ASSIST OFF", 1.0f);', self.client_input)
+        self.assertIn("UI_UpdateCenterPrint( string, 1.0 );", self.client_parse)
+        self.assertNotIn("CG_AimAssistNotify", self.client_input)
+        self.assertNotIn("CG_AimAssistNotify", self.cgame_public)
+        self.assertNotIn("CG_DrawAimAssistStatus", self.cgame_drawtools)
 
     def test_workflow_builds_packages_and_saves_incremental_manifests(self):
         for appid in ("OMOHAA020", "OMOHAB020", "OMOHAS020"):

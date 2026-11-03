@@ -83,6 +83,7 @@ static ps3a_voice_t g_voice[PS3A_MAX_VOICES];
 
 #define PS3A_STREAM_COUNT 11
 #define PS3A_STREAM_FIRST_SFX 3
+#define PS3A_SOUND_STREAM_CHANNEL_BASE PS3A_MAX_VOICES
 #define PS3A_STREAM_RING_FRAMES 16384
 #define PS3A_STREAM_CHUNK_FRAMES 2048
 
@@ -876,6 +877,35 @@ qboolean S_PS3AUDIO_IsStreamActive(int slot)
     return active;
 }
 
+qboolean S_PS3AUDIO_IsSoundPlaying(int channel_number, const char *sfxName)
+{
+    qboolean playing = qfalse;
+
+    if (!g_up || !sfxName || !sfxName[0]) {
+        return qfalse;
+    }
+
+    ps3a_lock();
+    if (channel_number >= 0 && channel_number < PS3A_MAX_VOICES) {
+        const ps3a_voice_t *v = &g_voice[channel_number];
+        if (v->active && v->sfxHandle > 0 && v->sfxHandle < s_numSfx
+            && !Q_stricmp(s_knownSfx[v->sfxHandle].name, sfxName)) {
+            playing = qtrue;
+        }
+    } else {
+        const int slot = channel_number - PS3A_SOUND_STREAM_CHANNEL_BASE;
+        if (slot >= PS3A_STREAM_FIRST_SFX && slot < PS3A_STREAM_COUNT) {
+            const ps3a_stream_t *s = &g_streams[slot];
+            if (s->active && s->sfxHandle > 0 && s->sfxHandle < s_numSfx
+                && !Q_stricmp(s_knownSfx[s->sfxHandle].name, sfxName)) {
+                playing = qtrue;
+            }
+        }
+    }
+    ps3a_unlock();
+    return playing;
+}
+
 static void ps3a_mix_block(float *out)
 {
     int k;
@@ -1178,22 +1208,34 @@ void S_PS3AUDIO_StartSound(
 {
     ps3a_voice_t *v;
     sfx_t        *sfx;
+    qboolean      doCallback = (entnum & S_FLAG_DO_CALLBACK) ? qtrue : qfalse;
+    int           callbackChannel = -1;
 
-    if (!g_up || sfxHandle <= 0 || sfxHandle >= s_numSfx) {
+    entnum &= ~S_FLAG_DO_CALLBACK;
+    if (sfxHandle <= 0 || sfxHandle >= s_numSfx) {
         return;
     }
     sfx = &s_knownSfx[sfxHandle];
+
+    if (!g_up) {
+        if (doCallback) {
+            PS3_CompatSoundCallback(entnum, -1, sfx->name);
+        }
+        return;
+    }
+
     if (stream || (sfx->iFlags & (SFX_FLAG_STREAMED | SFX_FLAG_MP3))) {
         int slot = -1, i;
         vec3_t streamOrigin;
         bool local;
-        entnum &= ~S_FLAG_DO_CALLBACK;
+
         if (entnum < 0 || entnum >= MAX_GENTITIES) entnum = 0;
         local = (entchannel == CHAN_MENU || entchannel == CHAN_LOCAL
                  || (entnum == s_iListenerNumber && entnum != 0)
                  || (!origin && entnum == 0));
         if (origin) VectorCopy(origin, streamOrigin);
         else VectorCopy(s_entity[entnum].position, streamOrigin);
+
         ps3a_lock();
         for (i = PS3A_STREAM_FIRST_SFX; i < PS3A_STREAM_COUNT; i++) {
             if (g_streams[i].active && entchannel != CHAN_AUTO
@@ -1217,11 +1259,13 @@ void S_PS3AUDIO_StartSound(
             }
         }
         ps3a_unlock();
+
         if (slot >= 0) {
             float md = min_dist < 0.0f ? 200.0f : min_dist;
             float xd = min_dist < 0.0f ? 12800.0f : max_dist;
             if (volume < 0.0f) volume = 1.0f;
             if (pitch <= 0.0f) pitch = 1.0f;
+
             if (S_PS3AUDIO_StartStream(slot, sfx->name, 1, 0, volume, pitch,
                                        local ? qtrue : qfalse, streamOrigin,
                                        entnum, entchannel, md, xd)) {
@@ -1230,14 +1274,25 @@ void S_PS3AUDIO_StartSound(
                 g_streams[slot].follow = (!origin && entnum != 0) ? true : false;
                 ps3a_unlock();
             }
+            callbackChannel = PS3A_SOUND_STREAM_CHANNEL_BASE + slot;
+        }
+
+        /* Like OpenAL, notify the game when a callback-enabled sound is
+         * assigned a channel. If decoding failed, the query below returns
+         * false and the script's sounddone wait completes instead of hanging. */
+        if (doCallback) {
+            PS3_CompatSoundCallback(entnum, callbackChannel, sfx->name);
         }
         return;
     }
+
     if (!ps3a_sfx_usable(sfx)) {
+        if (doCallback) {
+            PS3_CompatSoundCallback(entnum, -1, sfx->name);
+        }
         return;
     }
 
-    entnum &= ~S_FLAG_DO_CALLBACK;
     if (entnum < 0 || entnum >= MAX_GENTITIES) {
         entnum = 0;
     }
@@ -1258,6 +1313,7 @@ void S_PS3AUDIO_StartSound(
     ps3a_lock();
     v = ps3a_pick_voice(sfxHandle, entnum, entchannel, false);
     if (v) {
+        callbackChannel = (int)(v - g_voice);
         memset(v, 0, sizeof(*v));
         if (ps3a_setup_voice(v, sfxHandle, pitch)) {
             v->sfxHandle  = sfxHandle;
@@ -1281,6 +1337,10 @@ void S_PS3AUDIO_StartSound(
         }
     }
     ps3a_unlock();
+
+    if (doCallback) {
+        PS3_CompatSoundCallback(entnum, callbackChannel, sfx->name);
+    }
 }
 
 void S_PS3AUDIO_AddLoopingSound(

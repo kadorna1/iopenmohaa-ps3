@@ -234,6 +234,8 @@ void          S_PS3AUDIO_PauseStream(int, qboolean);
 void          S_PS3AUDIO_SetStreamVolume(int, float);
 unsigned int  S_PS3AUDIO_GetStreamPosition(int);
 qboolean      S_PS3AUDIO_IsStreamActive(int);
+qboolean      S_PS3AUDIO_IsSoundPlaying(int, const char *);
+void          PS3_CompatSoundCallback(int, int, const char *);
 const char   *S_PS3AUDIO_GetMusicFilename();
 int           S_PS3AUDIO_GetMusicLoopCount();
 unsigned int  S_PS3AUDIO_GetMusicOffset();

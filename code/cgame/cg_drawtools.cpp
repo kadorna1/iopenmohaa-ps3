@@ -1519,59 +1519,6 @@ void CG_DrawVote()
     }
 }
 
-static int s_aimAssistStatusTime = 0;
-static qboolean s_aimAssistStatusPending = qfalse;
-static qboolean s_aimAssistStatusEnabled = qfalse;
-
-void CG_AimAssistNotify(qboolean enabled)
-{
-    s_aimAssistStatusEnabled = enabled;
-    s_aimAssistStatusTime = cg.time;
-    s_aimAssistStatusPending = qtrue;
-}
-
-static void CG_DrawAimAssistStatus(void)
-{
-    const char *message;
-    fontheader_t *font;
-    int elapsed;
-    float x, y;
-    vec4_t shadowColor = {0.0f, 0.0f, 0.0f, 0.95f};
-    vec4_t textColor;
-
-    if (!s_aimAssistStatusPending) {
-        return;
-    }
-
-    elapsed = cg.time - s_aimAssistStatusTime;
-    if (elapsed < 0 || elapsed >= 3000) {
-        s_aimAssistStatusPending = qfalse;
-        return;
-    }
-
-    /* Use the always-registered in-game attacker font, with HUD font fallback. */
-    font = cgs.media.attackerFont ? cgs.media.attackerFont : cgs.media.hudDrawFont;
-    if (!font || cgs.uiHiResScale[0] <= 0.0f || cgs.uiHiResScale[1] <= 0.0f) {
-        return;
-    }
-
-    message = s_aimAssistStatusEnabled ? "AIM ASSIST ON" : "AIM ASSIST OFF";
-    textColor[0] = s_aimAssistStatusEnabled ? 0.20f : 1.0f;
-    textColor[1] = s_aimAssistStatusEnabled ? 1.0f : 0.20f;
-    textColor[2] = 0.20f;
-    textColor[3] = 1.0f;
-
-    /* R_DrawString uses virtual 640x480 coordinates plus uiHiResScale. */
-    x = 18.0f / cgs.uiHiResScale[0];
-    y = 24.0f / cgs.uiHiResScale[1];
-
-    cgi.R_SetColor(shadowColor);
-    cgi.R_DrawString(font, message, x + 1.0f, y + 1.0f, -1, cgs.uiHiResScale);
-    cgi.R_SetColor(textColor);
-    cgi.R_DrawString(font, message, x, y, -1, cgs.uiHiResScale);
-    cgi.R_SetColor(NULL);
-}
-
 /*
 ==============
 CG_Draw2D
@@ -1593,5 +1540,4 @@ void CG_Draw2D(void)
     CG_DrawVote();
     CG_DrawInstantMessageMenu();
     CG_DrawCrosshair();
-    CG_DrawAimAssistStatus();
 }
