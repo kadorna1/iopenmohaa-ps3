@@ -132,11 +132,12 @@ jobs:
           grep -Fqx 'seta ps3_aim_assist "1"' "$config"
           grep -Fqx 'seta ps3_aim_assist_strength "1.0"' "$config"
           grep -Fq 'CL_PS3ToggleAimAssist' code/client/cl_input.cpp
-          grep -Fq 'key == K_JOY7 && down && keys[key].repeats == 1' code/client/cl_keys.cpp
+          grep -Fq 'key == K_JOY6 && down && keys[key].repeats == 1' code/client/cl_keys.cpp
           grep -Fq 'PS3_AIM_ASSIST_TOGGLE' code/client/cl_keys.cpp
-          grep -Fq 'cge.CG_AimAssistNotify' code/cgame/cg_main.c
-          grep -Fq '"AIM ASSIST ON"' code/cgame/cg_drawtools.cpp
-          grep -Fq '"AIM ASSIST OFF"' code/cgame/cg_drawtools.cpp
+          grep -Fq 'UI_UpdateCenterPrint(enabled ? "AIM ASSIST ON" : "AIM ASSIST OFF", 1.0f);' code/client/cl_input.cpp
+          grep -Fq 'UI_UpdateCenterPrint(string, 1.0);' code/client/cl_parse.cpp
+          ! grep -Fq 'CG_AimAssistNotify' code/cgame/cg_public.h
+          ! grep -Fq 'CG_DrawAimAssistStatus' code/cgame/cg_drawtools.cpp
           grep -Fq 'stage_ps3_title_usrdir.sh' .github/workflows/ps3-build.yml
           grep -Fq -- '--extra-usrdir "$stage_usrdir"' .github/workflows/ps3-build.yml
 
