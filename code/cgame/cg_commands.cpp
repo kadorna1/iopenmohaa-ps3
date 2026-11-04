@@ -6147,6 +6147,12 @@ void ClientGameCommandManager::ArchiveToMemory(MemArchiver& archiver)
             m_emitters.AddObjectAt(i + 1, sp);
         }
     } else {
+#if defined(__PS3__)
+        if (archiver.IsWriting()) {
+            PS3_TRACEF("SAVE CG global emitter count begin bytes=%lu capacity=%lu",
+                (unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
+        }
+#endif
         num = m_emitters.NumObjects();
 #if defined(__PS3__)
         if (archiver.IsWriting()) {
@@ -6387,10 +6393,16 @@ void emitterthing_t::ArchiveToMemory(MemArchiver& archiver)
         PS3_STEPF("SAVE CG emitterthing begin ptr=%p bytes=%lu capacity=%lu",
             (void *)this, (unsigned long)archiver.BufferSize(),
             (unsigned long)archiver.Capacity());
-        PS3_STEPF("SAVE CG emitterthing count begin ptr=%p", (void *)this);
+        PS3_STEPF("SAVE CG emitterthing entity-tracker begin ptr=%p", (void *)this);
     }
 #endif
     enttracker_t::ArchiveToMemory(archiver);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_STEPF("SAVE CG emitterthing entity-tracker complete ptr=%p bytes=%lu",
+            (void *)this, (unsigned long)archiver.BufferSize());
+    }
+#endif
 
     if (archiver.IsReading()) {
         emittertime_t et;
@@ -6401,6 +6413,11 @@ void emitterthing_t::ArchiveToMemory(MemArchiver& archiver)
             m_emittertimes.AddObject(et);
         }
     } else {
+#if defined(__PS3__)
+        if (archiver.IsWriting()) {
+            PS3_STEPF("SAVE CG emitterthing count begin ptr=%p", (void *)this);
+        }
+#endif
         num = m_emittertimes.NumObjects();
 #if defined(__PS3__)
         if (archiver.IsWriting()) {
@@ -6508,8 +6525,7 @@ void spawnthing_t::ArchiveToMemory(MemArchiver& archiver)
     if (archiver.IsWriting()) {
         PS3_STEPF("SAVE CG spawnthing after emittertimes ptr=%p bytes=%lu",
             (void *)this, (unsigned long)archiver.BufferSize());
-        PS3_STEPF("SAVE CG spawnthing model-list begin ptr=%p count=%d",
-            (void *)this, m_modellist.NumObjects());
+        PS3_STEPF("SAVE CG spawnthing model-list begin ptr=%p", (void *)this);
     }
 #endif
     CG_ArchiveStringContainer(archiver, &m_modellist);
@@ -6517,8 +6533,7 @@ void spawnthing_t::ArchiveToMemory(MemArchiver& archiver)
     if (archiver.IsWriting()) {
         PS3_STEPF("SAVE CG spawnthing model-list complete ptr=%p bytes=%lu",
             (void *)this, (unsigned long)archiver.BufferSize());
-        PS3_STEPF("SAVE CG spawnthing tag-list begin ptr=%p count=%d",
-            (void *)this, m_taglist.NumObjects());
+        PS3_STEPF("SAVE CG spawnthing tag-list begin ptr=%p", (void *)this);
     }
 #endif
     CG_ArchiveStringContainer(archiver, &m_taglist);
