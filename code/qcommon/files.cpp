@@ -991,7 +991,7 @@ qboolean FS_Rename_HomeData( const char *from, const char *to, qboolean safe ) {
 	char *from_ospath, *to_ospath;
 
 	if ( !fs_searchpaths ) {
-		Com_Error( ERR_FATAL, "Filesystem call made without initialization\\n" );
+		Com_Error( ERR_FATAL, "Filesystem call made without initialization\n" );
 		return qfalse;
 	}
 
@@ -1002,7 +1002,7 @@ qboolean FS_Rename_HomeData( const char *from, const char *to, qboolean safe ) {
 	to_ospath = FS_BuildOSPath( fs_homedatapath->string, fs_gamedir, to );
 
 	if ( fs_debug->integer ) {
-		Com_Printf( "FS_Rename_HomeData: %s --> %s\\n", from_ospath, to_ospath );
+		Com_Printf( "FS_Rename_HomeData: %s --> %s\n", from_ospath, to_ospath );
 	}
 
 	if ( safe ) {
