@@ -858,6 +858,7 @@ void IN_Init(void *windowData)
 
     s_ps3_aim_sensitivity = Cvar_Get("ps3_aim_sensitivity", "0.5", CVAR_ARCHIVE);
     s_ps3_right_stick_deadzone = Cvar_Get("ps3_right_stick_deadzone", "12", CVAR_ARCHIVE);
+    Cvar_CheckRange(s_ps3_right_stick_deadzone, 0, 64, qtrue);
     Cvar_Get("ps3_aim_assist", "1", CVAR_ARCHIVE);
     Cvar_Get("ps3_aim_assist_strength", "1.0", CVAR_ARCHIVE);
     s_mouse_aim_accum_x = s_mouse_aim_accum_y = 0.0f;
