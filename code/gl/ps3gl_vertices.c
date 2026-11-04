@@ -15,12 +15,15 @@ void ps3gl_vring_init(void)
         PS3GL_LABEL_VRING_SEG0, PS3GL_LABEL_VRING_SEG1
     };
 
+#if !PS3GL_FORCE_RSX_VRING
     extern const void *ps3_rsx_io_base;
     extern size_t      ps3_rsx_io_size;
+#endif
     extern void ps3_log(const char *msg);
     char msg[160];
 
     ps3gl.vring.base = NULL;
+#if !PS3GL_FORCE_RSX_VRING
     if (ps3_rsx_io_base &&
         ps3_rsx_io_size >= PS3GL_VRING_IO_OFFSET + PS3GL_VRING_IO_SIZE) {
         uint8_t *io = (uint8_t *)ps3_rsx_io_base + PS3GL_VRING_IO_OFFSET;
@@ -30,6 +33,7 @@ void ps3gl_vring_init(void)
             ps3gl.vring.seg_capacity = PS3GL_VRING_IO_SIZE / PS3GL_VRING_SEGMENTS;
         }
     }
+#endif
     if (!ps3gl.vring.base) {
         ps3gl.vring.base = (uint8_t *)rsxMemalign(128, PS3GL_VRING_SIZE);
         if (!ps3gl.vring.base) {

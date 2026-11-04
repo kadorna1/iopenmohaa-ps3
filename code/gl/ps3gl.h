@@ -32,7 +32,13 @@ void ps3gl_front_call(const char *func);
 #define PS3GL_MAX_TEXTURES      4096
 #define PS3GL_MAX_VERTS         16384   /* per-batch immediate mode */
 
-/* Size used by the RSX-local fallback when no mapped-main-memory ring is available. */
+/* The 8 MiB RSX-local ring is 4 MiB per frame. Omaha Beach profiling
+ * showed the 2 MiB IO-mapped segment hitting its limit and dropping draws.
+ * Force the larger existing fallback for the A/B test without shrinking the
+ * 4 MiB GCM command buffer. Set to 0 to restore the faster IO-mapped ring. */
+#ifndef PS3GL_FORCE_RSX_VRING
+#define PS3GL_FORCE_RSX_VRING 1
+#endif
 #define PS3GL_VRING_SIZE        (8 * 1024 * 1024)   /* 2 segments, RSX local memory */
 
 /* Identity ARGB remap. Fallback for varying PSL1GHT macro definitions. */
