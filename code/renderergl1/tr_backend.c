@@ -608,7 +608,9 @@ void RB_BeginDrawingView (void) {
 
 	// sync with gl if needed
 	if ( r_finish->integer == 1 && !glState.finishCalled ) {
+		PS3_PROFILE_START(ps3_glfinish_t0);
 		qglFinish ();
+		PS3_PROFILE_END(PS3_PROF_GL_FINISH, ps3_glfinish_t0);
 		glState.finishCalled = qtrue;
 	}
 	if ( r_finish->integer == 0 ) {
@@ -1547,7 +1549,9 @@ const void	*RB_SwapBuffers( const void *data ) {
 
 
 	if ( !glState.finishCalled ) {
+		PS3_PROFILE_START(ps3_swap_finish_t0);
 		qglFinish();
+		PS3_PROFILE_END(PS3_PROF_GL_FINISH, ps3_swap_finish_t0);
 	}
 
 	GLimp_LogComment( "***************** RB_SwapBuffers *****************\n\n\n" );
@@ -1586,36 +1590,60 @@ void RB_ExecuteRenderCommands( const void *data ) {
 		data = PADP(data, sizeof(void *));
 
 		switch ( *(const int *)data ) {
-		case RC_SET_COLOR:
+		case RC_SET_COLOR: {
+			PS3_PROFILE_START(ps3_cmd_misc_t0);
 			data = RB_SetColor( data );
+			PS3_PROFILE_END(PS3_PROF_CMD_MISC, ps3_cmd_misc_t0);
 			break;
-		case RC_STRETCH_PIC:
+		}
+		case RC_STRETCH_PIC: {
+			PS3_PROFILE_START(ps3_cmd_stretch_t0);
 			data = RB_StretchPic( data );
+			PS3_PROFILE_END(PS3_PROF_CMD_STRETCH, ps3_cmd_stretch_t0);
 			break;
+		}
 		case RC_DRAW_SURFS:
 			data = RB_DrawSurfs( data );
 			break;
 		case RC_SPRITE_SURFS:
 			data = RB_SpriteSurfs( data );
 			break;
-		case RC_DRAW_BUFFER:
+		case RC_DRAW_BUFFER: {
+			PS3_PROFILE_START(ps3_cmd_misc_t0);
 			data = RB_DrawBuffer( data );
+			PS3_PROFILE_END(PS3_PROF_CMD_MISC, ps3_cmd_misc_t0);
 			break;
-		case RC_SWAP_BUFFERS:
+		}
+		case RC_SWAP_BUFFERS: {
+			PS3_PROFILE_START(ps3_cmd_swap_t0);
 			data = RB_SwapBuffers( data );
+			PS3_PROFILE_END(PS3_PROF_CMD_SWAP, ps3_cmd_swap_t0);
 			break;
-		case RC_SCREENSHOT:
+		}
+		case RC_SCREENSHOT: {
+			PS3_PROFILE_START(ps3_cmd_misc_t0);
 			data = RB_TakeScreenshotCmd( data );
+			PS3_PROFILE_END(PS3_PROF_CMD_MISC, ps3_cmd_misc_t0);
 			break;
-		case RC_VIDEOFRAME:
+		}
+		case RC_VIDEOFRAME: {
+			PS3_PROFILE_START(ps3_cmd_misc_t0);
 			data = RB_TakeVideoFrameCmd( data );
+			PS3_PROFILE_END(PS3_PROF_CMD_MISC, ps3_cmd_misc_t0);
 			break;
-		case RC_COLORMASK:
+		}
+		case RC_COLORMASK: {
+			PS3_PROFILE_START(ps3_cmd_misc_t0);
 			data = RB_ColorMask(data);
+			PS3_PROFILE_END(PS3_PROF_CMD_MISC, ps3_cmd_misc_t0);
 			break;
-		case RC_CLEARDEPTH:
+		}
+		case RC_CLEARDEPTH: {
+			PS3_PROFILE_START(ps3_cmd_misc_t0);
 			data = RB_ClearDepth(data);
+			PS3_PROFILE_END(PS3_PROF_CMD_MISC, ps3_cmd_misc_t0);
 			break;
+		}
 		case RC_END_OF_LIST:
 		default:
 			// stop rendering
