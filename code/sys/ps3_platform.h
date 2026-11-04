@@ -146,6 +146,12 @@ enum {
     PS3_PROF_CMD_MISC,
     PS3_PROF_CMD_SWAP,
     PS3_PROF_GL_FINISH,
+    PS3_PROF_GAME_EVENTS,
+    PS3_PROF_GAME_PREANIM,
+    PS3_PROF_GAME_NAV,
+    PS3_PROF_GAME_BOT,
+    PS3_PROF_GAME_ENTITIES,
+    PS3_PROF_GAME_POST,
     PS3_PROF_COUNT
 };
 static inline unsigned long long PS3_ProfTick(void)
