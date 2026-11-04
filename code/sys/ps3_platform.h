@@ -142,6 +142,10 @@ enum {
     PS3_PROF_SF_SPRITE,
     PS3_PROF_SF_TERRAIN,
     PS3_PROF_SF_TRIANGLES,
+    PS3_PROF_CMD_STRETCH,
+    PS3_PROF_CMD_MISC,
+    PS3_PROF_CMD_SWAP,
+    PS3_PROF_GL_FINISH,
     PS3_PROF_COUNT
 };
 static inline unsigned long long PS3_ProfTick(void)
