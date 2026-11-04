@@ -1021,6 +1021,7 @@ RB_SkelMesh
 */
 void RB_SkelMesh(skelSurfaceGame_t *sf)
 {
+    PS3_PROFILE_SCOPE(PS3_PROF_ANIM);
     unsigned int       baseIndex, baseVertex;
     unsigned int       render_count;
     unsigned int       indexes;
@@ -1776,6 +1777,7 @@ R_GetFrame
 */
 void R_GetFrame(refEntity_t *model, struct skelAnimFrame_s *newFrame)
 {
+    PS3_PROFILE_SCOPE(PS3_PROF_BONES);
     R_UpdatePoseInternal(model);
     ri.GetFrameInternal(model->tiki, model->entityNumber, newFrame);
 }
