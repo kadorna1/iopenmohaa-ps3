@@ -442,14 +442,15 @@ static void PS3_RSX_SetRenderTarget(int index)
 
 /* Public interface */
 
-/* GCM IO window layout for this diagnostic:
+/* GCM IO window layout:
  *   0x000000-0x3fffff: 4 MiB GCM command-buffer allocation
- *   0x400000-0x7fffff: 4 MiB ps3gl vertex ring (see ps3gl.h)
- * Keep these regions disjoint. Preserve the context boundaries and callback
- * supplied by GCM: extending context->end manually bypasses FIFO rollover and
- * previously correlated with RSX GET escaping into the adjacent IO region. */
+ *   0x400000-0xbfffff: 8 MiB cacheable ps3gl vertex ring (two 4 MiB segments)
+ * Keep these regions disjoint. The larger mapped ring preserves the capacity
+ * of the RSX-local A/B ring while allowing cacheable PPU vertex writes. Preserve
+ * the context boundaries and callback supplied by GCM: extending context->end
+ * manually bypasses FIFO rollover and risks RSX GET escaping the IO command area. */
 #define RSX_CB_SIZE          (4 * 1024 * 1024) /* 4 MiB GCM command-buffer allocation */
-#define RSX_HOST_SIZE       (8 * 1024 * 1024) /* 8 MiB IO buffer */
+#define RSX_HOST_SIZE       (12 * 1024 * 1024) /* 4 MiB command area + 8 MiB vertex ring */
 #if PS3GL_VRING_IO_OFFSET < RSX_CB_SIZE
 #error "PS3GL vertex ring overlaps the GCM command buffer"
 #endif
