@@ -32,18 +32,31 @@ void CG_ArchiveStuff(MemArchiver& archiver, int svsTime)
 	archiver.SetBaseTime(svsTime);
 #if defined(__PS3__)
 	if (archiver.IsWriting()) {
-		PS3_TRACEF("SAVE CG archive begin");
+		PS3_TRACEF("SAVE CG archive begin bytes=%lu capacity=%lu",
+			(unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
+		PS3_TRACEMEM("SAVE CG archive entry");
 	}
 #endif
 	commandManager.ArchiveToMemory(archiver);
 #if defined(__PS3__)
 	if (archiver.IsWriting()) {
-		PS3_TRACEF("SAVE CG command-manager archive complete");
+		PS3_TRACEF("SAVE CG command-manager archive complete bytes=%lu capacity=%lu",
+			(unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
+		PS3_TRACEMEM("SAVE CG after command manager archive");
+	}
+#endif
+#if defined(__PS3__)
+	if (archiver.IsWriting()) {
+		PS3_TRACEF("SAVE CG VSS globals begin bytes=%lu capacity=%lu",
+			(unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
 	}
 #endif
 	CG_ArchiveVSSGlobals(archiver);
 #if defined(__PS3__)
 	if (archiver.IsWriting()) {
+		PS3_TRACEF("SAVE CG VSS globals complete bytes=%lu capacity=%lu",
+			(unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
+		PS3_TRACEMEM("SAVE CG after VSS globals");
 		PS3_TRACEF("SAVE CG archive complete");
 	}
 #endif
@@ -64,6 +77,11 @@ size_t CG_SaveStateToBuffer(void** out, int svsTime)
 	archiver.SetupForWriting(0x400000);
 #else
 	archiver.SetupForWriting(0x200000);
+#endif
+#if defined(__PS3__)
+	PS3_TRACEF("SAVE CG snapshot buffer initialized bytes=%lu capacity=%lu",
+		(unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
+	PS3_TRACEMEM("SAVE CG snapshot buffer initialized");
 #endif
 	if (archiver.Failed()) {
 #if defined(__PS3__)

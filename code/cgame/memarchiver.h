@@ -43,6 +43,7 @@ public:
     void   SetupForReading(byte *buffer, size_t size);
     void   SetBaseTime(unsigned int time);
     size_t BufferSize() const;
+    size_t Capacity() const;
     byte  *ConfiscateBuffer();
     bool   IsReading() const;
     bool   IsWriting() const;
