@@ -846,6 +846,7 @@ static qboolean PS3_RSX_WrapCommandBufferIfNeeded(unsigned seq)
 void PS3_RSX_BeginFrame(void)
 {
     unsigned seq;
+    unsigned long long flipwait_t0;
     /* Restore from .data backup if corrupted */
     if ((uintptr_t)ps3_gcm_context <= 0x1000
         && (uintptr_t)ps3_gcm_context_backup > 0x1000)
@@ -857,6 +858,7 @@ void PS3_RSX_BeginFrame(void)
         return;
     }
 
+    PS3_ProfBackendBegin();
     seq = ++ps3_frame_begin_seq;
     PS3_RSX_ReportGraphicsErrors(seq);
     if (seq >= 20 && seq <= 30)
@@ -882,13 +884,16 @@ void PS3_RSX_BeginFrame(void)
         (unsigned)(u32)(ps3_flip_queued - ps3_flip_completed));
 
     PS3_RSX_TraceCommandBuffer("begin-before-flipwait", seq);
+    flipwait_t0 = PS3_ProfTick();
     if (!PS3_RSX_WaitFlips(seq)) {
+        PS3_ProfAdd(PS3_PROF_FLIPWAIT, PS3_ProfTick() - flipwait_t0);
         PS3_RSX_TraceCommandBuffer("begin-flipwait-timeout", seq);
         ri.Error(ERR_FATAL,
                  "PS3 RSX flip queue stalled at frame %u; see openmohaa-ps3.log",
                  seq);
         return;
     }
+    PS3_ProfAdd(PS3_PROF_FLIPWAIT, PS3_ProfTick() - flipwait_t0);
     PS3_RSX_TraceCommandBuffer("begin-after-flipwait", seq);
     if (!PS3_RSX_WrapCommandBufferIfNeeded(seq)) {
         ri.Error(ERR_FATAL, "PS3 RSX command-buffer wrap failed at frame %u; see openmohaa-ps3.log", seq);
@@ -1038,6 +1043,7 @@ void PS3_RSX_EndFrame(void)
     }
 
     ps3_current_fb = (ps3_current_fb + 1) % RSX_FB_COUNT;
+    PS3_ProfBackendEnd();
 }
 
 /* GLimp interface -- called by the iortcw renderer */
