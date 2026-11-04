@@ -1141,7 +1141,9 @@ void SV_Frame( int msec ) {
 
 			// let everything in the world think and move
 			PS3_FTRACE("SV_Frame before ge->RunFrame time=%d frameMsec=%d", svs.time, frameMsec);
+			PS3_PROFILE_START(ps3_sv_runframe_t0);
 			ge->RunFrame( svs.time, frameMsec );
+			PS3_PROFILE_END(PS3_PROF_SV, ps3_sv_runframe_t0);
 			PS3_FTRACE("SV_Frame after ge->RunFrame");
 
 			err = ge->errorMessage;

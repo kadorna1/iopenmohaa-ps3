@@ -557,12 +557,21 @@ void ps3gl_PixelStorei(GLenum pname, GLint param)
     (void)pname; (void)param;
 }
 
+static unsigned ps3gl_copytex_diag_count;
 void ps3gl_CopyTexSubImage2D(GLenum target, GLint level, GLint xoff,
                               GLint yoff, GLint x, GLint y,
                               GLsizei w, GLsizei h)
 {
-    (void)target; (void)level; (void)xoff; (void)yoff;
-    (void)x; (void)y; (void)w; (void)h;
+    ps3gl_texture_t *t;
+    PS3GL_FRONT_CHECK();
+    t = ps3gl.tmu[ps3gl.active_tmu].bound;
+    if (ps3gl_copytex_diag_count < 8) {
+        PS3_BootTraceFastf("PS3GL_COPYTEX unsupported call=%u target=0x%x level=%d dst=%d,%d src=%d,%d size=%dx%d tex=%d bpp=%u fmt=0x%x",
+                           ++ps3gl_copytex_diag_count, (unsigned)target, (int)level,
+                           (int)xoff, (int)yoff, (int)x, (int)y, (int)w, (int)h,
+                           t ? t->glname : -1, t ? (unsigned)t->bpp : 0u,
+                           t ? (unsigned)t->gcm_format : 0u);
+    }
 }
 
 /* Apply textures to RSX before draw */
