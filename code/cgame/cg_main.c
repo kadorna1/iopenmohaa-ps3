@@ -836,6 +836,17 @@ Called before every level change or subsystem restart
 */
 void CG_Shutdown(void)
 {
+    /*
+     * Release cached special-effect command Events before L_ShutdownEvents()
+     * resets Event_allocator. CGame is statically linked on PS3, so cached
+     * globals survive the nominal module unload between maps.
+     */
+    PS3_TRACEF("CG_SHUTDOWN before special-effects cleanup");
+    PS3_TRACEMEM("CG_SHUTDOWN before SFX cleanup");
+    CG_ShutdownSpecialEffectsManager();
+    PS3_TRACEF("CG_SHUTDOWN after special-effects cleanup");
+    PS3_TRACEMEM("CG_SHUTDOWN after SFX cleanup");
+
     L_ShutdownEvents();
     // Shutdown radar
     cgi.CL_InitRadar(NULL, NULL, -1);
