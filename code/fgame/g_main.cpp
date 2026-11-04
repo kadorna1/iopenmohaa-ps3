@@ -540,7 +540,11 @@ void G_RunFrame(int levelTime, int frameTime)
         level.setTime(levelTime);
 
         if (level.intermissiontime || level.died_already) {
-            L_ProcessPendingEvents();
+            {
+                PS3_PROFILE_START(ps3_game_events_t0);
+                L_ProcessPendingEvents();
+                PS3_PROFILE_END(PS3_PROF_GAME_EVENTS, ps3_game_events_t0);
+            }
             G_ClientDoBlends();
 
             if (g_gametype->integer != GT_SINGLE_PLAYER && g_maxintermission->value != 0.0f) {
@@ -561,7 +565,11 @@ void G_RunFrame(int levelTime, int frameTime)
 
         // Process most of the events before the physics are run
         // so that we can affect the physics immediately
-        L_ProcessPendingEvents();
+        {
+            PS3_PROFILE_START(ps3_game_events_t0);
+            L_ProcessPendingEvents();
+            PS3_PROFILE_END(PS3_PROF_GAME_EVENTS, ps3_game_events_t0);
+        }
 
         Director.AllowPause(true);
         Director.Pause();
@@ -570,18 +578,22 @@ void G_RunFrame(int levelTime, int frameTime)
         //
         // treat each object in turn
         //
-        for (edict = active_edicts.next; edict != &active_edicts; edict = edict->next) {
-            assert(edict);
-            assert(edict->inuse);
-            assert(edict->entity);
+        {
+            PS3_PROFILE_START(ps3_game_preanim_t0);
+            for (edict = active_edicts.next; edict != &active_edicts; edict = edict->next) {
+                assert(edict);
+                assert(edict->inuse);
+                assert(edict->entity);
 
-            Actor *actor = static_cast<Actor *>(edict->entity);
-            if (actor->IsSubclassOfActor()) {
-                actor->m_bUpdateAnimDoneFlags = false;
-                if (actor->m_bAnimating) {
-                    actor->PreAnimate();
+                Actor *actor = static_cast<Actor *>(edict->entity);
+                if (actor->IsSubclassOfActor()) {
+                    actor->m_bUpdateAnimDoneFlags = false;
+                    if (actor->m_bAnimating) {
+                        actor->PreAnimate();
+                    }
                 }
             }
+            PS3_PROFILE_END(PS3_PROF_GAME_PREANIM, ps3_game_preanim_t0);
         }
 
         g_iInThinks++;
@@ -589,7 +601,11 @@ void G_RunFrame(int levelTime, int frameTime)
         g_iInThinks--;
 
         // Process any pending events that got posted during the script code
-        L_ProcessPendingEvents();
+        {
+            PS3_PROFILE_START(ps3_game_events_t0);
+            L_ProcessPendingEvents();
+            PS3_PROFILE_END(PS3_PROF_GAME_EVENTS, ps3_game_events_t0);
+        }
 
         path_checksthisframe = 0;
 
@@ -599,7 +615,9 @@ void G_RunFrame(int levelTime, int frameTime)
 
         PathManager.ShowNodes();
 
+        PS3_PROFILE_START(ps3_game_nav_t0);
         G_Navigation_Frame();
+        PS3_PROFILE_END(PS3_PROF_GAME_NAV, ps3_game_nav_t0);
 
         showentnums = (sv_showentnums->integer && (g_gametype->integer == GT_SINGLE_PLAYER || sv_cheats->integer));
 
@@ -626,8 +644,11 @@ void G_RunFrame(int levelTime, int frameTime)
             start           = clock();
         }
 
+        PS3_PROFILE_START(ps3_game_bot_t0);
         G_BotFrame();
+        PS3_PROFILE_END(PS3_PROF_GAME_BOT, ps3_game_bot_t0);
 
+        PS3_PROFILE_START(ps3_game_entities_t0);
         for (edict = active_edicts.next; edict != &active_edicts; edict = edict->next) {
             for (num = edict->s.parent; num != ENTITYNUM_NONE; num = g_entities[num].s.parent) {
                 if (processed[num] == processedFrameID) {
@@ -643,6 +664,8 @@ void G_RunFrame(int levelTime, int frameTime)
                 G_AddGEntity(edict, showentnums);
             }
         }
+
+        PS3_PROFILE_END(PS3_PROF_GAME_ENTITIES, ps3_game_entities_t0);
 
         if (g_timeents->integer) {
             gi.cvar_set("g_timeents", va("%d", g_timeents->integer - 1));
@@ -660,16 +683,26 @@ void G_RunFrame(int levelTime, int frameTime)
         g_bBeforeThinks = qfalse;
 
         // Process any pending events that got posted during the physics code.
-        L_ProcessPendingEvents();
+        {
+            PS3_PROFILE_START(ps3_game_events_t0);
+            L_ProcessPendingEvents();
+            PS3_PROFILE_END(PS3_PROF_GAME_EVENTS, ps3_game_events_t0);
+        }
+        PS3_PROFILE_START(ps3_game_post_t0);
         level.DoEarthquakes();
 
         // build the playerstate_t structures for all players
         G_ClientEndServerFrames();
 
         level.Unregister(STRING_POSTTHINK);
+        PS3_PROFILE_END(PS3_PROF_GAME_POST, ps3_game_post_t0);
 
         // Process any pending events that got posted during the script code
-        L_ProcessPendingEvents();
+        {
+            PS3_PROFILE_START(ps3_game_events_t0);
+            L_ProcessPendingEvents();
+            PS3_PROFILE_END(PS3_PROF_GAME_EVENTS, ps3_game_events_t0);
+        }
 
         // show how many traces the game code is doing
         if (sv_traceinfo->integer) {

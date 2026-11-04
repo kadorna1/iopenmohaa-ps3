@@ -32,14 +32,14 @@ void ps3gl_front_call(const char *func);
 #define PS3GL_MAX_TEXTURES      4096
 #define PS3GL_MAX_VERTS         16384   /* per-batch immediate mode */
 
-/* The 8 MiB RSX-local ring is 4 MiB per frame. Omaha Beach profiling
- * showed the 2 MiB IO-mapped segment hitting its limit and dropping draws.
- * Force the larger existing fallback for the A/B test without shrinking the
- * 4 MiB GCM command buffer. Set to 0 to restore the faster IO-mapped ring. */
+/* Keep the 8 MiB ring (4 MiB per frame) in cacheable, IO-mapped main
+ * memory. The prior 2 MiB-per-frame IO ring overflowed; the 4 MiB RSX-local
+ * fallback removed drops but made PPU vertex copies expensive. Set to 1 to
+ * force the RSX-local fallback for A/B comparison. */
 #ifndef PS3GL_FORCE_RSX_VRING
-#define PS3GL_FORCE_RSX_VRING 1
+#define PS3GL_FORCE_RSX_VRING 0
 #endif
-#define PS3GL_VRING_SIZE        (8 * 1024 * 1024)   /* 2 segments, RSX local memory */
+#define PS3GL_VRING_SIZE        (8 * 1024 * 1024)   /* 2 segments, RSX-local fallback */
 
 /* Identity ARGB remap. Fallback for varying PSL1GHT macro definitions. */
 #define PS3GL_TEX_REMAP_IDENTITY  0x00AAE4
@@ -147,7 +147,7 @@ typedef struct {
  * its cache instead of uncached stores into RSX local memory, which cost
  * ~150 ns per vertex (2+ ms a frame). Falls back to RSX memory. */
 #define PS3GL_VRING_IO_OFFSET   (4 * 1024 * 1024)
-#define PS3GL_VRING_IO_SIZE     (4 * 1024 * 1024)   /* 2 segments of 2 MB */
+#define PS3GL_VRING_IO_SIZE     (8 * 1024 * 1024)   /* 2 segments of 4 MB */
 
 /* Shader program pair (vertex + fragment) */
 typedef struct {

@@ -123,6 +123,35 @@ enum {
     PS3_PROF_BONES,     /* inside anim: R_CalcBones */
     PS3_PROF_COLORS,    /* inside shade: per-stage vertex colors (ComputeColors) */
     PS3_PROF_TCOORDS,   /* inside shade: per-stage texture coords (ComputeTexCoords) */
+    PS3_PROF_COMMANDS,  /* total RB_ExecuteRenderCommands time */
+    PS3_PROF_DRAW_CMD,  /* RB_DrawSurfs command */
+    PS3_PROF_SPRITE_CMD,/* RB_SpriteSurfs command */
+    PS3_PROF_DRAW_LIST, /* RB_RenderDrawSurfList including entity/light setup */
+    PS3_PROF_SPRITE_LIST,/* RB_RenderSpriteSurfList */
+    PS3_PROF_SURF_DISPATCH, /* time inside surface-specific geometry builders */
+    PS3_PROF_SF_FACE,
+    PS3_PROF_SF_GRID,
+    PS3_PROF_SF_POLY,
+    PS3_PROF_SF_MARK,
+    PS3_PROF_SF_FLARE,
+    PS3_PROF_SF_ENTITY,
+    PS3_PROF_SF_DISPLAY,
+    PS3_PROF_SF_SKEL,
+    PS3_PROF_SF_STATIC,
+    PS3_PROF_SF_SWIPE,
+    PS3_PROF_SF_SPRITE,
+    PS3_PROF_SF_TERRAIN,
+    PS3_PROF_SF_TRIANGLES,
+    PS3_PROF_CMD_STRETCH,
+    PS3_PROF_CMD_MISC,
+    PS3_PROF_CMD_SWAP,
+    PS3_PROF_GL_FINISH,
+    PS3_PROF_GAME_EVENTS,
+    PS3_PROF_GAME_PREANIM,
+    PS3_PROF_GAME_NAV,
+    PS3_PROF_GAME_BOT,
+    PS3_PROF_GAME_ENTITIES,
+    PS3_PROF_GAME_POST,
     PS3_PROF_COUNT
 };
 static inline unsigned long long PS3_ProfTick(void)
