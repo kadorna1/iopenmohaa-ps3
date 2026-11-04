@@ -6,7 +6,7 @@ iOpenMoHAA-PS3 is a native PlayStation 3 port of [OpenMoHAA](https://github.com/
 
 The port adapts the engine to the PS3's PowerPC PPU and RSX architecture using the PSL1GHT development environment. Its platform implementation draws on the PS3 work in ioQuake3 and ioRTCW.
 
-The project focuses on getting the original game and its expansions running natively on PS3, with dedicated platform support, controller integration, audio playback, renderer optimizations, memory management improvements and automated PKG generation.
+The project focuses on getting the original game and its expansions running natively on PS3, with dedicated platform support, controller integration, audio playback, renderer and game-loop profiling, memory-management improvements and automated multi-title PKG generation.
 
 > **Development status:** Work in progress. The three title variants compile and package through GitHub Actions. Runtime performance, rendering consistency and complete campaign stability are still being tested on physical hardware.
 
@@ -47,6 +47,25 @@ Implemented improvements include:
 - Optimized lightmap handling.
 - Unused renderer image cleanup before texture precaching.
 
+#### Omaha Beach profiling and performance work
+
+The renderer and game module include PS3 profiling for the Omaha Beach workload. The instrumentation separates:
+
+- Renderer command execution, including draw-surface and sprite-surface lists.
+- Geometry-builder time, with per-surface-type breakdowns.
+- Stretch-picture, miscellaneous backend, swap and `qglFinish` costs.
+- Game-frame time for pending events/scripts, actor pre-animation, navigation, bots, active-entity/AI/physics work and post-entity work.
+
+The full 8 MiB vertex ring is allocated in cacheable IO-mapped main memory as two 4 MiB frame segments. It is kept separate from the 4 MiB RSX command buffer. The previous RSX-local vertex-ring path can be selected for A/B testing with:
+
+```sh
+PS3GL_FORCE_RSX_VRING=1
+```
+
+Skeletal skinning also caches each mesh's global-to-local Tiki bone-index mapping for reuse across vertex weights. Meshes outside the established bone-count bound retain the original lookup path.
+
+These changes target measured renderer and game-module hotspots while preserving surface order, shader behavior, water/HUD rendering and command submission. They are not a claim that Omaha Beach performance is solved: frame rate remains under hardware investigation. This profiling pass does not enable SMP or SPU offload.
+
 The default PS3 renderer configuration uses:
 
 ```cfg
@@ -69,8 +88,11 @@ These include:
 - Zone allocator diagnostics, including allocation tags and caller information.
 - Memory-release reporting when allocator tags are freed.
 - Improved renderer image-cache cleanup.
-- Avoidance of an additional full-size compression buffer in the PS3 save-archive path.
+- PS3 save archives are written without the extra LZ77 compression-output buffer; this avoids holding a second archive-sized allocation during save finalization.
+- Save-archive typed-field mismatch diagnostics report the archive byte offset and current object classname when available. This is diagnostic context only; it does not repair an incompatible or misaligned save.
 - Additional memory diagnostics around CGame initialization and map transitions.
+
+**Current save-memory limitation:** the PS3 game archive writer on `main` still builds a growable in-memory buffer, starting at 4 MiB and doubling when it runs out of space. A large manual save can therefore request an 8 MiB replacement allocation and fail when the game zone does not have a sufficiently large free block. A bounded streaming writer is being developed separately and is not yet part of `main`.
 
 The BSP streaming implementation specifically targets peak PPU memory consumption during level loading.
 
@@ -98,7 +120,9 @@ A dedicated PS3 input implementation provides:
 
 - Native DualShock 3 button handling.
 - Analog left and right stick support.
-- Correct right-stick yaw and pitch axis routing.
+- Continuous right-stick yaw and pitch input, using the PS3 yaw/pitch axes.
+- Radial deadzone compensation and rescaling of the remaining stick travel to the full input range, preserving direction on diagonals and providing a continuous response immediately outside the deadzone.
+- Archived `ps3_right_stick_deadzone` calibration cvar (default `12`, clamped to `0–64`) for controller drift and wear.
 - D-pad navigation.
 - Bindable controller buttons.
 - Trigger and pressure-sensitive button handling.
@@ -125,7 +149,7 @@ seta ps3_aim_assist_strength "1.0"
 
 **Controls**
 
-Press L2 during gameplay to toggle aim assist (SEEMS TO BE WORKING). A notification appears in the upper-left corner (CURRENTLY NOT WORKING):
+Tap L2 during active gameplay to toggle aim assist. A short notification appears in the upper-left corner for three seconds:
 
 - `AIM ASSIST ON`
 - `AIM ASSIST OFF`
@@ -138,9 +162,9 @@ The toggle is edge-triggered, so holding L2 does not repeatedly change its state
 - Rejects friendly actors.
 - Ignores dead targets.
 - Uses a configurable strength between 0.0 and 1.0.
-- Evaluates targets within a defined distance and aiming cone.
-- Rejects targets obstructed by solid world geometry.
-- Applies a combination of stick slowdown and subtle angular correction.
+- Evaluates candidates within 48–2048 world units and a 12-degree horizontal / 8-degree vertical aiming cone.
+- Tests the three best-aligned candidates against solid world geometry and rejects targets behind walls.
+- Applies up to 35% stick slowdown and a small frame-time-scaled angular correction.
 - Does not automatically lock onto targets or fire weapons.
 
 The system is implemented in shared PS3 input, game and CGame code and applies to Allied Assault, Spearhead and Breakthrough.
@@ -292,7 +316,7 @@ Implemented CI features include:
 - Source-hash-based incremental rebuild detection.
 - Separate executable linking for all three titles.
 - Automated expansion-path and package-staging tests.
-- Aim-assist mathematical regression tests.
+- Aim-assist and right-stick radial-response mathematical regression tests.
 - Renderer memory regression tests.
 - Shader-cache validation.
 - PKG existence and integrity checks.
@@ -301,7 +325,7 @@ Unchanged source files can reuse previously compiled objects across successive w
 
 The workflow supports pushes, pull requests and manual execution.
 
-It also supports a manually enabled experimental SPU audio build option, which is disabled by default.
+It also supports a manually enabled experimental SPU audio build option, which is disabled by default. The Omaha Beach profiling/vertex-ring pass itself does not move renderer or game simulation work to SPUs; it remains a PPU/RSX optimization.
 
 ---
 
@@ -347,6 +371,7 @@ iopenmohaa-ps3/
 │
 ├── tests/
 │   ├── test_ps3_aim_assist_math.c
+│   ├── test_ps3_stick_math.c
 │   ├── test_ps3_expansion_loading.py
 │   ├── test_ps3_multi_title_config.py
 │   ├── test_ps3_renderer_memory.py
@@ -475,9 +500,10 @@ However, a successful CI build does not guarantee complete gameplay stability on
 
 The following areas remain under active investigation:
 
-- Overall frame rate and gameplay performance.
+- Overall frame rate and gameplay performance, particularly the renderer backend and the active-entity/AI/physics portion of the game frame. PS3 profiling now reports these separately, but the measured Omaha Beach frame rate remains low.
 - PPU and RSX memory consumption during extended gameplay.
-- Stability during manual saves and automatic checkpoint saves.
+- Stability during manual saves and automatic checkpoint saves. Large manual saves can currently fail when the game zone cannot allocate the 8 MiB buffer required as the in-memory archive grows.
+- Save/archive restoration errors. Typed-field mismatches now include an archive offset and current object classname when available; this helps identify where a reader and writer diverge but is not itself a serialization fix.
 - Stability when transitioning between levels.
 - Expansion loading and rendering consistency.
 - BSP streaming behavior on physical hardware.
