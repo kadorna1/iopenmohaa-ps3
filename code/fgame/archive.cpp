@@ -856,7 +856,10 @@ Class *Archiver::ReadObject(void)
     if (!obj) {
         FileError("Failed to on new instance of class %s.", classname.c_str());
     } else {
+        str previousObjectName = currentObjectName;
+        currentObjectName = classname;
         obj->Archive(*this);
+        currentObjectName = previousObjectName;
     }
 
     if (!fileerror) {
@@ -933,7 +936,12 @@ void Archiver::ArchiveObject(Class *obj)
         ArchiveInteger(&index);
         objstart = archivefile.Pos();
 
-        obj->Archive(*this);
+        {
+            str previousObjectName = currentObjectName;
+            currentObjectName = classname;
+            obj->Archive(*this);
+            currentObjectName = previousObjectName;
+        }
 
         if (!fileerror) {
             endpos = archivefile.Pos();
@@ -1145,10 +1153,14 @@ void Archiver::CheckType(int type)
 
     if (archivemode == ARCHIVE_READ) {
         if (!fileerror) {
+            const size_t fieldOffset = archivefile.Tell();
             t = ReadType();
             if (t != type) {
                 if (t < ARC_NUMTYPES) {
-                    FileError("Expecting %s, Should be %s", typenames[type], typenames[t]);
+                    FileError("Expecting %s, Should be %s at offset %lu in object %s",
+                              typenames[type], typenames[t],
+                              (unsigned long)fieldOffset,
+                              currentObjectName.length() ? currentObjectName.c_str() : "<top-level>");
                     assert(0);
                 }
                 else {
