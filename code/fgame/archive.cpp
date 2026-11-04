@@ -574,7 +574,7 @@ void Archiver::Close(void)
         return;
     }
 
-    if (archivemode == ARCHIVE_WRITE) {
+    if (archivemode == ARCHIVE_WRITE && !fileerror) {
         int    numobjects;
         size_t pos;
 
