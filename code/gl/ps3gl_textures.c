@@ -505,10 +505,10 @@ static int compressed_format_to_gcm(GLenum format, uint8_t *gcm_format)
         *gcm_format = GCM_TEXTURE_FORMAT_DXT1;
         return 1;
     case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
-        *gcm_format = GCM_TEXTURE_FORMAT_DXT3;
+        *gcm_format = GCM_TEXTURE_FORMAT_DXT23;
         return 1;
     case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
-        *gcm_format = GCM_TEXTURE_FORMAT_DXT5;
+        *gcm_format = GCM_TEXTURE_FORMAT_DXT45;
         return 1;
     default:
         return 0;
