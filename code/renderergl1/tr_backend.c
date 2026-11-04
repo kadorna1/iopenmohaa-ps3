@@ -25,6 +25,12 @@ backEndData_t	*backEndData;
 backEndState_t	backEnd;
 
 
+#if defined(__PS3__)
+/* Start once per frame's render-command stream; close before GLimp_EndFrame
+ * because PS3_RSX_EndFrame emits the 120-frame report from inside that call. */
+static unsigned long long ps3_command_dispatch_start;
+#endif
+
 static float	s_flipMatrix[16] = {
 	// convert from our coordinate system (looking down X)
 	// to OpenGL's coordinate system (looking down -Z)
@@ -1546,6 +1552,12 @@ const void	*RB_SwapBuffers( const void *data ) {
 
 	GLimp_LogComment( "***************** RB_SwapBuffers *****************\n\n\n" );
 
+#if defined(__PS3__)
+	if (ps3_command_dispatch_start) {
+		PS3_ProfAdd(PS3_PROF_COMMANDS, PS3_ProfTick() - ps3_command_dispatch_start);
+		ps3_command_dispatch_start = 0;
+	}
+#endif
 	GLimp_EndFrame();
 
 	backEnd.in2D = qfalse;
@@ -1562,9 +1574,12 @@ smp extensions, or asynchronously by another thread.
 ====================
 */
 void RB_ExecuteRenderCommands( const void *data ) {
-	PS3_PROFILE_START(ps3_commands_t0);
 	int		t1, t2;
 
+#if defined(__PS3__)
+	if (!ps3_command_dispatch_start)
+		ps3_command_dispatch_start = PS3_ProfTick();
+#endif
 	t1 = ri.Milliseconds ();
 
 	while ( 1 ) {
@@ -1606,7 +1621,6 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			// stop rendering
 			t2 = ri.Milliseconds ();
 			backEnd.pc.msec = t2 - t1;
-			PS3_PROFILE_END(PS3_PROF_COMMANDS, ps3_commands_t0);
 			return;
 		}
 	}
