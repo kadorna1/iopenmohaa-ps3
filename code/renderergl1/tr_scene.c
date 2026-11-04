@@ -452,6 +452,14 @@ void RE_RenderScene( const refdef_t *fd ) {
 	if ( !tr.registered ) {
 		return;
 	}
+
+	/* TIKI pose caches and the tr.* view state are shared by backend routines
+	 * in this renderer. Do not reset/update them while the previous frame's
+	 * render worker is still consuming them. Entity/scene arrays have already
+	 * been double-buffered, so only the view-building phase needs this barrier. */
+	if ( glConfig.smpActive )
+		R_SyncRenderThread();
+
 	GLimp_LogComment( "====== RE_RenderScene =====\n" );
 
 	if ( r_norefresh->integer ) {
