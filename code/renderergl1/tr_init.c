@@ -1901,6 +1901,9 @@ RE_SetRenderTime
 =============
 */
 void RE_SetRenderTime(int t) {
+#if defined(__PS3__)
+	R_SyncRenderThread();
+#endif
 	backEnd.refdef.floatTime = (long double)t / 1000.0;
 	R_UpdateGhostTextures();
 }

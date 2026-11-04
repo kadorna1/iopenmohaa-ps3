@@ -596,8 +596,6 @@ static bool ps3a_mix_block_spu(float *out)
         dst->active = 1u;
     }
 
-    {
-        ps3a_spu_mix_job_t job;
     /* Include decoded stream PCM in the SPU job. The stream ring is a native-
      * endian short array on PPU; normalize it to little-endian PCM while staging. */
     for (uint32_t i = 0; i < PS3A_STREAM_COUNT; i++) {

@@ -602,9 +602,12 @@ void RE_EndFrame( int *frontEndMsec, int *backEndMsec ) {
 	}
 	tr.frontEndMsec = 0;
 	if ( backEndMsec ) {
-		*backEndMsec = backEnd.pc.msec;
+		/* In SMP mode this frame is still executing on the render worker.
+		 * Report zero rather than racing its backEnd counters. */
+		*backEndMsec = glConfig.smpActive ? 0 : backEnd.pc.msec;
 	}
-	backEnd.pc.msec = 0;
+	if ( !glConfig.smpActive )
+		backEnd.pc.msec = 0;
 }
 
 /*

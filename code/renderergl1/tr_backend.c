@@ -1514,7 +1514,6 @@ This function will be called synchronously if running without
 smp extensions, or asynchronously by another thread.
 ====================
 */
-void RB_ExecuteRenderCommands( const void *data ) {
 /* Render worker: restore its frame's TLS owner before executing the command batch. */
 void RB_RenderThread( void )
 {
@@ -1532,6 +1531,7 @@ void RB_RenderThread( void )
 }
 
 
+void RB_ExecuteRenderCommands( const void *data ) {
 	int		t1, t2;
 
 	t1 = ri.Milliseconds ();
