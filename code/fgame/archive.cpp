@@ -663,13 +663,13 @@ qboolean Archiver::Read(const char *name, qboolean harderror)
 
     ArchiveUnsigned(&version);
     if (version > ArchiveVersion) {
-        archivefile.Close();
+        archivefile.Close(qfalse);
         FileError("Archive is from version %u.  Check http://www.x-null.net for an update.", version);
         return false;
     }
 
     if (version < ArchiveVersion) {
-        archivefile.Close();
+        archivefile.Close(qfalse);
         FileError("Archive is out of date.");
         return false;
     }
