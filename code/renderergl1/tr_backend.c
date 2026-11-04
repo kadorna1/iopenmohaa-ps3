@@ -1515,6 +1515,7 @@ RB_SwapBuffers
 =============
 */
 const void	*RB_SwapBuffers( const void *data ) {
+	PS3_PROFILE_START(ps3_cmd_swap_t0);
 	const swapBuffersCommand_t	*cmd;
 
 	// finish any 2D drawing if needed
@@ -1562,6 +1563,7 @@ const void	*RB_SwapBuffers( const void *data ) {
 		ps3_command_dispatch_start = 0;
 	}
 #endif
+	PS3_PROFILE_END(PS3_PROF_CMD_SWAP, ps3_cmd_swap_t0);
 	GLimp_EndFrame();
 
 	backEnd.in2D = qfalse;
@@ -1614,12 +1616,9 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			PS3_PROFILE_END(PS3_PROF_CMD_MISC, ps3_cmd_misc_t0);
 			break;
 		}
-		case RC_SWAP_BUFFERS: {
-			PS3_PROFILE_START(ps3_cmd_swap_t0);
+		case RC_SWAP_BUFFERS:
 			data = RB_SwapBuffers( data );
-			PS3_PROFILE_END(PS3_PROF_CMD_SWAP, ps3_cmd_swap_t0);
 			break;
-		}
 		case RC_SCREENSHOT: {
 			PS3_PROFILE_START(ps3_cmd_misc_t0);
 			data = RB_TakeScreenshotCmd( data );
