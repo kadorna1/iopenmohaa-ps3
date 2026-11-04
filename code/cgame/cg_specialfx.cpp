@@ -61,6 +61,19 @@ specialeffectcommand_t::specialeffectcommand_t()
     pEvent       = NULL;
 }
 
+/*
+ * Event objects stored in the cached effect table are deliberately retained
+ * after ProcessEvent(*pEvent) so each effect can replay them. They must be
+ * destroyed with the command, while Event_allocator is still alive.
+ */
+specialeffectcommand_t::~specialeffectcommand_t()
+{
+    if (pEvent) {
+        delete pEvent;
+        pEvent = NULL;
+    }
+}
+
 specialeffect_t::specialeffect_t()
 {
     m_iCommandCount = 0;
@@ -85,27 +98,53 @@ ClientSpecialEffectsManager::ClientSpecialEffectsManager()
 void ClientSpecialEffectsManager::ResetForGameState()
 {
     int i, j;
+    int freedCommands = 0;
+    int freedEvents = 0;
+    int invalidTables = 0;
 
     PS3_CGF("SFX reset begin loaded=%d pending=%d", (int)m_bEffectsLoaded, m_iNumPendingEvents);
+    PS3_TRACEMEM("SFX reset enter");
 
-    /* This manager is part of the statically linked CGame image on PS3, so
-     * its Listener queue survives CL_ShutdownCGame(). Delayed effects from the
-     * old map must not run against the next map's effect table. */
+    /*
+     * Keep the two delayed-event queues separate: Listener owns effect-delay
+     * callbacks, while commandManager owns delayed TIKI commands.
+     */
+    PS3_CGF("SFX reset cancel listener events begin");
     CancelEventsOfType(EV_SFX_EffectDelay);
-    commandManager.ResetPendingEvents();
-    commandManager.ClearCurrentSFX();
+    PS3_CGF("SFX reset cancel listener events done");
+    PS3_TRACEMEM("SFX reset after listener queue");
 
+    PS3_CGF("SFX reset command queue begin");
+    commandManager.ResetPendingEvents();
+    PS3_CGF("SFX reset command queue done");
+    PS3_TRACEMEM("SFX reset after command queue");
+
+    commandManager.ClearCurrentSFX();
     current_entity = NULL;
     current_tiki = NULL;
 
     for (i = 0; i < SFX_COUNT; ++i) {
         int count = m_effects[i].m_iCommandCount;
 
-        /* Commands are owned by this table. Do not walk a corrupt count. */
-        if (count >= 0 && count <= MAX_SPECIAL_EFFECT_COMMANDS) {
+        if ((i & 15) == 0) {
+            PS3_CGF("SFX reset table progress effect=%d/%d commands=%d",
+                    i, SFX_COUNT, count);
+        }
+
+        /* Do not walk a corrupt count outside the fixed command table. */
+        if (count < 0 || count > MAX_SPECIAL_EFFECT_COMMANDS) {
+            invalidTables++;
+            PS3_CGF("SFX reset invalid command count effect=%d count=%d max=%d",
+                    i, count, MAX_SPECIAL_EFFECT_COMMANDS);
+        } else {
             for (j = 0; j < count; ++j) {
-                if (m_effects[i].m_commands[j]) {
-                    delete m_effects[i].m_commands[j];
+                specialeffectcommand_t *command = m_effects[i].m_commands[j];
+                if (command) {
+                    if (command->pEvent) {
+                        freedEvents++;
+                    }
+                    delete command;
+                    freedCommands++;
                 }
             }
         }
@@ -118,7 +157,11 @@ void ClientSpecialEffectsManager::ResetForGameState()
 
     m_iNumPendingEvents = 0;
     m_bEffectsLoaded = qfalse;
-    PS3_CGF("SFX reset done");
+
+    PS3_CGF("SFX reset table done effects=%d commands=%d ownedEvents=%d invalidTables=%d",
+            SFX_COUNT, freedCommands, freedEvents, invalidTables);
+    PS3_TRACEMEM("SFX reset done");
+    PS3_CGF("SFX reset complete");
 }
 
 void ClientSpecialEffectsManager::LoadEffects()
@@ -475,6 +518,20 @@ void ClientSpecialEffectsManager::LoadEffects()
     PS3_CGF("SFX load done gren=%d bazooka=%d",
             m_effects[SFX_EXP_GREN_BASE].m_iCommandCount,
             m_effects[SFX_EXP_BAZOOKA_BASE].m_iCommandCount);
+}
+
+void CG_ShutdownSpecialEffectsManager()
+{
+    /*
+     * CGame is statically linked on PS3. Release retained effect-command
+     * Events before CG_Shutdown calls L_ShutdownEvents(), which bulk-resets
+     * Event_allocator. The next gamestate's init-time reset is then empty.
+     */
+    PS3_CGF("SFX shutdown cleanup begin");
+    PS3_TRACEMEM("SFX shutdown before cleanup");
+    sfxManager.ResetForGameState();
+    PS3_TRACEMEM("SFX shutdown after cleanup");
+    PS3_CGF("SFX shutdown cleanup done");
 }
 
 void CG_InitializeSpecialEffectsManager()
