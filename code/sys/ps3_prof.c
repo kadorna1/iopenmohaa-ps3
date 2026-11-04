@@ -69,6 +69,10 @@ void PS3_ProfBackendEnd(void)
              "anim=%.2f bones=%.2f surf=%.2f shade=%.2f colors=%.2f tcoords=%.2f "
              "gldraw=%.2f glcopy=%.2f draws=%.1f verts=%.1f indices=%.1f "
              "direct=%.1f copied=%.1f copyverts=%.1f ringPeak=%uKB dropped=%u "
+             "cmds=%.2f drawCmd=%.2f spriteCmd=%.2f drawList=%.2f spriteList=%.2f "
+             "dispatch=%.2f sfFace=%.2f sfGrid=%.2f sfPoly=%.2f sfMark=%.2f "
+             "sfFlare=%.2f sfEntity=%.2f sfDisplay=%.2f sfSkel=%.2f sfStatic=%.2f "
+             "sfSwipe=%.2f sfSprite=%.2f sfTerrain=%.2f sfTriangles=%.2f "
              "tex=%uKB texFail=%u",
              frames, fps, frame_ms,
              PS3_PROF_MS(PS3_PROF_SV), PS3_PROF_MS(PS3_PROF_CL),
@@ -83,6 +87,16 @@ void PS3_ProfBackendEnd(void)
              (double)stats.indices / frames, (double)stats.direct_draws / frames,
              (double)stats.copied_draws / frames, (double)stats.copied_verts / frames,
              stats.vring_peak / 1024u, stats.dropped,
+             PS3_PROF_MS(PS3_PROF_COMMANDS), PS3_PROF_MS(PS3_PROF_DRAW_CMD),
+             PS3_PROF_MS(PS3_PROF_SPRITE_CMD), PS3_PROF_MS(PS3_PROF_DRAW_LIST),
+             PS3_PROF_MS(PS3_PROF_SPRITE_LIST), PS3_PROF_MS(PS3_PROF_SURF_DISPATCH),
+             PS3_PROF_MS(PS3_PROF_SF_FACE), PS3_PROF_MS(PS3_PROF_SF_GRID),
+             PS3_PROF_MS(PS3_PROF_SF_POLY), PS3_PROF_MS(PS3_PROF_SF_MARK),
+             PS3_PROF_MS(PS3_PROF_SF_FLARE), PS3_PROF_MS(PS3_PROF_SF_ENTITY),
+             PS3_PROF_MS(PS3_PROF_SF_DISPLAY), PS3_PROF_MS(PS3_PROF_SF_SKEL),
+             PS3_PROF_MS(PS3_PROF_SF_STATIC), PS3_PROF_MS(PS3_PROF_SF_SWIPE),
+             PS3_PROF_MS(PS3_PROF_SF_SPRITE), PS3_PROF_MS(PS3_PROF_SF_TERRAIN),
+             PS3_PROF_MS(PS3_PROF_SF_TRIANGLES),
              ps3gl_tex_bytes / 1024u, ps3gl_tex_failed);
 #undef PS3_PROF_MS
 }

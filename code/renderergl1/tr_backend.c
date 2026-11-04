@@ -686,12 +686,57 @@ void RB_BeginDrawingView (void) {
 	}
 }
 
+/* Profile the surface-specific geometry builders separately from
+ * RB_EndSurface's shader flush timer. This shows which surface type spends
+ * PPU time populating tess (faces, grids, Tiki, terrain, etc.). */
+#if defined(__PS3__)
+static int RB_SurfaceProfileSlot(surfaceType_t type)
+{
+    switch (type) {
+    case SF_FACE:          return PS3_PROF_SF_FACE;
+    case SF_GRID:          return PS3_PROF_SF_GRID;
+    case SF_POLY:          return PS3_PROF_SF_POLY;
+    case SF_MARK_FRAG:     return PS3_PROF_SF_MARK;
+    case SF_FLARE:         return PS3_PROF_SF_FLARE;
+    case SF_ENTITY:        return PS3_PROF_SF_ENTITY;
+    case SF_DISPLAY_LIST:  return PS3_PROF_SF_DISPLAY;
+    case SF_TIKI_SKEL:     return PS3_PROF_SF_SKEL;
+    case SF_TIKI_STATIC:   return PS3_PROF_SF_STATIC;
+    case SF_SWIPE:         return PS3_PROF_SF_SWIPE;
+    case SF_SPRITE:        return PS3_PROF_SF_SPRITE;
+    case SF_TERRAIN_PATCH: return PS3_PROF_SF_TERRAIN;
+    case SF_TRIANGLES:     return PS3_PROF_SF_TRIANGLES;
+    default:               return -1;
+    }
+}
+#endif
+
+static void RB_DispatchSurfaceProfiled(void *surface)
+{
+    surfaceType_t type = *(surfaceType_t *)surface;
+#if defined(__PS3__)
+    unsigned long long t0 = PS3_ProfTick();
+    int slot;
+#endif
+    rb_surfaceTable[type](surface);
+#if defined(__PS3__)
+    {
+        unsigned long long elapsed = PS3_ProfTick() - t0;
+        PS3_ProfAdd(PS3_PROF_SURF_DISPATCH, elapsed);
+        slot = RB_SurfaceProfileSlot(type);
+        if (slot >= 0)
+            PS3_ProfAdd(slot, elapsed);
+    }
+#endif
+}
+
 /*
 ==================
 RB_RenderDrawSurfList
 ==================
 */
 void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
+	PS3_PROFILE_START(ps3_draw_list_t0);
 	shader_t		*shader, *oldShader;
 	int				entityNum, oldEntityNum;
 	int				dlightMap, oldDlightMap;
@@ -724,7 +769,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	for (i = 0, drawSurf = drawSurfs ; i < numDrawSurfs ; i++, drawSurf++) {
 		if ( drawSurf->sort == (unsigned)oldSort && *drawSurf->surface != SF_SPRITE ) {
 			// fast path, same as previous sort
-			rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
+			RB_DispatchSurfaceProfiled(drawSurf->surface);
 			continue;
 		}
 		oldSort = (int)drawSurf->sort;
@@ -872,7 +917,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 		}
 
 		// add the triangles for this surface
-		rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
+		RB_DispatchSurfaceProfiled(drawSurf->surface);
 	}
 
 	// draw the contents of the last shader batch
@@ -906,6 +951,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 	// add light flares on lights that aren't obscured
 	RB_RenderFlares();
+	PS3_PROFILE_END(PS3_PROF_DRAW_LIST, ps3_draw_list_t0);
 }
 
 /*
@@ -914,6 +960,7 @@ RB_RenderSpriteSurfList
 ==================
 */
 void RB_RenderSpriteSurfList(drawSurf_t* drawSurfs, int numDrawSurfs) {
+	PS3_PROFILE_START(ps3_sprite_list_t0);
 	shader_t	*shader;
 	shader_t	*oldShader;
 	qboolean	depthRange;
@@ -961,7 +1008,7 @@ void RB_RenderSpriteSurfList(drawSurf_t* drawSurfs, int numDrawSurfs) {
         backEnd.shaderStartTime = ((refSprite_t*)drawSurf->surface)->shaderTime;
 
         // add the triangles for this surface
-        rb_surfaceTable[*drawSurf->surface](drawSurf->surface);
+        RB_DispatchSurfaceProfiled(drawSurf->surface);
 	}
 
 	if (oldShader) {
@@ -974,6 +1021,7 @@ void RB_RenderSpriteSurfList(drawSurf_t* drawSurfs, int numDrawSurfs) {
 	if (depthRange) {
 		qglDepthRange(0.0, 1.0);
 	}
+	PS3_PROFILE_END(PS3_PROF_SPRITE_LIST, ps3_sprite_list_t0);
 }
 
 
@@ -1218,6 +1266,7 @@ RB_DrawSurfs
 =============
 */
 const void	*RB_DrawSurfs( const void *data ) {
+	PS3_PROFILE_START(ps3_draw_cmd_t0);
 	const drawSurfsCommand_t	*cmd;
 
 	// finish any 2D drawing if needed
@@ -1232,6 +1281,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 	RB_SetupFog();
 	RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs );
+	PS3_PROFILE_END(PS3_PROF_DRAW_CMD, ps3_draw_cmd_t0);
 
 	return (const void *)(cmd + 1);
 }
@@ -1244,6 +1294,7 @@ RB_DrawSurfs
 =============
 */
 const void* RB_SpriteSurfs(const void* data) {
+	PS3_PROFILE_START(ps3_sprite_cmd_t0);
     const drawSurfsCommand_t* cmd;
 
     // finish any 2D drawing if needed
@@ -1258,6 +1309,7 @@ const void* RB_SpriteSurfs(const void* data) {
 	
 	RB_SetupFog();
     RB_RenderSpriteSurfList(cmd->drawSurfs, cmd->numDrawSurfs);
+	PS3_PROFILE_END(PS3_PROF_SPRITE_CMD, ps3_sprite_cmd_t0);
 
     return (const void*)(cmd + 1);
 }
@@ -1510,6 +1562,7 @@ smp extensions, or asynchronously by another thread.
 ====================
 */
 void RB_ExecuteRenderCommands( const void *data ) {
+	PS3_PROFILE_START(ps3_commands_t0);
 	int		t1, t2;
 
 	t1 = ri.Milliseconds ();
@@ -1553,6 +1606,7 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			// stop rendering
 			t2 = ri.Milliseconds ();
 			backEnd.pc.msec = t2 - t1;
+			PS3_PROFILE_END(PS3_PROF_COMMANDS, ps3_commands_t0);
 			return;
 		}
 	}
