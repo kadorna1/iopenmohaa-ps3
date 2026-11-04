@@ -979,6 +979,40 @@ void FS_BaseDir_Rename_HomeData( const char *from, const char *to, qboolean safe
 }
 
 /*
+===========
+FS_Rename_HomeData
+
+Rename a file in the active game's HomeData directory. Unlike the BaseDir
+helper above, this follows the same fs_gamedir path used by
+FS_FOpenFileWrite_HomeData.
+===========
+*/
+qboolean FS_Rename_HomeData( const char *from, const char *to, qboolean safe ) {
+	char *from_ospath, *to_ospath;
+
+	if ( !fs_searchpaths ) {
+		Com_Error( ERR_FATAL, "Filesystem call made without initialization\\n" );
+		return qfalse;
+	}
+
+	// don't let sound stutter
+	S_ClearSoundBuffer();
+
+	from_ospath = FS_BuildOSPath( fs_homedatapath->string, fs_gamedir, from );
+	to_ospath = FS_BuildOSPath( fs_homedatapath->string, fs_gamedir, to );
+
+	if ( fs_debug->integer ) {
+		Com_Printf( "FS_Rename_HomeData: %s --> %s\\n", from_ospath, to_ospath );
+	}
+
+	if ( safe ) {
+		FS_CheckFilenameIsMutable( to_ospath, __func__ );
+	}
+
+	return rename( from_ospath, to_ospath ) == 0 ? qtrue : qfalse;
+}
+
+/*
 ==============
 FS_FCloseFile
 
