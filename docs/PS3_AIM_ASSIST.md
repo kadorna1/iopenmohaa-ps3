@@ -48,6 +48,27 @@ ps3_aim_assist_strength 1.0
 Set `ps3_aim_assist 0` to disable it. Strength is clamped to 0.0–1.0; zero
 disables the effect and one applies the strongest slowdown and pull.
 
+## Right-stick analog response
+
+The DualShock 3 right stick feeds continuous yaw and pitch axes (engine axes 4
+and 3). Its radial deadzone is compensated and the remaining travel is
+rescaled to the full joystick range, so a small movement just outside the
+deadzone produces a small aim movement instead of the abrupt jump caused by
+discarding low raw values. The radial calculation also keeps diagonal
+movement consistent and preserves the direction of the stick.
+
+The archived `ps3_right_stick_deadzone` cvar defaults to `12` raw units
+(approximately 9.4% of the stick's 127-unit cardinal travel) and is clamped
+to 0–64. Adjust it in the console to accommodate drift or controller wear:
+
+```
+ps3_right_stick_deadzone 8
+ps3_right_stick_deadzone 16
+```
+
+`ps3_aim_sensitivity` continues to scale the right stick independently of
+the left-stick movement and menu cursor. Its default remains `0.5`.
+
 ## Behaviour
 
 - Active only during gameplay, with input focus, while the player is turning
