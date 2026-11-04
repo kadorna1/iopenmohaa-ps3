@@ -13,6 +13,7 @@
 
 #include "qcommon/q_shared.h"
 #include "qcommon/qcommon.h"
+#include "qcommon/ps3_stick_math.h"
 #include "client/client.h"
 #include "client/keycodes.h"
 #include "../input/ps3_input.h"
@@ -246,6 +247,7 @@ static mouseInfo s_mouse_info;
 static qboolean  s_mouse_connected = qfalse;
 static u8        s_mouse_btns_prev = 0;
 static cvar_t   *s_ps3_aim_sensitivity;
+static cvar_t   *s_ps3_right_stick_deadzone;
 static float     s_mouse_aim_accum_x, s_mouse_aim_accum_y;
 
 /* One archived scale controls both USB-mouse and DS3 right-stick aiming.
@@ -767,12 +769,13 @@ void PS3_Input_Frame(void)
         int rx = (int)ps3_pad_data.ANA_R_H - STICK_CENTER;
         int ry = (int)ps3_pad_data.ANA_R_V - STICK_CENTER;
         int raw_axis[4] = { lx, ly, rx, ry };
+        int normalized_rx = 0, normalized_ry = 0;
         int axis[4];
 
+        /* Keep the existing left-stick/menu behavior. The right stick gets
+         * radial deadzone compensation and full-range analog rescaling. */
         if (abs(lx) < STICK_DEADZONE) lx = 0;
         if (abs(ly) < STICK_DEADZONE) ly = 0;
-        if (abs(rx) < STICK_DEADZONE) rx = 0;
-        if (abs(ry) < STICK_DEADZONE) ry = 0;
 
         if (in_menu) {
             /* Console-style DS3 navigation:
@@ -802,11 +805,16 @@ void PS3_Input_Frame(void)
             lx = ly = rx = ry = 0;      /* gameplay axes are idle in menus */
         }
 
-        /* scaled to the engine's +/-32K joystick axis range */
+        PS3_NormalizeStick(rx, ry,
+                           s_ps3_right_stick_deadzone ? s_ps3_right_stick_deadzone->integer : 12,
+                           &normalized_rx, &normalized_ry);
+
+        /* Left stick retains its legacy mapping. The right stick is continuous,
+         * deadzone-compensated, and scaled to the engine's +/-32767 axis range. */
         axis[0] = lx * 256;
         axis[1] = ly * 256;
-        axis[2] = (int)((float)rx * 256.0f * PS3_AimSensitivityX());
-        axis[3] = (int)((float)ry * 256.0f * PS3_AimSensitivity());
+        axis[2] = (int)((float)normalized_rx * PS3_AimSensitivityX());
+        axis[3] = (int)((float)normalized_ry * PS3_AimSensitivity());
         for (b = 0; b < 4; b++) {
             if (axis[b] != ps3_axis_prev[b]) {
                 /* Bounded trace: enough to verify raw-to-engine axis routing
@@ -849,6 +857,8 @@ void IN_Init(void *windowData)
     PS3_SetDefaultBind(K_JOY15, "weapnext");         /* D-pad right */
 
     s_ps3_aim_sensitivity = Cvar_Get("ps3_aim_sensitivity", "0.5", CVAR_ARCHIVE);
+    s_ps3_right_stick_deadzone = Cvar_Get("ps3_right_stick_deadzone", "12", CVAR_ARCHIVE);
+    Cvar_CheckRange(s_ps3_right_stick_deadzone, 0, 64, qtrue);
     Cvar_Get("ps3_aim_assist", "1", CVAR_ARCHIVE);
     Cvar_Get("ps3_aim_assist_strength", "1.0", CVAR_ARCHIVE);
     s_mouse_aim_accum_x = s_mouse_aim_accum_y = 0.0f;
@@ -868,8 +878,9 @@ void IN_Init(void *windowData)
     {
         char aim_log[160];
         snprintf(aim_log, sizeof(aim_log),
-                 "IN_Init: PS3 input initialized; DS3 axes left=0/1 right=yaw4/pitch3; aim scale x=%.2f y=%.2f (ps3_aim_sensitivity)",
-                 PS3_AimSensitivityX(), PS3_AimSensitivity());
+                 "IN_Init: PS3 input initialized; DS3 axes left=0/1 right=yaw4/pitch3; aim scale x=%.2f y=%.2f deadzone=%d",
+                 PS3_AimSensitivityX(), PS3_AimSensitivity(),
+                 s_ps3_right_stick_deadzone ? s_ps3_right_stick_deadzone->integer : 12);
         ps3_log(aim_log);
     }
 }

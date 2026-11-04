@@ -90,6 +90,7 @@ private:
 
 protected:
     str         filename;
+    str         currentObjectName;
     qboolean    fileerror;
     ArchiveFile archivefile;
     int         archivemode;
