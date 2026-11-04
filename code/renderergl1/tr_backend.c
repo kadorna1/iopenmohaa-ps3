@@ -70,7 +70,7 @@ void GL_Bind( image_t *image ) {
 
 	if ( glState.currenttextures[glState.currenttmu] != texnum ) {
 		if (image) {
-			image->frameUsed = tr.frameCount;
+			image->frameUsed = backEnd.viewParms.frameCount;
 		}
 		glState.currenttextures[glState.currenttmu] = texnum;
 		qglBindTexture (GL_TEXTURE_2D, texnum);
@@ -123,13 +123,13 @@ void GL_BindMultitexture( image_t *image0, GLuint env0, image_t *image1, GLuint 
 
 	if ( glState.currenttextures[1] != texnum1 ) {
 		GL_SelectTexture( 1 );
-		image1->frameUsed = tr.frameCount;
+		image1->frameUsed = backEnd.viewParms.frameCount;
 		glState.currenttextures[1] = texnum1;
 		qglBindTexture( GL_TEXTURE_2D, texnum1 );
 	}
 	if ( glState.currenttextures[0] != texnum0 ) {
 		GL_SelectTexture( 0 );
-		image0->frameUsed = tr.frameCount;
+		image0->frameUsed = backEnd.viewParms.frameCount;
 		glState.currenttextures[0] = texnum0;
 		qglBindTexture( GL_TEXTURE_2D, texnum0 );
 	}
@@ -842,7 +842,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			}
 			else if (shader->needsLSpherical)
 			{
-				if (tr.refdef.rdflags & RDF_HUD)
+				if (backEnd.refdef.rdflags & RDF_HUD)
 				{
 					backEnd.currentSphere = &backEnd.hudSphere;
 					backEnd.hudSphere.TessFunction = 0;
