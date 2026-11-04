@@ -74,7 +74,8 @@ void PS3_ProfBackendEnd(void)
              "sfFlare=%.2f sfEntity=%.2f sfDisplay=%.2f sfSkel=%.2f sfStatic=%.2f "
              "sfSwipe=%.2f sfSprite=%.2f sfTerrain=%.2f sfTriangles=%.2f "
              "cmdStretch=%.2f cmdMisc=%.2f cmdSwap=%.2f glfinish=%.2f "
-             "tex=%uKB texFail=%u",
+             "gameEvents=%.2f gamePreAnim=%.2f gameNav=%.2f gameBot=%.2f "
+             "gameEntities=%.2f gamePost=%.2f tex=%uKB texFail=%u",
              frames, fps, frame_ms,
              PS3_PROF_MS(PS3_PROF_SV), PS3_PROF_MS(PS3_PROF_CL),
              PS3_PROF_MS(PS3_PROF_CGAME), PS3_PROF_MS(PS3_PROF_BACKEND),
@@ -100,6 +101,9 @@ void PS3_ProfBackendEnd(void)
              PS3_PROF_MS(PS3_PROF_SF_TRIANGLES),
              PS3_PROF_MS(PS3_PROF_CMD_STRETCH), PS3_PROF_MS(PS3_PROF_CMD_MISC),
              PS3_PROF_MS(PS3_PROF_CMD_SWAP), PS3_PROF_MS(PS3_PROF_GL_FINISH),
+             PS3_PROF_MS(PS3_PROF_GAME_EVENTS), PS3_PROF_MS(PS3_PROF_GAME_PREANIM),
+             PS3_PROF_MS(PS3_PROF_GAME_NAV), PS3_PROF_MS(PS3_PROF_GAME_BOT),
+             PS3_PROF_MS(PS3_PROF_GAME_ENTITIES), PS3_PROF_MS(PS3_PROF_GAME_POST),
              ps3gl_tex_bytes / 1024u, ps3gl_tex_failed);
 #undef PS3_PROF_MS
 }
