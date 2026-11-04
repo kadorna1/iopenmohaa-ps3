@@ -63,7 +63,7 @@ void PS3_ProfBackendEnd(void)
     fps = (double)frames * (double)ps3_prof_timebase_hz / (double)elapsed;
     frame_ms = (double)elapsed * tick_to_ms / (double)frames;
 #define PS3_PROF_MS(slot) ((double)total[(slot)] * tick_to_ms / (double)frames)
-    PS3_Logf("[ps3perf] n=%u fps=%.2f frame=%.2fms "
+    PS3_Logf("[ps3perf] n=%u renderFps=%.2f renderFrame=%.2fms "
              "sv=%.2f cl=%.2f cgame=%.2f backend=%.2f "
              "flipwait=%.2f fencewait=%.2f rwait=%.2f sound=%.2f "
              "anim=%.2f bones=%.2f surf=%.2f shade=%.2f colors=%.2f tcoords=%.2f "
