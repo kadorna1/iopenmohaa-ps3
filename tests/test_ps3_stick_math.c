@@ -21,6 +21,17 @@ static void test_deadzone_and_rescaling(void)
     PS3_NormalizeStick(64, 0, 12, &x, &y);
     assert(x > 14000 && x < 16000 && y == 0);
 
+    /* Response must increase smoothly across the usable travel. */
+    {
+        int previous = 0;
+        int raw;
+        for (raw = 13; raw <= 127; raw++) {
+            PS3_NormalizeStick(raw, 0, 12, &x, &y);
+            assert(x > previous);
+            previous = x;
+        }
+    }
+
     PS3_NormalizeStick(127, 0, 12, &x, &y);
     assert(x == 32767 && y == 0);
 
