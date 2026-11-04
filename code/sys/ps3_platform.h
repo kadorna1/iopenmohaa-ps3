@@ -131,10 +131,18 @@ static inline unsigned long long PS3_ProfTick(void)
     __asm__ volatile("mftb %0" : "=r"(tb));
     return tb;
 }
+/* These routines and shared counters are implemented in C but used by
+ * both the C renderer and C++ model/client code. Keep one unmangled ABI. */
+#ifdef __cplusplus
+extern "C" {
+#endif
 void PS3_ProfAdd(int slot, unsigned long long ticks);
 void PS3_ProfBackendBegin(void);
 void PS3_ProfBackendEnd(void);
 extern int ps3_prof_smp;
+#ifdef __cplusplus
+}
+#endif
 
 #ifdef __PS3__
 #define PS3_PROFILE_START(name) unsigned long long name = PS3_ProfTick()
