@@ -149,12 +149,12 @@ seta ps3_aim_assist_strength "1.0"
 
 **Controls**
 
-Tap L2 during active gameplay to toggle aim assist. A short notification appears in the upper-left corner for three seconds:
+Tap R1 during active gameplay to toggle aim assist. A short notification appears in the upper-left corner for three seconds:
 
 - `AIM ASSIST ON`
 - `AIM ASSIST OFF`
 
-The toggle is edge-triggered, so holding L2 does not repeatedly change its state.
+The toggle is edge-triggered, so holding R1 does not repeatedly change its state.
 
 **Targeting behavior**
 
