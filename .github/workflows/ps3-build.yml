@@ -128,6 +128,10 @@ jobs:
           set -eu
           cc -std=c99 -Wall -Wextra -Werror tests/test_ps3_aim_assist_math.c -lm -o /tmp/test_ps3_aim_assist_math
           /tmp/test_ps3_aim_assist_math
+          cc -std=c99 -Wall -Wextra -Werror tests/test_ps3_stick_math.c -lm -o /tmp/test_ps3_stick_math
+          /tmp/test_ps3_stick_math
+          grep -Fq 'PS3_NormalizeStick(rx, ry' code/input/ps3_input.c
+          grep -Fq 'Cvar_Get("ps3_right_stick_deadzone", "12", CVAR_ARCHIVE)' code/input/ps3_input.c
           config=assets/ps3_usrdir/main/autoexec.cfg
           grep -Fqx 'seta ps3_aim_assist "1"' "$config"
           grep -Fqx 'seta ps3_aim_assist_strength "1.0"' "$config"
