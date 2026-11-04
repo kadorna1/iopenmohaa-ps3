@@ -52,6 +52,12 @@ R_ToggleSmpFrame
 ====================
 */
 void R_InitNextFrame( void ) {
+#if defined(__PS3__)
+	if ( glConfig.smpActive && backEndDataSmpBuffers[1] ) {
+		backEndData = (backEndData == backEndDataSmpBuffers[0])
+			? backEndDataSmpBuffers[1] : backEndDataSmpBuffers[0];
+	}
+#endif
 	backEndData->commands.used = 0;
 
 	r_firstSceneDrawSurf = 0;

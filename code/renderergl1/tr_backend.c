@@ -21,7 +21,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include "tr_local.h"
 
-backEndData_t	*backEndData;
+#if defined(__PS3__)
+__thread backEndData_t *backEndData;
+#else
+backEndData_t *backEndData;
+#endif
+backEndData_t *backEndDataSmpBuffers[2];
 backEndState_t	backEnd;
 
 
@@ -1510,6 +1515,23 @@ smp extensions, or asynchronously by another thread.
 ====================
 */
 void RB_ExecuteRenderCommands( const void *data ) {
+/* Render worker: restore its frame's TLS owner before executing the command batch. */
+void RB_RenderThread( void )
+{
+	for ( ;; )
+	{
+		void *data = GLimp_RendererSleep();
+		renderCommandList_t *cmdList;
+		if ( !data )
+			return;
+		cmdList = (renderCommandList_t *)data; /* cmds is the first member */
+		if ( cmdList->owner )
+			backEndData = (backEndData_t *)cmdList->owner;
+		RB_ExecuteRenderCommands( data );
+	}
+}
+
+
 	int		t1, t2;
 
 	t1 = ri.Milliseconds ();

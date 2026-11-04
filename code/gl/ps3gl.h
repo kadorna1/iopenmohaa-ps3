@@ -88,6 +88,7 @@ typedef struct {
     uint16_t        height;
     uint8_t         bpp;        /* bytes per texel in RSX storage: 2 or 4 */
     uint8_t         gcm_format; /* GCM_TEXTURE_FORMAT_* without LIN flag */
+    uint8_t         compressed; /* native RSX DXT1/3/5 block data */
     uint8_t         num_levels; /* contiguous mip levels uploaded so far, >=1 */
     uint8_t         wrap_s, wrap_t;
     uint8_t         min_filter, mag_filter;
@@ -377,6 +378,12 @@ void ps3gl_DeleteTextures(GLsizei n, const GLuint *textures);
 void ps3gl_TexImage2D(GLenum target, GLint level, GLint internalformat,
                       GLsizei width, GLsizei height, GLint border,
                       GLenum format, GLenum type, const void *pixels);
+void ps3gl_CompressedTexImage2D(GLenum target, GLint level, GLenum internalformat,
+                                GLsizei width, GLsizei height, GLint border,
+                                GLsizei imageSize, const void *data);
+void ps3gl_CompressedTexSubImage2D(GLenum target, GLint level, GLint xoff, GLint yoff,
+                                   GLsizei width, GLsizei height, GLenum format,
+                                   GLsizei imageSize, const void *data);
 void ps3gl_TexSubImage2D(GLenum target, GLint level, GLint xoff, GLint yoff,
                          GLsizei w, GLsizei h, GLenum format, GLenum type,
                          const void *pixels);
