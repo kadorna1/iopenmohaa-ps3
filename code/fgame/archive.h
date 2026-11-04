@@ -78,7 +78,7 @@ protected:
 public:
     ArchiveFile();
     ~ArchiveFile();
-    qboolean    Close();
+    qboolean    Close(qboolean commit);
     const char *Filename(void);
     qboolean    Compress();
     size_t      Length(void);
