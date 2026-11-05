@@ -174,20 +174,38 @@ void CG_ArchiveTikiPointer(MemArchiver& archiver, dtiki_t** pTiki)
 {
     str tmp;
 
-	if (archiver.IsReading()) {
-		archiver.ArchiveString(&tmp);
-		if (tmp.length()) {
-			*pTiki = cgi.R_Model_GetHandle(cgi.R_RegisterModel(tmp.c_str()));
-		} else {
-			*pTiki = NULL;
-		}
-	} else {
-		if (*pTiki) {
-			tmp = (*pTiki)->name;
-		}
+    if (archiver.IsReading()) {
+        archiver.ArchiveString(&tmp);
+        if (tmp.length()) {
+            *pTiki = cgi.R_Model_GetHandle(cgi.R_RegisterModel(tmp.c_str()));
+        } else {
+            *pTiki = NULL;
+        }
+    } else {
+#if defined(__PS3__)
+        if (archiver.IsWriting()) {
+            PS3_STEPF("SAVE CG TIKI pointer begin field=%p tiki=%p",
+                (void *)pTiki, pTiki ? (void *)*pTiki : NULL);
+        }
+#endif
+        if (*pTiki) {
+#if defined(__PS3__)
+            if (archiver.IsWriting()) PS3_STEPF("SAVE CG TIKI dereference begin tiki=%p", (void *)*pTiki);
+#endif
+            tmp = (*pTiki)->name;
+#if defined(__PS3__)
+            if (archiver.IsWriting()) PS3_STEPF("SAVE CG TIKI dereference complete nameLength=%lu", (unsigned long)tmp.length());
+#endif
+        }
 
-		archiver.ArchiveString(&tmp);
-	}
+        archiver.ArchiveString(&tmp);
+#if defined(__PS3__)
+        if (archiver.IsWriting()) {
+            PS3_STEPF("SAVE CG TIKI pointer complete bytes=%lu",
+                (unsigned long)archiver.BufferSize());
+        }
+#endif
+    }
 }
 
 void CG_ArchiveModelHandle(MemArchiver& archiver, qhandle_t* handle)
