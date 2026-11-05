@@ -26,6 +26,8 @@ class PS3RendererMemoryTests(unittest.TestCase):
             for name in ("mainta", "maintt")
         }
         cls.archive_source = (ROOT / "code/fgame/archive.cpp").read_text(encoding="utf-8")
+        cls.cg_commands = (ROOT / "code/cgame/cg_commands.cpp").read_text(encoding="utf-8")
+        cls.cg_archive = (ROOT / "code/cgame/cg_archive.cpp").read_text(encoding="utf-8")
         cls.shader_source = (ROOT / "code/renderergl1/tr_shader.c").read_text(encoding="utf-8")
 
     def test_stale_images_are_freed_before_map_texture_warmup(self):
@@ -159,6 +161,31 @@ class PS3RendererMemoryTests(unittest.TestCase):
         self.assertIn("MAX_PATCH_SIZE", self.world_bsp)
         self.assertIn("count > totalVertices - first", self.world_bsp)
         self.assertIn("count > totalIndexes - first", self.world_bsp)
+
+
+    def test_ps3_renderer_allocates_only_initialized_bsp_planes(self):
+        start = self.world_bsp.index("static\\tvoid R_LoadPlanes")
+        end = self.world_bsp.index("/*\\n================", start)
+        loader = self.world_bsp[start:end]
+
+        self.assertIn("#if defined(__PS3__)", loader)
+        self.assertIn("ri.Hunk_Alloc(count * sizeof(*out), h_dontcare)", loader)
+        self.assertIn("ri.Hunk_Alloc(count * 2 * sizeof(*out), h_dontcare)", loader)
+
+    def test_checkpoint_archive_traces_common_data_strings_and_tiki_dereference(self):
+        for marker in (
+            "SAVE CG common-data bouncesound begin",
+            "SAVE CG common-data tiki begin",
+            "SAVE CG common-data swipe_shader begin",
+            "SAVE CG common-data swipe_tag_start begin",
+            "SAVE CG common-data swipe_tag_end begin",
+            "SAVE CG common-data shadername begin",
+            "SAVE CG common-data complete",
+        ):
+            self.assertIn(marker, self.cg_commands)
+
+        self.assertIn("SAVE CG TIKI dereference begin", self.cg_archive)
+        self.assertIn("SAVE CG TIKI dereference complete", self.cg_archive)
 
 
 if __name__ == "__main__":
