@@ -575,227 +575,64 @@ jobs:
           path: |
             dist/iOpenMOHAA-PS3-OMOHAS020.pkg
 
-      - name: Publish GitHub release
-        if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish v0.1.0.0b]')
+      - name: Publish GitHub release v0.2.0.0a
+        if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish v0.2.0.0a]')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create v0.1.0.0b dist/*.pkg \
+
+          expected_files=(
+            iOpenMOHAA-PS3-OMOHAA020.pkg
+            iOpenMOHAA-PS3-OMOHAA020.gnpdrm.pkg
+            iOpenMOHAA-PS3-OMOHAB020.pkg
+            iOpenMOHAA-PS3-OMOHAB020.gnpdrm.pkg
+            iOpenMOHAA-PS3-OMOHAS020.pkg
+            iOpenMOHAA-PS3-OMOHAS020.gnpdrm.pkg
+          )
+
+          for name in "${expected_files[@]}"; do
+            if [[ ! -s "dist/$name" ]]; then
+              echo "::error::Missing or empty release package: $name"
+              exit 1
+            fi
+          done
+
+          mapfile -t actual_files < <(find dist -maxdepth 1 -type f -name '*.pkg' -printf '%f\n' | sort)
+          if [[ "${#actual_files[@]}" -ne 6 ]]; then
+            echo "::error::Expected exactly six PKG assets; found ${#actual_files[@]}: ${actual_files[*]}"
+            exit 1
+          fi
+
+          cat > "$RUNNER_TEMP/v0.2.0.0a-release-notes.md" <<'RELEASE_NOTES'
+          ## Changes since v0.1.0.0c
+
+          This release contains the 118 commits added to `main` after v0.1.0.0c, including the following feature work and its follow-up fixes/tests.
+
+          - **Training dialogue and scripted audio:** restore `sounddone` callbacks for PCM and streamed sound-effect voices, assign stable callback channels, and make script sound-state queries check the active mixer voice/stream. Failed sound starts report a non-playing channel so dialogue scripts do not wait indefinitely.
+          - **Aim-assist controls:** move the physical toggle to edge-triggered R1, show ON/OFF feedback through the normal center-print UI, and remove the separate CGame overlay.
+          - **Renderer SMP and frame-state isolation:** add separate front-end/back-end frame storage, double-buffer scene data, snapshot per-view and frame identifiers, isolate view-dependent backend state, and dispatch command batches to the PS3 render worker. `r_smp` defaults to enabled on PS3; failed worker startup retains the synchronous fallback.
+          - **Texture and material handling:** add native RSX S3TC DXT1, DXT3 and DXT5 uploads, support the GL1 `GL_BLEND` texture-environment mode, and render additive multitexture stages in two depth-coherent passes. Dynamic-light scratch data is separated by frame.
+          - **Omaha Beach profiling and renderer memory:** add FPS/backend timing, direct-XDR versus copied-vertex counters, command/surface-builder, swap and `qglFinish` timings, and game-frame phase timings for events/scripts, actor pre-animation, navigation, bots, entities/AI/physics and post-entity work. The vertex ring is 8 MiB in cacheable IO-mapped main memory (two 4 MiB frame segments), separate from the 4 MiB RSX command buffer. TIKI skeletal skinning caches per-mesh global-to-local bone indices.
+          - **DualShock 3 analog response:** use a radial right-stick deadzone and rescale remaining travel while preserving diagonal direction. The archived `ps3_right_stick_deadzone` setting defaults to 12 and is clamped to 0–64; regression tests cover continuity, monotonicity, polarity, diagonals and saturation.
+          - **Save-archive streaming and safer replacement:** stream PS3 saves through a 64 KiB staging buffer, preserve random-access backpatches with flush/seek, and write to `.ps3tmp` before flushing, closing and renaming a complete save into place. This removes the former large contiguous archive-buffer allocation while preserving archive ordering/version and reader compatibility. Typed-field mismatch logs include byte offset and object classname where available.
+          - **CGame teardown and checkpoint diagnostics:** release retained special-effect command events before resetting the event allocator, and add checkpoint snapshot/emitter-list diagnostics to help investigate remaining state/lifetime faults.
+          - **Build and regression coverage:** expand checks for sound callback routing, R1/center-print behavior, SMP frame isolation, blend/additive material paths, right-stick math, archive behavior, multi-title staging and renderer memory. CI builds and links Allied Assault, Breakthrough and Spearhead and verifies standard plus GNPDRM packages for all three.
+
+          The SPUKit streamed-audio mixer is included as an opt-in experimental build path and is not enabled in the standard release configuration. Renderer SMP is PPU-side worker threading, not SPE renderer offload.
+
+          ## Validation
+
+          The release job publishes only after the three-title PS3 build, regression tests, staging checks and six non-empty package outputs have succeeded. Physical-console testing is still required for long-session performance, checkpoint/save/reload behavior and the experimental SPU audio path.
+          RELEASE_NOTES
+
+          if gh release view v0.2.0.0a >/dev/null 2>&1; then
+            echo "::error::Release v0.2.0.0a already exists; refusing to overwrite it."
+            exit 1
+          fi
+
+          gh release create v0.2.0.0a dist/*.pkg \
             --target "$GITHUB_SHA" \
-            --title "shader caching enabled" \
-            --notes "Shader-caching release for iOpenMOHAA PS3. Publishes separate Allied Assault, Breakthrough and Spearhead EBOOT packages. All variants share the Allied Assault game-data install root and keep configuration, saves, state and logs inside their own TITLE_ID USRDIR. Includes the pre-indexed shader cache, DualShock 3 aim assist, static-free minimp3 audio, streamed audio support, 720p default display configuration, and stripped PS3 binaries."
-
-      - name: Create draft GitHub release
-        if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[draft v0.1.0.0c]')
-        uses: actions/github-script@v7
-        env:
-          RELEASE_NOTES: |
-            ### Changes
-
-            - Build separate Allied Assault, Breakthrough and Spearhead PS3 executables and PKGs with cached incremental builds.
-            - Keep expansion data and startup configuration in each title's own USRDIR, with shared Allied Assault data fallback.
-            - Add per-title shader caches, renderer memory diagnostics, texture/lightmap optimizations and streamed BSP surface loading.
-            - Improve expansion audio precaching and MP3/minimp3 recovery; retain the static-free audio fix.
-            - Apply DS3 aim assist consistently across all three titles, enabled by default with an in-game toggle.
-            - Expand automated coverage for packaging, expansion loading, shader caches, renderer memory and aim-assist behaviour.
-
-            ### Validation
-
-            - GitHub Actions run #549 passed all host tests, all three PS3 builds/links, staging checks, and verification of all three installable PKGs.
-            - Real-hardware validation of BSP streaming, rendering quality, expansion stability and aim-assist behaviour remains outstanding.
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-            const { owner, repo } = context.repo;
-            const tag = 'v0.1.0.0c';
-            const packageDir = path.join(process.env.GITHUB_WORKSPACE || process.cwd(), 'dist');
-            const packageFiles = fs.readdirSync(packageDir)
-              .filter(name => name.endsWith('.pkg'))
-              .sort();
-
-            if (packageFiles.length !== 6) {
-              throw new Error(`Expected exactly 6 PS3 PKGs for ${tag} in dist/, found ${packageFiles.length}: ${packageFiles.join(', ')}`);
-            }
-
-            let release;
-            try {
-              const existing = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
-              release = existing.data;
-              if (!release.draft) {
-                throw new Error(`Release ${tag} already exists and is not a draft; refusing to replace it.`);
-              }
-            } catch (error) {
-              if (error.status !== 404) throw error;
-              const created = await github.rest.repos.createRelease({
-                owner,
-                repo,
-                tag_name: tag,
-                target_commitish: context.sha,
-                name: 'Three-title PS3 build with BSP streaming',
-                body: process.env.RELEASE_NOTES,
-                draft: true,
-                prerelease: false
-              });
-              release = created.data;
-            }
-
-            let assets = await github.paginate(github.rest.repos.listReleaseAssets, {
-              owner,
-              repo,
-              release_id: release.id,
-              per_page: 100
-            });
-
-            for (const name of packageFiles) {
-              if (assets.some(asset => asset.name === name)) continue;
-              const filePath = path.join(packageDir, name);
-              const stat = fs.statSync(filePath);
-              await github.rest.repos.uploadReleaseAsset({
-                owner,
-                repo,
-                release_id: release.id,
-                name,
-                data: fs.readFileSync(filePath),
-                headers: {
-                  'content-type': 'application/octet-stream',
-                  'content-length': stat.size
-                }
-              });
-            }
-
-            assets = await github.paginate(github.rest.repos.listReleaseAssets, {
-              owner,
-              repo,
-              release_id: release.id,
-              per_page: 100
-            });
-            const missing = packageFiles.filter(name => !assets.some(asset => asset.name === name));
-            if (missing.length) {
-              throw new Error(`Draft release is missing assets: ${missing.join(', ')}`);
-            }
-            core.notice(`Draft release ${tag} is ready with ${packageFiles.length} verified PKG assets: ${release.html_url}`);
-
-      - name: Publish GitHub release v0.1.0.0c
-        if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish v0.1.0.0c]')
-        uses: actions/github-script@v7
-        env:
-          RELEASE_NOTES: |
-            ## What's new since v0.1.0.0b
-
-            - **Three independent game packages:** build Allied Assault, Breakthrough and Spearhead with their own executable configuration, target-game selection and PS3 TITLE_ID.
-            - **Expansion-local data and state:** stage Breakthrough in its own USRDIR/maintt and Spearhead in its own USRDIR/mainta, while retaining shared Allied Assault base-game lookup and separate per-title saves, configuration and logs.
-            - **BSP surface streaming:** read draw vertices and indexes per surface using reusable bounded scratch buffers, reducing peak memory pressure during level loading.
-            - **Renderer and memory work:** add per-title shader caches, safer cache validation and generation, compact texture/lightmap handling, unused-image cleanup, texture-memory reporting, zone-allocation diagnostics and a lower-memory PS3 save-archive path.
-            - **DualShock 3 aim assist across all titles:** support scripted soldiers and players, reject friendly/dead/occluded targets, enable aim assist by default at strength 1.0 and provide an L2 toggle with on-screen state feedback.
-            - **Expansion audio robustness:** improve MP3 stream/frame recovery and expansion audio precaching while retaining the native libaudio mixer and minimp3-based static-free playback.
-            - **Incremental Linux CI:** persist three separate Ninja build trees and share the cached PS3 toolchain, host dependencies and compiler cache; expand automated coverage for aim assist, expansion paths, renderer memory, BSP streaming and shader caches.
-
-            ## Validation
-
-            - The release workflow builds and links all three PS3 title variants, runs the PS3 regression tests, validates title-specific shader caches and stages all three packages.
-            - Six package assets are attached: standard PKG and GNPDRM PKG for each title.
-            - CI success verifies compilation, tests and package generation; physical-console validation of campaign stability, performance, BSP streaming and memory behavior remains ongoing.
-            - Build run: https://github.com/kadorna1/iopenmohaa-ps3/actions/runs/${{ github.run_id }}
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-            const { owner, repo } = context.repo;
-            const tag = 'v0.1.0.0c';
-            const packageDir = path.join(process.env.GITHUB_WORKSPACE || process.cwd(), 'dist');
-            const expectedFiles = [
-              'iOpenMOHAA-PS3-OMOHAA020.pkg',
-              'iOpenMOHAA-PS3-OMOHAA020.gnpdrm.pkg',
-              'iOpenMOHAA-PS3-OMOHAB020.pkg',
-              'iOpenMOHAA-PS3-OMOHAB020.gnpdrm.pkg',
-              'iOpenMOHAA-PS3-OMOHAS020.pkg',
-              'iOpenMOHAA-PS3-OMOHAS020.gnpdrm.pkg'
-            ];
-            const packageFiles = fs.readdirSync(packageDir)
-              .filter(name => name.endsWith('.pkg'))
-              .sort();
-
-            const missingFiles = expectedFiles.filter(name => !packageFiles.includes(name));
-            if (packageFiles.length !== expectedFiles.length || missingFiles.length) {
-              throw new Error(
-                'Expected exactly six title PKG/GNPDRM files; found ' +
-                packageFiles.length + ': ' + packageFiles.join(', ') +
-                '. Missing: ' + missingFiles.join(', ')
-              );
-            }
-
-            let release;
-            try {
-              const existing = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
-              release = existing.data;
-              if (!release.draft) {
-                throw new Error('Release ' + tag + ' already exists as a published release; refusing to replace it.');
-              }
-            } catch (error) {
-              if (error.status !== 404) throw error;
-              const created = await github.rest.repos.createRelease({
-                owner,
-                repo,
-                tag_name: tag,
-                target_commitish: context.sha,
-                name: 'Three-title build with BSP streaming',
-                body: process.env.RELEASE_NOTES,
-                draft: true,
-                prerelease: false
-              });
-              release = created.data;
-            }
-
-            let assets = await github.paginate(github.rest.repos.listReleaseAssets, {
-              owner,
-              repo,
-              release_id: release.id,
-              per_page: 100
-            });
-
-            for (const name of packageFiles) {
-              if (assets.some(asset => asset.name === name)) continue;
-              const filePath = path.join(packageDir, name);
-              const stat = fs.statSync(filePath);
-              await github.rest.repos.uploadReleaseAsset({
-                owner,
-                repo,
-                release_id: release.id,
-                name,
-                data: fs.readFileSync(filePath),
-                headers: {
-                  'content-type': 'application/octet-stream',
-                  'content-length': stat.size
-                }
-              });
-            }
-
-            assets = await github.paginate(github.rest.repos.listReleaseAssets, {
-              owner,
-              repo,
-              release_id: release.id,
-              per_page: 100
-            });
-            const missingAssets = packageFiles.filter(name => !assets.some(asset => asset.name === name));
-            if (missingAssets.length) {
-              throw new Error('Release is missing package assets: ' + missingAssets.join(', '));
-            }
-
-            const published = await github.rest.repos.updateRelease({
-              owner,
-              repo,
-              release_id: release.id,
-              name: 'Three-title build with BSP streaming',
-              body: process.env.RELEASE_NOTES,
-              draft: false,
-              prerelease: false
-            });
-            core.notice(
-              'Published ' + tag + ' with ' + packageFiles.length +
-              ' verified package assets: ' + published.data.html_url
-            );
+            --title "iOpenMoHAA PS3 v0.2.0.0a" \
+            --notes-file "$RUNNER_TEMP/v0.2.0.0a-release-notes.md"
