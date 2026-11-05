@@ -261,6 +261,7 @@ functions exported to the main executable
         void (*S_Respatialize)(int entityNum, const vec3_t origin, vec3_t axis[3]);
         void (*S_BeginRegistration)(void);
         sfxHandle_t (*S_RegisterSound)(const char *sample, int streamed);
+        int (*S_PrecacheStream)(const char *sample);
         void (*S_EndRegistration)(void);
         void (*S_UpdateEntity)(int entityNum, const vec3_t origin, const vec3_t velocity, qboolean use_listener);
         void (*S_SetReverb)(int reverb_type, float reverb_level);
