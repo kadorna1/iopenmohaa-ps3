@@ -164,8 +164,8 @@ class PS3RendererMemoryTests(unittest.TestCase):
 
 
     def test_ps3_renderer_allocates_only_initialized_bsp_planes(self):
-        start = self.world_bsp.index("static\\tvoid R_LoadPlanes")
-        end = self.world_bsp.index("/*\\n================", start)
+        start = self.world_bsp.index("R_LoadPlanes(gamelump_t* l)")
+        end = self.world_bsp.index("/*\\n================\\nR_LoadLightGrid", start)
         loader = self.world_bsp[start:end]
 
         self.assertIn("#if defined(__PS3__)", loader)
