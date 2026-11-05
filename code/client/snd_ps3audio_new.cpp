@@ -911,26 +911,24 @@ static void ps3a_clear_precache_internal(void)
     }
 }
 
-static void ps3a_precache_sound_internal(int sfxHandle)
+static int ps3a_precache_file_internal(const char *filename)
 {
-    sfx_t *sfx;
     snd_stream_t *decoder = NULL;
     byte raw[PS3A_PRECACHE_FRAMES * 4];
     int rate = 0, width = 0, chans = 0;
     int slot = -1, limit, i, got, frames, frameBytes;
 
-    if (!g_up || sfxHandle <= 0 || sfxHandle >= s_numSfx) {
-        return;
+    if (!g_up || !filename || !filename[0]) {
+        return -1;
     }
-
-    sfx = &s_knownSfx[sfxHandle];
-    if (!(sfx->iFlags & (SFX_FLAG_STREAMED | SFX_FLAG_MP3)) || !sfx->name[0]) {
-        return;
+    if (strlen(filename) >= MAX_QPATH) {
+        PS3_BootTracef("PS3AUDIO: precache skipped; sound path too long file=%s", filename);
+        return 0;
     }
 
     limit = ps3a_precache_limit();
     if (!limit) {
-        return;
+        return -1;
     }
 
     /* Reserve a slot before opening the decoder, but never hold the audio
@@ -938,9 +936,9 @@ static void ps3a_precache_sound_internal(int sfxHandle)
     ps3a_lock();
     for (i = 0; i < limit; i++) {
         if ((g_precache[i].active || g_precache[i].reserved)
-            && !Q_stricmp(g_precache[i].filename, sfx->name)) {
+            && !Q_stricmp(g_precache[i].filename, filename)) {
             ps3a_unlock();
-            return;
+            return 1; /* Already warm or currently being prepared. */
         }
         if (slot < 0 && !g_precache[i].active && !g_precache[i].reserved) {
             slot = i;
@@ -948,21 +946,21 @@ static void ps3a_precache_sound_internal(int sfxHandle)
     }
     if (slot >= 0) {
         g_precache[slot].reserved = true;
-        Q_strncpyz(g_precache[slot].filename, sfx->name, sizeof(g_precache[slot].filename));
+        Q_strncpyz(g_precache[slot].filename, filename, sizeof(g_precache[slot].filename));
     }
     ps3a_unlock();
 
     if (slot < 0) {
-        return; /* The bounded warm cache is full; normal streaming remains available. */
+        return -1; /* The bounded warm cache is full; normal streaming remains available. */
     }
 
-    decoder = ps3a_stream_open_decoder(sfx->name, &rate, &width, &chans, 0);
+    decoder = ps3a_stream_open_decoder(filename, &rate, &width, &chans, 0);
     if (!decoder) {
         ps3a_lock();
         memset(&g_precache[slot], 0, sizeof(g_precache[slot]));
         ps3a_unlock();
-        PS3_BootTracef("PS3AUDIO: precache skipped; decoder open failed file=%s", sfx->name);
-        return;
+        PS3_BootTracef("PS3AUDIO: precache skipped; decoder open failed file=%s", filename);
+        return 0;
     }
 
     frameBytes = width * chans;
@@ -975,13 +973,13 @@ static void ps3a_precache_sound_internal(int sfxHandle)
         ps3a_lock();
         memset(&g_precache[slot], 0, sizeof(g_precache[slot]));
         ps3a_unlock();
-        PS3_BootTracef("PS3AUDIO: precache skipped; no decoded frames file=%s", sfx->name);
-        return;
+        PS3_BootTracef("PS3AUDIO: precache skipped; no decoded frames file=%s", filename);
+        return 0;
     }
 
     ps3a_lock();
     if (g_precache[slot].reserved
-        && !Q_stricmp(g_precache[slot].filename, sfx->name)) {
+        && !Q_stricmp(g_precache[slot].filename, filename)) {
         int n;
         for (n = 0; n < frames; n++) {
             int left, right;
@@ -1019,11 +1017,27 @@ static void ps3a_precache_sound_internal(int sfxHandle)
 
     if (decoder) {
         S_CodecCloseStream(decoder);
-        return;
+        return 0;
     }
 
     PS3_BootTracef("PS3AUDIO: mission stream precached file=%s frames=%d rate=%d channels=%d slots=%d",
-                   sfx->name, frames, rate, chans, limit);
+                   filename, frames, rate, chans, limit);
+    return 2; /* Newly warmed. */
+}
+
+static void ps3a_precache_sound_internal(int sfxHandle)
+{
+    const sfx_t *sfx;
+
+    if (sfxHandle <= 0 || sfxHandle >= s_numSfx) {
+        return;
+    }
+    sfx = &s_knownSfx[sfxHandle];
+    if (!(sfx->iFlags & (SFX_FLAG_STREAMED | SFX_FLAG_MP3)) || !sfx->name[0]) {
+        return;
+    }
+
+    (void)ps3a_precache_file_internal(sfx->name);
 }
 
 static bool ps3a_take_precache(int streamSlot, const char *filename, ps3a_precache_take_t *taken)
