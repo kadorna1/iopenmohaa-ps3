@@ -6448,8 +6448,18 @@ void cg_common_data::ArchiveToMemory(MemArchiver& archiver)
 {
 #if defined(__PS3__)
     if (archiver.IsWriting()) {
-        PS3_STEPF("SAVE CG common-data begin ptr=%p tiki=%p bytes=%lu",
-            (void *)this, (void *)tiki, (unsigned long)archiver.BufferSize());
+        /*
+         * Keep the entry marker independent of member reads. The previous
+         * marker evaluated 'tiki' while formatting the line, so a bad object
+         * address could fault before the trace identified method entry.
+         */
+        PS3_STEPF("SAVE CG common-data enter this=%p size=%lu",
+            (void *)this, (unsigned long)sizeof(cg_common_data));
+        {
+            dtiki_t *archiveTiki = tiki;
+            PS3_STEPF("SAVE CG common-data tiki field read complete field=%p value=%p",
+                (void *)&tiki, (void *)archiveTiki);
+        }
     }
 #endif
     archiver.ArchiveInteger(&life);
@@ -6583,7 +6593,8 @@ void spawnthing_t::ArchiveToMemory(MemArchiver& archiver)
     if (archiver.IsWriting()) {
         PS3_STEPF("SAVE CG spawnthing tag-list complete ptr=%p bytes=%lu",
             (void *)this, (unsigned long)archiver.BufferSize());
-        PS3_STEPF("SAVE CG spawnthing common-data begin ptr=%p", (void *)this);
+        PS3_STEPF("SAVE CG spawnthing common-data begin this=%p cgd=%p cgd-size=%lu",
+            (void *)this, (void *)&cgd, (unsigned long)sizeof(cgd));
     }
 #endif
 
