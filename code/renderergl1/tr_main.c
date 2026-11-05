@@ -1763,10 +1763,12 @@ or a mirror / remote location
 ================
 */
 void R_RenderView (viewParms_t *parms) {
+	PS3_PROFILE_START(ps3_cgame_t0);
 	int		firstDrawSurf;
 	int		firstSpriteSurf;
 
 	if ( parms->viewportWidth <= 0 || parms->viewportHeight <= 0 ) {
+		PS3_PROFILE_END(PS3_PROF_CGAME, ps3_cgame_t0);
 		return;
 	}
 
@@ -1802,6 +1804,8 @@ void R_RenderView (viewParms_t *parms) {
 
 	// draw main system development information (surface outlines, etc)
 	R_DebugGraphics();
+
+	PS3_PROFILE_END(PS3_PROF_CGAME, ps3_cgame_t0);
 }
 
 

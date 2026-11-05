@@ -123,6 +123,35 @@ enum {
     PS3_PROF_BONES,     /* inside anim: R_CalcBones */
     PS3_PROF_COLORS,    /* inside shade: per-stage vertex colors (ComputeColors) */
     PS3_PROF_TCOORDS,   /* inside shade: per-stage texture coords (ComputeTexCoords) */
+    PS3_PROF_COMMANDS,  /* total RB_ExecuteRenderCommands time */
+    PS3_PROF_DRAW_CMD,  /* RB_DrawSurfs command */
+    PS3_PROF_SPRITE_CMD,/* RB_SpriteSurfs command */
+    PS3_PROF_DRAW_LIST, /* RB_RenderDrawSurfList including entity/light setup */
+    PS3_PROF_SPRITE_LIST,/* RB_RenderSpriteSurfList */
+    PS3_PROF_SURF_DISPATCH, /* time inside surface-specific geometry builders */
+    PS3_PROF_SF_FACE,
+    PS3_PROF_SF_GRID,
+    PS3_PROF_SF_POLY,
+    PS3_PROF_SF_MARK,
+    PS3_PROF_SF_FLARE,
+    PS3_PROF_SF_ENTITY,
+    PS3_PROF_SF_DISPLAY,
+    PS3_PROF_SF_SKEL,
+    PS3_PROF_SF_STATIC,
+    PS3_PROF_SF_SWIPE,
+    PS3_PROF_SF_SPRITE,
+    PS3_PROF_SF_TERRAIN,
+    PS3_PROF_SF_TRIANGLES,
+    PS3_PROF_CMD_STRETCH,
+    PS3_PROF_CMD_MISC,
+    PS3_PROF_CMD_SWAP,
+    PS3_PROF_GL_FINISH,
+    PS3_PROF_GAME_EVENTS,
+    PS3_PROF_GAME_PREANIM,
+    PS3_PROF_GAME_NAV,
+    PS3_PROF_GAME_BOT,
+    PS3_PROF_GAME_ENTITIES,
+    PS3_PROF_GAME_POST,
     PS3_PROF_COUNT
 };
 static inline unsigned long long PS3_ProfTick(void)
@@ -131,9 +160,42 @@ static inline unsigned long long PS3_ProfTick(void)
     __asm__ volatile("mftb %0" : "=r"(tb));
     return tb;
 }
+/* These routines and shared counters are implemented in C but used by
+ * both the C renderer and C++ model/client code. Keep one unmangled ABI. */
+#ifdef __cplusplus
+extern "C" {
+#endif
 void PS3_ProfAdd(int slot, unsigned long long ticks);
-void PS3_ProfReportFrame(void);
-extern int ps3_prof_smp;     /* the render thread is up (set by ps3_glimp.c) */
+void PS3_ProfBackendBegin(void);
+void PS3_ProfBackendEnd(void);
+extern int ps3_prof_smp;
+#ifdef __cplusplus
+}
+#endif
+
+#ifdef __PS3__
+#define PS3_PROFILE_START(name) unsigned long long name = PS3_ProfTick()
+#define PS3_PROFILE_END(slot, name) PS3_ProfAdd((slot), PS3_ProfTick() - (name))
+#else
+#define PS3_PROFILE_START(name) ((void)0)
+#define PS3_PROFILE_END(slot, name) ((void)0)
+#endif
+
+#if defined(__PS3__) && defined(__cplusplus)
+class PS3PlatformProfileScope {
+public:
+    explicit PS3PlatformProfileScope(int slot) : slot_(slot), start_(PS3_ProfTick()) {}
+    ~PS3PlatformProfileScope() { PS3_ProfAdd(slot_, PS3_ProfTick() - start_); }
+private:
+    int slot_;
+    unsigned long long start_;
+};
+#define PS3_PROFILE_SCOPE_JOIN2(a, b) a##b
+#define PS3_PROFILE_SCOPE_JOIN(a, b) PS3_PROFILE_SCOPE_JOIN2(a, b)
+#define PS3_PROFILE_SCOPE(slot) PS3PlatformProfileScope PS3_PROFILE_SCOPE_JOIN(ps3_profile_scope_, __LINE__)(slot)
+#else
+#define PS3_PROFILE_SCOPE(slot) ((void)0)
+#endif     /* the render thread is up (set by ps3_glimp.c) */
 void PS3_PlatformPump(void);
 int PS3_PlatformRunning(void);
 /* one module syscall (VM_DllSyscall): args[0] is the call number */
@@ -141,15 +203,14 @@ void PS3_ProfSyscall(const char *module, const intptr_t *args, unsigned long lon
 
 /* ps3gl counters, reset every frame by the profiler */
 typedef struct {
-    unsigned draws;         /* DrawElements/DrawArrays + immediate flushes */
-    unsigned verts;         /* vertices copied into the vertex ring */
-    unsigned indices;       /* inline indices written to the command buffer */
-    unsigned vring_peak;    /* bytes of the ring segment used */
+    unsigned draws;         /* submitted DrawElements and immediate-mode draws */
+    unsigned verts;         /* vertices submitted, including direct-bound arrays */
+    unsigned indices;       /* indices submitted through DrawElements */
+    unsigned vring_peak;    /* peak bytes consumed in the current report window */
     unsigned dropped;       /* draws dropped because the ring segment was full */
-    unsigned direct_draws;  /* vertex arrays read directly from IO-mapped XDR */
-    unsigned copy_draws;    /* vertex batches interleaved into the RSX ring */
-    unsigned copy_verts;    /* vertices copied into the ring */
-    unsigned copy_bytes;    /* bytes written into the ring for vertex batches */
+    unsigned direct_draws;  /* draws bound directly from IO-mapped main memory */
+    unsigned copied_draws;  /* draws staged through the PS3GL vertex ring */
+    unsigned copied_verts;  /* vertices copied into the PS3GL vertex ring */
 } ps3gl_stats_t;
 extern ps3gl_stats_t ps3gl_stats;
 extern unsigned ps3gl_tex_bytes;    /* RSX memory held by textures */

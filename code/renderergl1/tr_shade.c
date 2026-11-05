@@ -794,6 +794,7 @@ ComputeColors
 */
 static void ComputeColors( shaderStage_t *pStage )
 {
+	PS3_PROFILE_START(ps3_colors_t0);
 	int		i;
 
 	//
@@ -1339,6 +1340,8 @@ static void ComputeColors( shaderStage_t *pStage )
 	default:
 		break;
 	}
+
+	PS3_PROFILE_END(PS3_PROF_COLORS, ps3_colors_t0);
 }
 
 /*
@@ -1347,6 +1350,7 @@ ComputeTexCoords
 ===============
 */
 static void ComputeTexCoords( shaderStage_t *pStage ) {
+	PS3_PROFILE_START(ps3_tcoords_t0);
 	int		i;
 	int		b;
 
@@ -1475,6 +1479,8 @@ static void ComputeTexCoords( shaderStage_t *pStage ) {
 			}
 		}
 	}
+
+	PS3_PROFILE_END(PS3_PROF_TCOORDS, ps3_tcoords_t0);
 }
 
 /*
@@ -1565,6 +1571,7 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 */
 void RB_StageIteratorGeneric( void )
 {
+	PS3_PROFILE_START(ps3_shade_t0);
 	shaderCommands_t *input;
 
 	input = &tess;
@@ -1668,6 +1675,8 @@ void RB_StageIteratorGeneric( void )
 	{
 		qglDisable( GL_POLYGON_OFFSET_FILL );
 	}
+
+	PS3_PROFILE_END(PS3_PROF_SHADE, ps3_shade_t0);
 }
 
 
@@ -1866,11 +1875,13 @@ void RB_StageIteratorLightmappedMultitextureUnfogged( void ) {
 ** RB_EndSurface
 */
 void RB_EndSurface( void ) {
+	PS3_PROFILE_START(ps3_surface_t0);
 	shaderCommands_t *input;
 
 	input = &tess;
 
 	if (input->numIndexes == 0) {
+		PS3_PROFILE_END(PS3_PROF_SURF, ps3_surface_t0);
 		return;
 	}
 	if (input->indexes[SHADER_MAX_INDEXES-1] != 0) {
@@ -1886,11 +1897,13 @@ void RB_EndSurface( void ) {
 
 	if ( tess.shader == tr.shadowShader ) {
 		RB_ComputeShadowVolume();
+		PS3_PROFILE_END(PS3_PROF_SURF, ps3_surface_t0);
 		return;
 	}
 
 	// for debugging of sort order issues, stop rendering after a given sort value
 	if ( r_debugSort->integer && r_debugSort->integer < tess.shader->sort ) {
+		PS3_PROFILE_END(PS3_PROF_SURF, ps3_surface_t0);
 		return;
 	}
 
@@ -1924,5 +1937,7 @@ void RB_EndSurface( void ) {
 	tess.numIndexes = 0;
 
 	GLimp_LogComment( "----------\n" );
+
+	PS3_PROFILE_END(PS3_PROF_SURF, ps3_surface_t0);
 }
 

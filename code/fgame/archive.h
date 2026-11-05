@@ -65,11 +65,20 @@ protected:
     size_t bufferlength;
     bool   writing;
     bool   opened;
+#if defined(__PS3__)
+    fileHandle_t streamHandle;
+    str         streamTempFilename;
+    size_t      streamPosition;
+    size_t      streamBuffered;
+    qboolean    streamMode;
+    qboolean    streamFailed;
+    qboolean    FlushStreamBuffer(void);
+#endif
 
 public:
     ArchiveFile();
     ~ArchiveFile();
-    void        Close();
+    qboolean    Close(qboolean commit);
     const char *Filename(void);
     qboolean    Compress();
     size_t      Length(void);
@@ -90,6 +99,7 @@ private:
 
 protected:
     str         filename;
+    str         currentObjectName;
     qboolean    fileerror;
     ArchiveFile archivefile;
     int         archivemode;

@@ -229,6 +229,8 @@ S_Update
 */
 void S_Update( void )
 {
+    PS3_PROFILE_START(ps3_sound_t0);
+
 	if(s_muted->integer)
 	{
 		if(!(s_muteWhenMinimized->integer && com_minimized->integer) &&
@@ -251,6 +253,8 @@ void S_Update( void )
 	if( si.Update ) {
 		si.Update( );
 	}
+
+    PS3_PROFILE_END(PS3_PROF_SOUND, ps3_sound_t0);
 }
 
 /*

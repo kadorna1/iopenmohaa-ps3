@@ -2730,6 +2730,7 @@ static void PS3_MapFrameTrace(const char *stage)
 #endif
 
 void CL_Frame ( int msec ) {
+    PS3_PROFILE_SCOPE(PS3_PROF_CL);
 
 	if ( !com_cl_running->integer ) {
 		return;

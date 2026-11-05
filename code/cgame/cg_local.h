@@ -919,6 +919,7 @@ qboolean CG_LightStyleColor(int style, int realtime, vec4_t color, qboolean clam
     void CG_LandingSound(centity_t *ent, refEntity_t *pREnt, float volume, int iEquipment);
     void CG_BodyFallSound(centity_t *ent, refEntity_t *pREnt, float volume);
     void CG_InitializeSpecialEffectsManager();
+    void CG_ShutdownSpecialEffectsManager();
     void CG_AddPendingEffects();
 
     //

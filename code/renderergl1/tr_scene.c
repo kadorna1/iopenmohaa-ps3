@@ -52,6 +52,12 @@ R_ToggleSmpFrame
 ====================
 */
 void R_InitNextFrame( void ) {
+#if defined(__PS3__)
+	if ( glConfig.smpActive && backEndDataSmpBuffers[1] ) {
+		backEndData = (backEndData == backEndDataSmpBuffers[0])
+			? backEndDataSmpBuffers[1] : backEndDataSmpBuffers[0];
+	}
+#endif
 	backEndData->commands.used = 0;
 
 	r_firstSceneDrawSurf = 0;
@@ -446,6 +452,14 @@ void RE_RenderScene( const refdef_t *fd ) {
 	if ( !tr.registered ) {
 		return;
 	}
+
+	/* TIKI pose caches and the tr.* view state are shared by backend routines
+	 * in this renderer. Do not reset/update them while the previous frame's
+	 * render worker is still consuming them. Entity/scene arrays have already
+	 * been double-buffered, so only the view-building phase needs this barrier. */
+	if ( glConfig.smpActive )
+		R_SyncRenderThread();
+
 	GLimp_LogComment( "====== RE_RenderScene =====\n" );
 
 	if ( r_norefresh->integer ) {

@@ -1841,6 +1841,7 @@ void SV_InitGameProgs( void ) {
 	import.FS_Tell						= FS_FTell;
 	import.FS_Seek						= FS_Seek;
 	import.FS_Flush						= FS_ForceFlush;
+	import.FS_RenameHomeData			= FS_Rename_HomeData;
 	import.FS_FileNewer					= FS_FileNewer;
 	import.FS_CanonicalFilename			= FS_CanonicalFilename;
 	import.FS_ListFiles					= FS_ListFiles;

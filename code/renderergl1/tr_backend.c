@@ -21,9 +21,20 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include "tr_local.h"
 
-backEndData_t	*backEndData;
+#if defined(__PS3__)
+__thread backEndData_t *backEndData;
+#else
+backEndData_t *backEndData;
+#endif
+backEndData_t *backEndDataSmpBuffers[2];
 backEndState_t	backEnd;
 
+
+#if defined(__PS3__)
+/* Start once per frame's render-command stream; close before GLimp_EndFrame
+ * because PS3_RSX_EndFrame emits the 120-frame report from inside that call. */
+static unsigned long long ps3_command_dispatch_start;
+#endif
 
 static float	s_flipMatrix[16] = {
 	// convert from our coordinate system (looking down X)
@@ -65,7 +76,7 @@ void GL_Bind( image_t *image ) {
 
 	if ( glState.currenttextures[glState.currenttmu] != texnum ) {
 		if (image) {
-			image->frameUsed = tr.frameCount;
+			image->frameUsed = backEnd.viewParms.frameCount;
 		}
 		glState.currenttextures[glState.currenttmu] = texnum;
 		qglBindTexture (GL_TEXTURE_2D, texnum);
@@ -118,13 +129,13 @@ void GL_BindMultitexture( image_t *image0, GLuint env0, image_t *image1, GLuint 
 
 	if ( glState.currenttextures[1] != texnum1 ) {
 		GL_SelectTexture( 1 );
-		image1->frameUsed = tr.frameCount;
+		image1->frameUsed = backEnd.viewParms.frameCount;
 		glState.currenttextures[1] = texnum1;
 		qglBindTexture( GL_TEXTURE_2D, texnum1 );
 	}
 	if ( glState.currenttextures[0] != texnum0 ) {
 		GL_SelectTexture( 0 );
-		image0->frameUsed = tr.frameCount;
+		image0->frameUsed = backEnd.viewParms.frameCount;
 		glState.currenttextures[0] = texnum0;
 		qglBindTexture( GL_TEXTURE_2D, texnum0 );
 	}
@@ -602,7 +613,9 @@ void RB_BeginDrawingView (void) {
 
 	// sync with gl if needed
 	if ( r_finish->integer == 1 && !glState.finishCalled ) {
+		PS3_PROFILE_START(ps3_glfinish_t0);
 		qglFinish ();
+		PS3_PROFILE_END(PS3_PROF_GL_FINISH, ps3_glfinish_t0);
 		glState.finishCalled = qtrue;
 	}
 	if ( r_finish->integer == 0 ) {
@@ -686,12 +699,57 @@ void RB_BeginDrawingView (void) {
 	}
 }
 
+/* Profile the surface-specific geometry builders separately from
+ * RB_EndSurface's shader flush timer. This shows which surface type spends
+ * PPU time populating tess (faces, grids, Tiki, terrain, etc.). */
+#if defined(__PS3__)
+static int RB_SurfaceProfileSlot(surfaceType_t type)
+{
+    switch (type) {
+    case SF_FACE:          return PS3_PROF_SF_FACE;
+    case SF_GRID:          return PS3_PROF_SF_GRID;
+    case SF_POLY:          return PS3_PROF_SF_POLY;
+    case SF_MARK_FRAG:     return PS3_PROF_SF_MARK;
+    case SF_FLARE:         return PS3_PROF_SF_FLARE;
+    case SF_ENTITY:        return PS3_PROF_SF_ENTITY;
+    case SF_DISPLAY_LIST:  return PS3_PROF_SF_DISPLAY;
+    case SF_TIKI_SKEL:     return PS3_PROF_SF_SKEL;
+    case SF_TIKI_STATIC:   return PS3_PROF_SF_STATIC;
+    case SF_SWIPE:         return PS3_PROF_SF_SWIPE;
+    case SF_SPRITE:        return PS3_PROF_SF_SPRITE;
+    case SF_TERRAIN_PATCH: return PS3_PROF_SF_TERRAIN;
+    case SF_TRIANGLES:     return PS3_PROF_SF_TRIANGLES;
+    default:               return -1;
+    }
+}
+#endif
+
+static void RB_DispatchSurfaceProfiled(void *surface)
+{
+    surfaceType_t type = *(surfaceType_t *)surface;
+#if defined(__PS3__)
+    unsigned long long t0 = PS3_ProfTick();
+    int slot;
+#endif
+    rb_surfaceTable[type](surface);
+#if defined(__PS3__)
+    {
+        unsigned long long elapsed = PS3_ProfTick() - t0;
+        PS3_ProfAdd(PS3_PROF_SURF_DISPATCH, elapsed);
+        slot = RB_SurfaceProfileSlot(type);
+        if (slot >= 0)
+            PS3_ProfAdd(slot, elapsed);
+    }
+#endif
+}
+
 /*
 ==================
 RB_RenderDrawSurfList
 ==================
 */
 void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
+	PS3_PROFILE_START(ps3_draw_list_t0);
 	shader_t		*shader, *oldShader;
 	int				entityNum, oldEntityNum;
 	int				dlightMap, oldDlightMap;
@@ -724,7 +782,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	for (i = 0, drawSurf = drawSurfs ; i < numDrawSurfs ; i++, drawSurf++) {
 		if ( drawSurf->sort == (unsigned)oldSort && *drawSurf->surface != SF_SPRITE ) {
 			// fast path, same as previous sort
-			rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
+			RB_DispatchSurfaceProfiled(drawSurf->surface);
 			continue;
 		}
 		oldSort = (int)drawSurf->sort;
@@ -837,7 +895,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			}
 			else if (shader->needsLSpherical)
 			{
-				if (tr.refdef.rdflags & RDF_HUD)
+				if (backEnd.refdef.rdflags & RDF_HUD)
 				{
 					backEnd.currentSphere = &backEnd.hudSphere;
 					backEnd.hudSphere.TessFunction = 0;
@@ -872,7 +930,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 		}
 
 		// add the triangles for this surface
-		rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
+		RB_DispatchSurfaceProfiled(drawSurf->surface);
 	}
 
 	// draw the contents of the last shader batch
@@ -906,6 +964,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 	// add light flares on lights that aren't obscured
 	RB_RenderFlares();
+	PS3_PROFILE_END(PS3_PROF_DRAW_LIST, ps3_draw_list_t0);
 }
 
 /*
@@ -914,6 +973,7 @@ RB_RenderSpriteSurfList
 ==================
 */
 void RB_RenderSpriteSurfList(drawSurf_t* drawSurfs, int numDrawSurfs) {
+	PS3_PROFILE_START(ps3_sprite_list_t0);
 	shader_t	*shader;
 	shader_t	*oldShader;
 	qboolean	depthRange;
@@ -961,7 +1021,7 @@ void RB_RenderSpriteSurfList(drawSurf_t* drawSurfs, int numDrawSurfs) {
         backEnd.shaderStartTime = ((refSprite_t*)drawSurf->surface)->shaderTime;
 
         // add the triangles for this surface
-        rb_surfaceTable[*drawSurf->surface](drawSurf->surface);
+        RB_DispatchSurfaceProfiled(drawSurf->surface);
 	}
 
 	if (oldShader) {
@@ -974,6 +1034,7 @@ void RB_RenderSpriteSurfList(drawSurf_t* drawSurfs, int numDrawSurfs) {
 	if (depthRange) {
 		qglDepthRange(0.0, 1.0);
 	}
+	PS3_PROFILE_END(PS3_PROF_SPRITE_LIST, ps3_sprite_list_t0);
 }
 
 
@@ -1218,6 +1279,7 @@ RB_DrawSurfs
 =============
 */
 const void	*RB_DrawSurfs( const void *data ) {
+	PS3_PROFILE_START(ps3_draw_cmd_t0);
 	const drawSurfsCommand_t	*cmd;
 
 	// finish any 2D drawing if needed
@@ -1232,6 +1294,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 	RB_SetupFog();
 	RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs );
+	PS3_PROFILE_END(PS3_PROF_DRAW_CMD, ps3_draw_cmd_t0);
 
 	return (const void *)(cmd + 1);
 }
@@ -1244,6 +1307,7 @@ RB_DrawSurfs
 =============
 */
 const void* RB_SpriteSurfs(const void* data) {
+	PS3_PROFILE_START(ps3_sprite_cmd_t0);
     const drawSurfsCommand_t* cmd;
 
     // finish any 2D drawing if needed
@@ -1258,6 +1322,7 @@ const void* RB_SpriteSurfs(const void* data) {
 	
 	RB_SetupFog();
     RB_RenderSpriteSurfList(cmd->drawSurfs, cmd->numDrawSurfs);
+	PS3_PROFILE_END(PS3_PROF_SPRITE_CMD, ps3_sprite_cmd_t0);
 
     return (const void*)(cmd + 1);
 }
@@ -1455,6 +1520,7 @@ RB_SwapBuffers
 =============
 */
 const void	*RB_SwapBuffers( const void *data ) {
+	PS3_PROFILE_START(ps3_cmd_swap_t0);
 	const swapBuffersCommand_t	*cmd;
 
 	// finish any 2D drawing if needed
@@ -1489,11 +1555,20 @@ const void	*RB_SwapBuffers( const void *data ) {
 
 
 	if ( !glState.finishCalled ) {
+		PS3_PROFILE_START(ps3_swap_finish_t0);
 		qglFinish();
+		PS3_PROFILE_END(PS3_PROF_GL_FINISH, ps3_swap_finish_t0);
 	}
 
 	GLimp_LogComment( "***************** RB_SwapBuffers *****************\n\n\n" );
 
+#if defined(__PS3__)
+	if (ps3_command_dispatch_start) {
+		PS3_ProfAdd(PS3_PROF_COMMANDS, PS3_ProfTick() - ps3_command_dispatch_start);
+		ps3_command_dispatch_start = 0;
+	}
+#endif
+	PS3_PROFILE_END(PS3_PROF_CMD_SWAP, ps3_cmd_swap_t0);
 	GLimp_EndFrame();
 
 	backEnd.in2D = qfalse;
@@ -1509,45 +1584,87 @@ This function will be called synchronously if running without
 smp extensions, or asynchronously by another thread.
 ====================
 */
+/* Render worker: restore its frame's TLS owner before executing the command batch. */
+void RB_RenderThread( void )
+{
+	for ( ;; )
+	{
+		void *data = GLimp_RendererSleep();
+		renderCommandList_t *cmdList;
+		if ( !data )
+			return;
+		cmdList = (renderCommandList_t *)data; /* cmds is the first member */
+		if ( cmdList->owner )
+			backEndData = (backEndData_t *)cmdList->owner;
+		RB_ExecuteRenderCommands( data );
+	}
+}
+
+
 void RB_ExecuteRenderCommands( const void *data ) {
 	int		t1, t2;
 
+#if defined(__PS3__)
+	if (!ps3_command_dispatch_start)
+		ps3_command_dispatch_start = PS3_ProfTick();
+#endif
 	t1 = ri.Milliseconds ();
 
 	while ( 1 ) {
 		data = PADP(data, sizeof(void *));
 
 		switch ( *(const int *)data ) {
-		case RC_SET_COLOR:
+		case RC_SET_COLOR: {
+			PS3_PROFILE_START(ps3_cmd_misc_t0);
 			data = RB_SetColor( data );
+			PS3_PROFILE_END(PS3_PROF_CMD_MISC, ps3_cmd_misc_t0);
 			break;
-		case RC_STRETCH_PIC:
+		}
+		case RC_STRETCH_PIC: {
+			PS3_PROFILE_START(ps3_cmd_stretch_t0);
 			data = RB_StretchPic( data );
+			PS3_PROFILE_END(PS3_PROF_CMD_STRETCH, ps3_cmd_stretch_t0);
 			break;
+		}
 		case RC_DRAW_SURFS:
 			data = RB_DrawSurfs( data );
 			break;
 		case RC_SPRITE_SURFS:
 			data = RB_SpriteSurfs( data );
 			break;
-		case RC_DRAW_BUFFER:
+		case RC_DRAW_BUFFER: {
+			PS3_PROFILE_START(ps3_cmd_misc_t0);
 			data = RB_DrawBuffer( data );
+			PS3_PROFILE_END(PS3_PROF_CMD_MISC, ps3_cmd_misc_t0);
 			break;
+		}
 		case RC_SWAP_BUFFERS:
 			data = RB_SwapBuffers( data );
 			break;
-		case RC_SCREENSHOT:
+		case RC_SCREENSHOT: {
+			PS3_PROFILE_START(ps3_cmd_misc_t0);
 			data = RB_TakeScreenshotCmd( data );
+			PS3_PROFILE_END(PS3_PROF_CMD_MISC, ps3_cmd_misc_t0);
 			break;
-		case RC_VIDEOFRAME:
+		}
+		case RC_VIDEOFRAME: {
+			PS3_PROFILE_START(ps3_cmd_misc_t0);
 			data = RB_TakeVideoFrameCmd( data );
+			PS3_PROFILE_END(PS3_PROF_CMD_MISC, ps3_cmd_misc_t0);
 			break;
-		case RC_COLORMASK:
+		}
+		case RC_COLORMASK: {
+			PS3_PROFILE_START(ps3_cmd_misc_t0);
 			data = RB_ColorMask(data);
+			PS3_PROFILE_END(PS3_PROF_CMD_MISC, ps3_cmd_misc_t0);
 			break;
-		case RC_CLEARDEPTH:
+		}
+		case RC_CLEARDEPTH: {
+			PS3_PROFILE_START(ps3_cmd_misc_t0);
 			data = RB_ClearDepth(data);
+			PS3_PROFILE_END(PS3_PROF_CMD_MISC, ps3_cmd_misc_t0);
 			break;
+		}
 		case RC_END_OF_LIST:
 		default:
 			// stop rendering

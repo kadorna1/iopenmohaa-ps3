@@ -78,28 +78,101 @@ ArchiveFile::ArchiveFile()
     bufferlength = 0;
     writing      = 0;
     opened       = 0;
+#if defined(__PS3__)
+    streamHandle = 0;
+    streamPosition = 0;
+    streamBuffered = 0;
+    streamMode = qfalse;
+    streamFailed = qfalse;
+#endif
 }
 
 ArchiveFile::~ArchiveFile()
 {
-    Close();
+    Close(qfalse);
 }
 
-void ArchiveFile::Close()
+#if defined(__PS3__)
+qboolean ArchiveFile::FlushStreamBuffer(void)
 {
-    if (writing) {
-        gi.FS_WriteFile(filename.c_str(), buffer, length);
+    if (!streamMode || !streamBuffered) {
+        return streamFailed ? qfalse : qtrue;
     }
+
+    if (!streamHandle || gi.FS_Write(buffer, streamBuffered, streamHandle) != streamBuffered) {
+        streamFailed = qtrue;
+        return qfalse;
+    }
+
+    streamBuffered = 0;
+    return qtrue;
+}
+#endif
+
+qboolean ArchiveFile::Close(qboolean commit)
+{
+    qboolean result = qtrue;
+
+    if (writing) {
+#if defined(__PS3__)
+        if (streamMode) {
+            if (commit && !streamFailed) {
+                if (!FlushStreamBuffer()) {
+                    result = qfalse;
+                }
+                if (result && streamHandle && gi.FS_Flush) {
+                    gi.FS_Flush(streamHandle);
+                }
+            } else if (streamFailed) {
+                result = qfalse;
+            }
+
+            if (streamHandle) {
+                gi.FS_FCloseFile(streamHandle);
+                streamHandle = 0;
+            }
+
+            if (commit && result && !streamFailed) {
+                if (!gi.FS_RenameHomeData
+                    || !gi.FS_RenameHomeData(streamTempFilename.c_str(), filename.c_str(), qtrue)) {
+                    result = qfalse;
+                }
+            }
+        } else
+#endif
+        if (commit && buffer) {
+            int written = gi.FS_WriteFile(filename.c_str(), buffer, (int)length);
+            if (written < 0 || (size_t)written != length) {
+                result = qfalse;
+            }
+        }
+    }
+
+#if defined(__PS3__)
+    if (streamHandle) {
+        gi.FS_FCloseFile(streamHandle);
+        streamHandle = 0;
+    }
+    streamTempFilename = "";
+    streamPosition = 0;
+    streamBuffered = 0;
+    streamMode = qfalse;
+    streamFailed = qfalse;
+#endif
 
     if (buffer) {
         gi.Free((void *)buffer);
         buffer = NULL;
     }
 
-    writing  = false;
-    filename = "";
-    length   = 0;
-    pos      = 0;
+    writing      = false;
+    opened       = false;
+    filename     = "";
+    length       = 0;
+    bufferlength = 0;
+    pos          = 0;
+
+    return result;
 }
 
 const char *ArchiveFile::Filename(void)
@@ -154,26 +227,48 @@ size_t ArchiveFile::Length(void)
 
 size_t ArchiveFile::Pos(void)
 {
+#if defined(__PS3__)
+    if (streamMode) {
+        return streamPosition;
+    }
+#endif
     return pos - buffer;
 }
 
 size_t ArchiveFile::Tell(void)
 {
+#if defined(__PS3__)
+    if (streamMode) {
+        return streamPosition;
+    }
+#endif
     return pos - buffer;
 }
 
 qboolean ArchiveFile::Seek(size_t newpos)
 {
-    if (!buffer) {
-        return false;
-    }
+#if defined(__PS3__)
+    if (streamMode) {
+        if (!streamHandle || newpos > length || !FlushStreamBuffer()) {
+            streamFailed = qtrue;
+            return qfalse;
+        }
 
-    if (newpos > length) {
+        if (gi.FS_Seek(streamHandle, (long)newpos, FS_SEEK_SET) != 0) {
+            streamFailed = qtrue;
+            return qfalse;
+        }
+
+        streamPosition = newpos;
+        return qtrue;
+    }
+#endif
+
+    if (!buffer || newpos > length) {
         return false;
     }
 
     pos = buffer + newpos;
-
     return true;
 }
 
@@ -182,8 +277,7 @@ qboolean ArchiveFile::OpenRead(const char *name)
     byte *tempbuf;
     assert(name);
 
-    assert(!buffer);
-    Close();
+    Close(qfalse);
 
     if (!name) {
         return false;
@@ -191,21 +285,30 @@ qboolean ArchiveFile::OpenRead(const char *name)
 
     length = gi.FS_ReadFile(name, (void **)&tempbuf, qtrue);
     if (length == (size_t)(-1) || length == 0) {
+        length = 0;
         return false;
     }
+
     // create our own space
-    buffer       = (byte *)gi.Malloc(length);
+    buffer = (byte *)gi.Malloc(length);
+    if (!buffer) {
+        gi.FS_FreeFile(tempbuf);
+        length = 0;
+        return false;
+    }
     bufferlength = length;
+
     // copy the file over to our space
     memcpy(buffer, tempbuf, length);
+
     // free the file
     gi.FS_FreeFile(tempbuf);
+
     // set the file name
     filename = name;
-
-    pos     = buffer;
+    pos = buffer;
     writing = false;
-    opened  = true;
+    opened = true;
 
     char FileHeader[4];
     Read(FileHeader, sizeof(FileHeader));
@@ -214,24 +317,27 @@ qboolean ArchiveFile::OpenRead(const char *name)
         pos = buffer;
     } else {
         uint32_t new_len;
-        size_t   iCSVGLength;
+        size_t iCSVGLength;
 
         new_len = 0;
         Read(&new_len, sizeof(uint32_t));
         new_len = LittleLong(new_len);
         tempbuf = (byte *)gi.Malloc(new_len);
+        if (!tempbuf) {
+            return false;
+        }
 
         if (g_lz77.Decompress(pos, length - 8, tempbuf, &iCSVGLength) || iCSVGLength != new_len) {
-            gi.Error(ERR_DROP, "Decompression of save game failed\n");
+            gi.Free(tempbuf);
+            gi.Error(ERR_DROP, "Decompression of save game failed\\n");
             return false;
         }
 
         gi.Free(buffer);
-
-        buffer       = tempbuf;
-        length       = iCSVGLength;
+        buffer = tempbuf;
+        length = iCSVGLength;
         bufferlength = length;
-        pos          = buffer;
+        pos = buffer;
     }
 
     return true;
@@ -239,15 +345,52 @@ qboolean ArchiveFile::OpenRead(const char *name)
 
 qboolean ArchiveFile::OpenWrite(const char *name)
 {
-    this->length = 0;
-    // 4 MiB buffer
-    this->bufferlength = 4 * 1024 * 1024;
-    this->buffer       = (byte *)gi.Malloc(bufferlength);
-    this->filename     = name;
-    this->pos          = buffer;
-    this->writing      = true;
-    this->opened       = true;
+    Close(qfalse);
+    if (!name) {
+        return false;
+    }
 
+    filename = name;
+#if defined(__PS3__)
+    char tempName[MAX_OSPATH];
+    Com_sprintf(tempName, sizeof(tempName), "%s.ps3tmp", name);
+    streamTempFilename = tempName;
+    streamHandle = gi.FS_FOpenFileWrite(streamTempFilename.c_str());
+    if (!streamHandle) {
+        streamFailed = qtrue;
+        Close(qfalse);
+        return false;
+    }
+
+    // Keep only a small staging buffer; large archive payloads are streamed
+    // directly to disk instead of growing a multi-megabyte zone allocation.
+    bufferlength = 64 * 1024;
+    buffer = (byte *)gi.Malloc(bufferlength);
+    if (!buffer) {
+        gi.FS_FCloseFile(streamHandle);
+        streamHandle = 0;
+        streamFailed = qtrue;
+        Close(qfalse);
+        return false;
+    }
+
+    streamPosition = 0;
+    streamBuffered = 0;
+    streamMode = qtrue;
+    streamFailed = qfalse;
+#else
+    // 4 MiB buffer on non-PS3 platforms.
+    bufferlength = 4 * 1024 * 1024;
+    buffer = (byte *)gi.Malloc(bufferlength);
+    if (!buffer) {
+        Close(qfalse);
+        return false;
+    }
+    pos = buffer;
+#endif
+
+    writing = true;
+    opened = true;
     return true;
 }
 
@@ -269,6 +412,75 @@ qboolean ArchiveFile::Read(void *dest, size_t size)
 
 qboolean ArchiveFile::Write(const void *source, size_t size)
 {
+    if (!size) {
+        return true;
+    }
+
+#if defined(__PS3__)
+    if (streamMode) {
+        const byte *src = (const byte *)source;
+
+        if (!streamHandle || streamFailed || !src) {
+            streamFailed = qtrue;
+            return qfalse;
+        }
+
+        // Object sizes and the class-pointer table are backpatched after
+        // their payloads have been written. Flush pending append data before
+        // direct writes to an earlier file position.
+        if (streamPosition < length) {
+            if (!FlushStreamBuffer()
+                || gi.FS_Seek(streamHandle, (long)streamPosition, FS_SEEK_SET) != 0) {
+                streamFailed = qtrue;
+                return qfalse;
+            }
+
+            if (gi.FS_Write(src, size, streamHandle) != size) {
+                streamFailed = qtrue;
+                return qfalse;
+            }
+
+            streamPosition += size;
+            if (length < streamPosition) {
+                length = streamPosition;
+            }
+            return qtrue;
+        }
+
+        while (size) {
+            if (!streamBuffered && size >= bufferlength) {
+                if (gi.FS_Write(src, size, streamHandle) != size) {
+                    streamFailed = qtrue;
+                    return qfalse;
+                }
+                streamPosition += size;
+                if (length < streamPosition) {
+                    length = streamPosition;
+                }
+                return qtrue;
+            }
+
+            size_t available = bufferlength - streamBuffered;
+            size_t amount = size < available ? size : available;
+            memcpy(buffer + streamBuffered, src, amount);
+            streamBuffered += amount;
+            streamPosition += amount;
+            src += amount;
+            size -= amount;
+
+            if (streamBuffered == bufferlength && !FlushStreamBuffer()) {
+                streamFailed = qtrue;
+                return qfalse;
+            }
+        }
+
+        if (length < streamPosition) {
+            length = streamPosition;
+        }
+        return qtrue;
+    }
+#endif
+
     if ((pos + size) > (buffer + bufferlength)) {
         byte *oldbuf;
 
@@ -279,6 +491,10 @@ qboolean ArchiveFile::Write(const void *source, size_t size)
         oldbuf = buffer;
         // reallocate a bigger buffer
         buffer = (byte *)gi.Malloc(bufferlength);
+        if (!buffer) {
+            buffer = oldbuf;
+            return false;
+        }
         memcpy(buffer, oldbuf, length);
         // free the old buffer
         gi.Free(oldbuf);
@@ -289,8 +505,8 @@ qboolean ArchiveFile::Write(const void *source, size_t size)
     memcpy(pos, source, size);
     pos += size;
 
-    if (length < (pos - buffer)) {
-        length = (pos - buffer);
+    if (length < (size_t)(pos - buffer)) {
+        length = (size_t)(pos - buffer);
     }
 
     return true;
@@ -358,7 +574,7 @@ void Archiver::Close(void)
         return;
     }
 
-    if (archivemode == ARCHIVE_WRITE) {
+    if (archivemode == ARCHIVE_WRITE && !fileerror) {
         int    numobjects;
         size_t pos;
 
@@ -372,7 +588,15 @@ void Archiver::Close(void)
         archivefile.Compress();
     }
 
-    archivefile.Close();
+    const qboolean wasWriting = (archivemode == ARCHIVE_WRITE);
+    const qboolean archiveClosed = archivefile.Close(wasWriting && !fileerror);
+    if (wasWriting && !fileerror && !archiveClosed) {
+        const str errorFilename = filename;
+        archivemode = ARCHIVE_NONE;
+        gi.Error(ERR_DROP, "Error while writing to %s : failed to flush or commit save archive\\n",
+                 errorFilename.c_str());
+        return;
+    }
 
     if (archivemode == ARCHIVE_READ) {
         int              i, num;
@@ -432,20 +656,20 @@ qboolean Archiver::Read(const char *name, qboolean harderror)
 
     ArchiveUnsigned(&header);
     if (header != ArchiveHeader) {
-        archivefile.Close();
+        archivefile.Close(qfalse);
         FileError("Not a valid MOHAA archive.");
         return false;
     }
 
     ArchiveUnsigned(&version);
     if (version > ArchiveVersion) {
-        archivefile.Close();
+        archivefile.Close(qfalse);
         FileError("Archive is from version %u.  Check http://www.x-null.net for an update.", version);
         return false;
     }
 
     if (version < ArchiveVersion) {
-        archivefile.Close();
+        archivefile.Close(qfalse);
         FileError("Archive is out of date.");
         return false;
     }
@@ -856,7 +1080,10 @@ Class *Archiver::ReadObject(void)
     if (!obj) {
         FileError("Failed to on new instance of class %s.", classname.c_str());
     } else {
+        str previousObjectName = currentObjectName;
+        currentObjectName = classname;
         obj->Archive(*this);
+        currentObjectName = previousObjectName;
     }
 
     if (!fileerror) {
@@ -933,7 +1160,12 @@ void Archiver::ArchiveObject(Class *obj)
         ArchiveInteger(&index);
         objstart = archivefile.Pos();
 
-        obj->Archive(*this);
+        {
+            str previousObjectName = currentObjectName;
+            currentObjectName = classname;
+            obj->Archive(*this);
+            currentObjectName = previousObjectName;
+        }
 
         if (!fileerror) {
             endpos = archivefile.Pos();
@@ -1145,10 +1377,14 @@ void Archiver::CheckType(int type)
 
     if (archivemode == ARCHIVE_READ) {
         if (!fileerror) {
+            const size_t fieldOffset = archivefile.Tell();
             t = ReadType();
             if (t != type) {
                 if (t < ARC_NUMTYPES) {
-                    FileError("Expecting %s, Should be %s", typenames[type], typenames[t]);
+                    FileError("Expecting %s, Should be %s at offset %lu in object %s",
+                              typenames[type], typenames[t],
+                              (unsigned long)fieldOffset,
+                              currentObjectName.length() ? currentObjectName.c_str() : "<top-level>");
                     assert(0);
                 }
                 else {

@@ -15,12 +15,15 @@ void ps3gl_vring_init(void)
         PS3GL_LABEL_VRING_SEG0, PS3GL_LABEL_VRING_SEG1
     };
 
+#if !PS3GL_FORCE_RSX_VRING
     extern const void *ps3_rsx_io_base;
     extern size_t      ps3_rsx_io_size;
+#endif
     extern void ps3_log(const char *msg);
     char msg[160];
 
     ps3gl.vring.base = NULL;
+#if !PS3GL_FORCE_RSX_VRING
     if (ps3_rsx_io_base &&
         ps3_rsx_io_size >= PS3GL_VRING_IO_OFFSET + PS3GL_VRING_IO_SIZE) {
         uint8_t *io = (uint8_t *)ps3_rsx_io_base + PS3GL_VRING_IO_OFFSET;
@@ -30,6 +33,7 @@ void ps3gl_vring_init(void)
             ps3gl.vring.seg_capacity = PS3GL_VRING_IO_SIZE / PS3GL_VRING_SEGMENTS;
         }
     }
+#endif
     if (!ps3gl.vring.base) {
         ps3gl.vring.base = (uint8_t *)rsxMemalign(128, PS3GL_VRING_SIZE);
         if (!ps3gl.vring.base) {
@@ -98,7 +102,6 @@ ps3gl_vertex_t *ps3gl_vring_alloc(int count, uint32_t *out_offset)
     /* Round up to 16-byte alignment -- every carve must self-align its own start or
      * attribute sub-offsets (TC0/TC1/COLOR) drift and RSX vertex fetch wedges the whole console. */
     ps3gl.vring.head = (ps3gl.vring.head + needed + 15u) & ~15u;
-    ps3gl_stats.verts += (unsigned)count;
     if (ps3gl.vring.head > ps3gl_stats.vring_peak)
         ps3gl_stats.vring_peak = ps3gl.vring.head;
 
@@ -140,8 +143,11 @@ static void flush_immediate(void)
     /* Copy vertices into ring buffer */
     uint32_t vb_offset;
     ps3gl_stats.draws++;
+    ps3gl_stats.verts += (unsigned)count;
     ps3gl_vertex_t *dst = ps3gl_vring_alloc(count, &vb_offset);
     if (!dst) return;
+    ps3gl_stats.copied_draws++;
+    ps3gl_stats.copied_verts += (unsigned)count;
     memcpy(dst, ps3gl.imm.buf, count * PS3GL_VERTEX_SIZE);
 
     gcmContextData *ctx = ps3gl_get_ctx();

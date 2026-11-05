@@ -1021,6 +1021,7 @@ RB_SkelMesh
 */
 void RB_SkelMesh(skelSurfaceGame_t *sf)
 {
+    PS3_PROFILE_SCOPE(PS3_PROF_ANIM);
     unsigned int       baseIndex, baseVertex;
     unsigned int       render_count;
     unsigned int       indexes;
@@ -1043,6 +1044,8 @@ void RB_SkelMesh(skelSurfaceGame_t *sf)
     int                mesh;
     int                surf;
     int                i;
+    int                localBoneMap[TIKI_MAX_BONES];
+    qboolean           useLocalBoneMap;
     skelHeaderGame_t  *skelmodel;
     skelSurfaceGame_t *psurface;
     qboolean           bFound;
@@ -1079,6 +1082,17 @@ void RB_SkelMesh(skelSurfaceGame_t *sf)
     }
 
     assert(bFound);
+
+    /* Additional meshes refer to global Tiki channels, while the cached
+     * pose array is indexed by local channels. Resolve this mapping once per
+     * surface instead of repeating the lookup for every vertex weight. */
+    useLocalBoneMap = qfalse;
+    if (mesh > 0 && skelmodel->numBones > 0 && skelmodel->numBones <= TIKI_MAX_BONES) {
+        for (i = 0; i < skelmodel->numBones; i++) {
+            localBoneMap[i] = ri.TIKI_GetLocalChannel(tiki, skelmodel->pBones[i].channel);
+        }
+        useLocalBoneMap = qtrue;
+    }
 
     //
     // Process LOD
@@ -1222,20 +1236,32 @@ void RB_SkelMesh(skelSurfaceGame_t *sf)
                 }
 
                 if (newVerts->numMorphs) {
-                    channelNum = skelmodel->pBones[morph->morphIndex].channel;
+                    if (useLocalBoneMap) {
+                        boneNum = localBoneMap[morph->morphIndex];
+                    } else {
+                        channelNum = skelmodel->pBones[morph->morphIndex].channel;
+                        boneNum = ri.TIKI_GetLocalChannel(tiki, channelNum);
+                    }
                 } else {
-                    channelNum = skelmodel->pBones[weight->boneIndex].channel;
+                    if (useLocalBoneMap) {
+                        boneNum = localBoneMap[weight->boneIndex];
+                    } else {
+                        channelNum = skelmodel->pBones[weight->boneIndex].channel;
+                        boneNum = ri.TIKI_GetLocalChannel(tiki, channelNum);
+                    }
                 }
-
-                boneNum = ri.TIKI_GetLocalChannel(tiki, channelNum);
-                bone    = &bones[boneNum];
+                bone = &bones[boneNum];
 
                 SkelVertGetNormal(newVerts, bone, normal);
 
                 for (weightNum = 0; weightNum < newVerts->numWeights; weightNum++) {
-                    channelNum = skelmodel->pBones[weight->boneIndex].channel;
-                    boneNum    = ri.TIKI_GetLocalChannel(tiki, channelNum);
-                    bone       = &bones[boneNum];
+                    if (useLocalBoneMap) {
+                        boneNum = localBoneMap[weight->boneIndex];
+                    } else {
+                        channelNum = skelmodel->pBones[weight->boneIndex].channel;
+                        boneNum = ri.TIKI_GetLocalChannel(tiki, channelNum);
+                    }
+                    bone = &bones[boneNum];
 
                     if (!weightNum) {
                         SkelWeightMorphGetXyz(weight, bone, totalmorph, out);
@@ -1331,16 +1357,24 @@ void RB_SkelMesh(skelSurfaceGame_t *sf)
                 weight = (skelWeight_t *)((byte *)newVerts + sizeof(skeletorVertex_t)
                                           + sizeof(skeletorMorph_t) * newVerts->numMorphs);
 
-                channelNum = skelmodel->pBones[weight->boneIndex].channel;
-                boneNum    = ri.TIKI_GetLocalChannel(tiki, channelNum);
-                bone       = &bones[boneNum];
+                if (useLocalBoneMap) {
+                    boneNum = localBoneMap[weight->boneIndex];
+                } else {
+                    channelNum = skelmodel->pBones[weight->boneIndex].channel;
+                    boneNum = ri.TIKI_GetLocalChannel(tiki, channelNum);
+                }
+                bone = &bones[boneNum];
 
                 SkelVertGetNormal(newVerts, bone, normal);
 
                 for (weightNum = 0; weightNum < newVerts->numWeights; weightNum++) {
-                    channelNum = skelmodel->pBones[weight->boneIndex].channel;
-                    boneNum    = ri.TIKI_GetLocalChannel(tiki, channelNum);
-                    bone       = &bones[boneNum];
+                    if (useLocalBoneMap) {
+                        boneNum = localBoneMap[weight->boneIndex];
+                    } else {
+                        channelNum = skelmodel->pBones[weight->boneIndex].channel;
+                        boneNum = ri.TIKI_GetLocalChannel(tiki, channelNum);
+                    }
+                    bone = &bones[boneNum];
 
                     SkelWeightGetXyz(weight, bone, out);
 
@@ -1776,6 +1810,7 @@ R_GetFrame
 */
 void R_GetFrame(refEntity_t *model, struct skelAnimFrame_s *newFrame)
 {
+    PS3_PROFILE_SCOPE(PS3_PROF_BONES);
     R_UpdatePoseInternal(model);
     ri.GetFrameInternal(model->tiki, model->entityNumber, newFrame);
 }

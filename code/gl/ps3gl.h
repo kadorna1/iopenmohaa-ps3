@@ -32,8 +32,14 @@ void ps3gl_front_call(const char *func);
 #define PS3GL_MAX_TEXTURES      4096
 #define PS3GL_MAX_VERTS         16384   /* per-batch immediate mode */
 
-/* Size used by the RSX-local fallback when no mapped-main-memory ring is available. */
-#define PS3GL_VRING_SIZE        (8 * 1024 * 1024)   /* 2 segments, RSX local memory */
+/* Keep the 8 MiB ring (4 MiB per frame) in cacheable, IO-mapped main
+ * memory. The prior 2 MiB-per-frame IO ring overflowed; the 4 MiB RSX-local
+ * fallback removed drops but made PPU vertex copies expensive. Set to 1 to
+ * force the RSX-local fallback for A/B comparison. */
+#ifndef PS3GL_FORCE_RSX_VRING
+#define PS3GL_FORCE_RSX_VRING 0
+#endif
+#define PS3GL_VRING_SIZE        (8 * 1024 * 1024)   /* 2 segments, RSX-local fallback */
 
 /* Identity ARGB remap. Fallback for varying PSL1GHT macro definitions. */
 #define PS3GL_TEX_REMAP_IDENTITY  0x00AAE4
@@ -88,6 +94,7 @@ typedef struct {
     uint16_t        height;
     uint8_t         bpp;        /* bytes per texel in RSX storage: 2 or 4 */
     uint8_t         gcm_format; /* GCM_TEXTURE_FORMAT_* without LIN flag */
+    uint8_t         compressed; /* native RSX DXT1/3/5 block data */
     uint8_t         num_levels; /* contiguous mip levels uploaded so far, >=1 */
     uint8_t         wrap_s, wrap_t;
     uint8_t         min_filter, mag_filter;
@@ -141,7 +148,7 @@ typedef struct {
  * its cache instead of uncached stores into RSX local memory, which cost
  * ~150 ns per vertex (2+ ms a frame). Falls back to RSX memory. */
 #define PS3GL_VRING_IO_OFFSET   (4 * 1024 * 1024)
-#define PS3GL_VRING_IO_SIZE     (4 * 1024 * 1024)   /* 2 segments of 2 MB */
+#define PS3GL_VRING_IO_SIZE     (8 * 1024 * 1024)   /* 2 segments of 4 MB */
 
 /* Shader program pair (vertex + fragment) */
 typedef struct {
@@ -377,6 +384,12 @@ void ps3gl_DeleteTextures(GLsizei n, const GLuint *textures);
 void ps3gl_TexImage2D(GLenum target, GLint level, GLint internalformat,
                       GLsizei width, GLsizei height, GLint border,
                       GLenum format, GLenum type, const void *pixels);
+void ps3gl_CompressedTexImage2D(GLenum target, GLint level, GLenum internalformat,
+                                GLsizei width, GLsizei height, GLint border,
+                                GLsizei imageSize, const void *data);
+void ps3gl_CompressedTexSubImage2D(GLenum target, GLint level, GLint xoff, GLint yoff,
+                                   GLsizei width, GLsizei height, GLenum format,
+                                   GLsizei imageSize, const void *data);
 void ps3gl_TexSubImage2D(GLenum target, GLint level, GLint xoff, GLint yoff,
                          GLsizei w, GLsizei h, GLenum format, GLenum type,
                          const void *pixels);

@@ -185,6 +185,7 @@ static void ps3gl_DrawElements_(GLenum mode, GLsizei count, GLenum type,
     if (cs == 0) cs = 4;
 
     const int has_z = (ps3gl.va_vertex.size >= 3);
+    ps3gl_stats.verts += (unsigned)num_verts;
 
     /* Direct-bind XDR arrays to RSX, or copy to vring on failure. */
     {
@@ -232,9 +233,8 @@ static void ps3gl_DrawElements_(GLenum mode, GLsizei count, GLenum type,
             uint32_t vb_offset;
             ps3gl_vertex_t *verts = ps3gl_vring_alloc(num_verts, &vb_offset);
             if (!verts) return;
-            ps3gl_stats.copy_draws++;
-            ps3gl_stats.copy_verts += (unsigned)num_verts;
-            ps3gl_stats.copy_bytes += (unsigned)num_verts * (unsigned)PS3GL_VERTEX_SIZE;
+            ps3gl_stats.copied_draws++;
+            ps3gl_stats.copied_verts += (unsigned)num_verts;
 
             const uint32_t imm_c = ps3gl.imm.color;
 

@@ -442,14 +442,15 @@ static void PS3_RSX_SetRenderTarget(int index)
 
 /* Public interface */
 
-/* GCM IO window layout for this diagnostic:
+/* GCM IO window layout:
  *   0x000000-0x3fffff: 4 MiB GCM command-buffer allocation
- *   0x400000-0x7fffff: 4 MiB ps3gl vertex ring (see ps3gl.h)
- * Keep these regions disjoint. Preserve the context boundaries and callback
- * supplied by GCM: extending context->end manually bypasses FIFO rollover and
- * previously correlated with RSX GET escaping into the adjacent IO region. */
+ *   0x400000-0xbfffff: 8 MiB cacheable ps3gl vertex ring (two 4 MiB segments)
+ * Keep these regions disjoint. The larger mapped ring preserves the capacity
+ * of the RSX-local A/B ring while allowing cacheable PPU vertex writes. Preserve
+ * the context boundaries and callback supplied by GCM: extending context->end
+ * manually bypasses FIFO rollover and risks RSX GET escaping the IO command area. */
 #define RSX_CB_SIZE          (4 * 1024 * 1024) /* 4 MiB GCM command-buffer allocation */
-#define RSX_HOST_SIZE       (8 * 1024 * 1024) /* 8 MiB IO buffer */
+#define RSX_HOST_SIZE       (12 * 1024 * 1024) /* 4 MiB command area + 8 MiB vertex ring */
 #if PS3GL_VRING_IO_OFFSET < RSX_CB_SIZE
 #error "PS3GL vertex ring overlaps the GCM command buffer"
 #endif
@@ -846,6 +847,7 @@ static qboolean PS3_RSX_WrapCommandBufferIfNeeded(unsigned seq)
 void PS3_RSX_BeginFrame(void)
 {
     unsigned seq;
+    unsigned long long flipwait_t0;
     /* Restore from .data backup if corrupted */
     if ((uintptr_t)ps3_gcm_context <= 0x1000
         && (uintptr_t)ps3_gcm_context_backup > 0x1000)
@@ -857,6 +859,7 @@ void PS3_RSX_BeginFrame(void)
         return;
     }
 
+    PS3_ProfBackendBegin();
     seq = ++ps3_frame_begin_seq;
     PS3_RSX_ReportGraphicsErrors(seq);
     if (seq >= 20 && seq <= 30)
@@ -882,13 +885,16 @@ void PS3_RSX_BeginFrame(void)
         (unsigned)(u32)(ps3_flip_queued - ps3_flip_completed));
 
     PS3_RSX_TraceCommandBuffer("begin-before-flipwait", seq);
+    flipwait_t0 = PS3_ProfTick();
     if (!PS3_RSX_WaitFlips(seq)) {
+        PS3_ProfAdd(PS3_PROF_FLIPWAIT, PS3_ProfTick() - flipwait_t0);
         PS3_RSX_TraceCommandBuffer("begin-flipwait-timeout", seq);
         ri.Error(ERR_FATAL,
                  "PS3 RSX flip queue stalled at frame %u; see openmohaa-ps3.log",
                  seq);
         return;
     }
+    PS3_ProfAdd(PS3_PROF_FLIPWAIT, PS3_ProfTick() - flipwait_t0);
     PS3_RSX_TraceCommandBuffer("begin-after-flipwait", seq);
     if (!PS3_RSX_WrapCommandBufferIfNeeded(seq)) {
         ri.Error(ERR_FATAL, "PS3 RSX command-buffer wrap failed at frame %u; see openmohaa-ps3.log", seq);
@@ -1038,6 +1044,7 @@ void PS3_RSX_EndFrame(void)
     }
 
     ps3_current_fb = (ps3_current_fb + 1) % RSX_FB_COUNT;
+    PS3_ProfBackendEnd();
 }
 
 /* GLimp interface -- called by the iortcw renderer */
@@ -1079,7 +1086,12 @@ void GLimp_Init(qboolean fixedFunction)
     glConfig.deviceSupportsGamma = qfalse;
     glConfig.maxTextureSize     = 2048;
     glConfig.numTextureUnits    = PS3GL_MAX_TMUS;
-    glConfig.textureCompression = TC_NONE;
+    {
+        cvar_t *allowExtensions = ri.Cvar_Get("r_allowExtensions", "1", CVAR_ARCHIVE | CVAR_LATCH);
+        cvar_t *compressedTextures = ri.Cvar_Get("r_ext_compressed_textures", "1", CVAR_ARCHIVE | CVAR_LATCH);
+        glConfig.textureCompression = (allowExtensions->integer && compressedTextures->integer)
+            ? TC_S3TC_ARB : TC_NONE;
+    }
     glConfig.textureEnvAddAvailable = qtrue;
 
     textureFilterAnisotropic = qfalse;
@@ -1090,7 +1102,8 @@ void GLimp_Init(qboolean fixedFunction)
     Q_strncpyz(glConfig.renderer_string, "RSX (ps3gl)", sizeof(glConfig.renderer_string));
     Q_strncpyz(glConfig.version_string, "1.1 ps3gl", sizeof(glConfig.version_string));
     Q_strncpyz(glConfig.extensions_string,
-               "GL_ARB_multitexture GL_EXT_compiled_vertex_array GL_EXT_texture_env_add",
+               "GL_ARB_multitexture GL_EXT_compiled_vertex_array GL_EXT_texture_env_add "
+               "GL_ARB_texture_compression GL_EXT_texture_compression_s3tc",
                sizeof(glConfig.extensions_string));
 
     ri.Cvar_Get("r_availableModes", "", CVAR_ROM);

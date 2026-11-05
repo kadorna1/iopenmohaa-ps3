@@ -979,6 +979,115 @@ void FS_BaseDir_Rename_HomeData( const char *from, const char *to, qboolean safe
 }
 
 /*
+===========
+FS_Rename_HomeData
+
+Rename a file in the active game's HomeData directory. Unlike the BaseDir
+helper above, this follows the same fs_gamedir path used by
+FS_FOpenFileWrite_HomeData.
+===========
+*/
+qboolean FS_Rename_HomeData( const char *from, const char *to, qboolean safe ) {
+	char *from_ospath, *to_ospath;
+
+	if ( !fs_searchpaths ) {
+		Com_Error( ERR_FATAL, "Filesystem call made without initialization\n" );
+		return qfalse;
+	}
+
+	// don't let sound stutter
+	S_ClearSoundBuffer();
+
+	from_ospath = FS_BuildOSPath( fs_homedatapath->string, fs_gamedir, from );
+	to_ospath = FS_BuildOSPath( fs_homedatapath->string, fs_gamedir, to );
+
+	if ( fs_debug->integer ) {
+		Com_Printf( "FS_Rename_HomeData: %s --> %s\n", from_ospath, to_ospath );
+	}
+
+	if ( safe ) {
+		FS_CheckFilenameIsMutable( to_ospath, __func__ );
+	}
+
+#if defined(__PS3__)
+	/*
+	 * PSL1GHT maps rename() to LV2 sys_fs_rename, which refuses to replace
+	 * an existing destination. Preserve the old file until the new temporary
+	 * file is in place: move the destination aside, install the source, then
+	 * remove the backup. If installation fails, restore the previous file.
+	 */
+	{
+		char backup_ospath[MAX_OSPATH];
+		const char suffix[] = ".ps3bak";
+		size_t to_length = strlen( to_ospath );
+		qboolean destinationExists;
+		qboolean backupExists;
+
+		if ( to_length + sizeof( suffix ) > sizeof( backup_ospath ) ) {
+			Com_Printf( "FS_Rename_HomeData: backup path is too long for %s\n", to_ospath );
+			return qfalse;
+		}
+
+		memcpy( backup_ospath, to_ospath, to_length );
+		memcpy( backup_ospath + to_length, suffix, sizeof( suffix ) );
+
+		destinationExists = FS_FileInPathExists( to_ospath );
+		backupExists = FS_FileInPathExists( backup_ospath );
+
+		/*
+		 * Recover a previous interrupted replacement before starting another:
+		 * if only the backup exists, restore it; if the destination exists,
+		 * the backup is stale and can be removed.
+		 */
+		if ( backupExists ) {
+			if ( !destinationExists ) {
+				if ( rename( backup_ospath, to_ospath ) != 0 ) {
+					Com_Printf( "FS_Rename_HomeData: could not restore backup %s\n", backup_ospath );
+					return qfalse;
+				}
+				destinationExists = qtrue;
+			} else if ( remove( backup_ospath ) != 0 ) {
+				Com_Printf( "FS_Rename_HomeData: could not remove stale backup %s\n", backup_ospath );
+				return qfalse;
+			}
+		}
+
+		if ( !destinationExists ) {
+			if ( rename( from_ospath, to_ospath ) == 0 ) {
+				return qtrue;
+			}
+			Com_Printf( "FS_Rename_HomeData: could not install %s as %s\n", from_ospath, to_ospath );
+			return qfalse;
+		}
+
+		if ( rename( to_ospath, backup_ospath ) != 0 ) {
+			Com_Printf( "FS_Rename_HomeData: could not move existing %s aside\n", to_ospath );
+			return qfalse;
+		}
+
+		if ( rename( from_ospath, to_ospath ) == 0 ) {
+			if ( remove( backup_ospath ) != 0 ) {
+				// The new file is committed; a later call will clean this backup.
+				Com_Printf( "FS_Rename_HomeData: committed %s; stale backup remains at %s\n",
+					to_ospath, backup_ospath );
+			}
+			return qtrue;
+		}
+
+		Com_Printf( "FS_Rename_HomeData: could not install %s as %s; restoring previous file\n",
+			from_ospath, to_ospath );
+		if ( rename( backup_ospath, to_ospath ) != 0 ) {
+			Com_Printf( "FS_Rename_HomeData: CRITICAL: could not restore previous file %s from %s\n",
+				to_ospath, backup_ospath );
+		}
+		return qfalse;
+	}
+#else
+	return rename( from_ospath, to_ospath ) == 0 ? qtrue : qfalse;
+#endif
+}
+
+/*
 ==============
 FS_FCloseFile
 

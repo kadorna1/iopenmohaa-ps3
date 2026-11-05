@@ -1443,7 +1443,8 @@ extern cvar_t	*r_depthbits;			// number of desired depth bits
 extern cvar_t	*r_colorbits;			// number of desired color bits, only relevant for fullscreen
 extern cvar_t	*r_stereo;				// desired pixelformat stereo flag
 extern cvar_t	*r_textureDetails;
-extern cvar_t	*r_texturebits;			// number of desired texture bits
+extern cvar_t	*r_texturebits;
+extern cvar_t	*r_smp;			// number of desired texture bits
 										// 0 = use framebuffer depth
 										// 16 = use 16-bit textures
 										// 32 = use 32-bit textures
@@ -1867,6 +1868,9 @@ qboolean	GLimp_SpawnRenderThread( void (*function)( void ) );
 void		*GLimp_RendererSleep( void );
 void		GLimp_FrontEndSleep( void );
 void		GLimp_WakeRenderer( void *data );
+#if defined(__PS3__)
+void		GLimp_ShutdownRenderThread( void );
+#endif
 
 void		GLimp_LogComment( char *comment );
 
@@ -2364,6 +2368,7 @@ extern suninfo_t s_sun;
 typedef struct {
 	byte	cmds[MAX_RENDER_COMMANDS];
 	int		used;
+	void	*owner;
 } renderCommandList_t;
 
 typedef struct {
@@ -2485,7 +2490,12 @@ extern	int		max_polys;
 extern	int		max_polyverts;
 extern	int		max_termarks;
 
-extern	backEndData_t	*backEndData;	// the second one may not be allocated
+#if defined(__PS3__)
+extern __thread backEndData_t *backEndData;
+#else
+extern backEndData_t *backEndData;
+#endif
+extern backEndData_t *backEndDataSmpBuffers[2];
 
 extern	volatile renderCommandList_t	*renderCommandList;
 
