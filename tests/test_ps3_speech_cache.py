@@ -36,6 +36,8 @@ class PS3SpeechCacheTests(unittest.TestCase):
 
     def test_entire_clip_is_decoded_and_deduplicated(self):
         self.assertIn("PS3A_SPEECH_CACHE_MAX_ENTRIES 512", self.audio)
+        self.assertIn("decoder->info.samples", self.audio)
+        self.assertIn("availableBytes < sizeof(short)", self.audio)
         self.assertIn("S_CodecReadStream(decoder,", self.audio)
         self.assertIn("totalFrames += (uint32_t)frames;", self.audio)
         self.assertIn("Q_stricmp(g_speech_entries[i].filename, filename)", self.audio)
