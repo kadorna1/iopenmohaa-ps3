@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "cl_ui.h"
+#include "snd_local_new.h"
 #include "cl_uiradar.h"
 #include "../corepp/tiki.h"
 #include "../qcommon/localization.h"
