@@ -104,6 +104,31 @@ static short g_stream_ring[PS3A_STREAM_COUNT][PS3A_STREAM_RING_FRAMES * 2]
     __attribute__((aligned(128)));
 static bool g_codecs_inited = false;
 
+/* Keep map-load work bounded: only a few streamed assets are opened and
+ * primed, rather than decoding the mission's entire sound directory. */
+#define PS3A_PRECACHE_SLOTS 3
+#define PS3A_PRECACHE_FRAMES 4096
+
+typedef struct {
+    bool active;
+    bool reserved;
+    snd_stream_t *decoder;
+    char filename[MAX_QPATH];
+    int rate, width, chans;
+    unsigned int frames;
+    short pcm[PS3A_PRECACHE_FRAMES * 2];
+} ps3a_precache_t;
+
+typedef struct {
+    snd_stream_t *decoder;
+    int rate, width, chans;
+    unsigned int frames;
+} ps3a_precache_take_t;
+
+static ps3a_precache_t g_precache[PS3A_PRECACHE_SLOTS];
+static cvar_t *s_ps3_precache_streams;
+
+
 static sys_mutex_t  g_lock;
 static bool         g_lockMade   = false;
 static bool         g_inited     = false; /* audio port + thread exist (kept for the whole run) */
@@ -853,6 +878,191 @@ static void ps3a_stream_refill(int slot)
     }
 }
 
+
+/* ---------------------------------------------------------------------------
+   Mission stream precache
+--------------------------------------------------------------------------- */
+
+static int ps3a_precache_limit(void)
+{
+    int limit = s_ps3_precache_streams ? s_ps3_precache_streams->integer : PS3A_PRECACHE_SLOTS;
+    if (limit < 0) limit = 0;
+    if (limit > PS3A_PRECACHE_SLOTS) limit = PS3A_PRECACHE_SLOTS;
+    return limit;
+}
+
+static void ps3a_clear_precache_internal(void)
+{
+    snd_stream_t *closeList[PS3A_PRECACHE_SLOTS];
+    int i;
+
+    memset(closeList, 0, sizeof(closeList));
+    ps3a_lock();
+    for (i = 0; i < PS3A_PRECACHE_SLOTS; i++) {
+        closeList[i] = g_precache[i].decoder;
+        memset(&g_precache[i], 0, sizeof(g_precache[i]));
+    }
+    ps3a_unlock();
+
+    for (i = 0; i < PS3A_PRECACHE_SLOTS; i++) {
+        if (closeList[i]) {
+            S_CodecCloseStream(closeList[i]);
+        }
+    }
+}
+
+static void ps3a_precache_sound_internal(int sfxHandle)
+{
+    sfx_t *sfx;
+    snd_stream_t *decoder = NULL;
+    byte raw[PS3A_PRECACHE_FRAMES * 4];
+    int rate = 0, width = 0, chans = 0;
+    int slot = -1, limit, i, got, frames, frameBytes;
+
+    if (!g_up || sfxHandle <= 0 || sfxHandle >= s_numSfx) {
+        return;
+    }
+
+    sfx = &s_knownSfx[sfxHandle];
+    if (!(sfx->iFlags & (SFX_FLAG_STREAMED | SFX_FLAG_MP3)) || !sfx->name[0]) {
+        return;
+    }
+
+    limit = ps3a_precache_limit();
+    if (!limit) {
+        return;
+    }
+
+    /* Reserve a slot before opening the decoder, but never hold the audio
+     * mutex across filesystem or codec operations. */
+    ps3a_lock();
+    for (i = 0; i < limit; i++) {
+        if ((g_precache[i].active || g_precache[i].reserved)
+            && !Q_stricmp(g_precache[i].filename, sfx->name)) {
+            ps3a_unlock();
+            return;
+        }
+        if (slot < 0 && !g_precache[i].active && !g_precache[i].reserved) {
+            slot = i;
+        }
+    }
+    if (slot >= 0) {
+        g_precache[slot].reserved = true;
+        Q_strncpyz(g_precache[slot].filename, sfx->name, sizeof(g_precache[slot].filename));
+    }
+    ps3a_unlock();
+
+    if (slot < 0) {
+        return; /* The bounded warm cache is full; normal streaming remains available. */
+    }
+
+    decoder = ps3a_stream_open_decoder(sfx->name, &rate, &width, &chans, 0);
+    if (!decoder) {
+        ps3a_lock();
+        memset(&g_precache[slot], 0, sizeof(g_precache[slot]));
+        ps3a_unlock();
+        PS3_BootTracef("PS3AUDIO: precache skipped; decoder open failed file=%s", sfx->name);
+        return;
+    }
+
+    frameBytes = width * chans;
+    got = S_CodecReadStream(decoder, PS3A_PRECACHE_FRAMES * frameBytes, raw);
+    frames = got > 0 ? got / frameBytes : 0;
+    if (frames > PS3A_PRECACHE_FRAMES) frames = PS3A_PRECACHE_FRAMES;
+
+    if (frames <= 0) {
+        S_CodecCloseStream(decoder);
+        ps3a_lock();
+        memset(&g_precache[slot], 0, sizeof(g_precache[slot]));
+        ps3a_unlock();
+        PS3_BootTracef("PS3AUDIO: precache skipped; no decoded frames file=%s", sfx->name);
+        return;
+    }
+
+    ps3a_lock();
+    if (g_precache[slot].reserved
+        && !Q_stricmp(g_precache[slot].filename, sfx->name)) {
+        int n;
+        for (n = 0; n < frames; n++) {
+            int left, right;
+            if (width == 2) {
+                short sample;
+                const int offset = n * frameBytes;
+                memcpy(&sample, raw + offset, sizeof(sample));
+                left = (int)sample;
+                if (chans == 2) {
+                    memcpy(&sample, raw + offset + 2, sizeof(sample));
+                    right = (int)sample;
+                } else {
+                    right = left;
+                }
+            } else {
+                const int offset = n * chans;
+                left = ((int)raw[offset] - 128) << 8;
+                right = chans == 2 ? (((int)raw[offset + 1] - 128) << 8) : left;
+            }
+            g_precache[slot].pcm[n * 2] = (short)left;
+            g_precache[slot].pcm[n * 2 + 1] = (short)right;
+        }
+        g_precache[slot].decoder = decoder;
+        g_precache[slot].rate = rate;
+        g_precache[slot].width = width;
+        g_precache[slot].chans = chans;
+        g_precache[slot].frames = (unsigned int)frames;
+        g_precache[slot].active = true;
+        g_precache[slot].reserved = false;
+        decoder = NULL; /* ownership moved into the cache */
+    } else {
+        memset(&g_precache[slot], 0, sizeof(g_precache[slot]));
+    }
+    ps3a_unlock();
+
+    if (decoder) {
+        S_CodecCloseStream(decoder);
+        return;
+    }
+
+    PS3_BootTracef("PS3AUDIO: mission stream precached file=%s frames=%d rate=%d channels=%d slots=%d",
+                   sfx->name, frames, rate, chans, limit);
+}
+
+static bool ps3a_take_precache(int streamSlot, const char *filename, ps3a_precache_take_t *taken)
+{
+    int i;
+    bool found = false;
+
+    if (!taken || streamSlot < 0 || streamSlot >= PS3A_STREAM_COUNT || !filename) {
+        return false;
+    }
+
+    memset(taken, 0, sizeof(*taken));
+    ps3a_lock();
+    for (i = 0; i < PS3A_PRECACHE_SLOTS; i++) {
+        ps3a_precache_t *entry = &g_precache[i];
+        if (!entry->active || Q_stricmp(entry->filename, filename)) {
+            continue;
+        }
+
+        taken->decoder = entry->decoder;
+        taken->rate = entry->rate;
+        taken->width = entry->width;
+        taken->chans = entry->chans;
+        taken->frames = entry->frames;
+        memcpy(g_stream_ring[streamSlot], entry->pcm,
+               (size_t)entry->frames * 2u * sizeof(short));
+        memset(entry, 0, sizeof(*entry));
+        found = true;
+        break;
+    }
+    ps3a_unlock();
+
+    if (found) {
+        PS3_BootTracef("PS3AUDIO: mission stream precache hit file=%s frames=%u slot=%d",
+                       filename, taken->frames, streamSlot);
+    }
+    return found;
+}
+
 static void ps3a_mix_streams(float *out)
 {
     float master=(s_volume?s_volume->value:0.9f)*PS3A_MIX_HEADROOM;
@@ -901,10 +1111,21 @@ qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
 {
     ps3a_stream_t *s;
     snd_stream_t *d;
+    ps3a_precache_take_t prepared;
+    bool fromPrecache;
     int rate=0,width=0,chans=0;
     if(!g_up || slot<0 || slot>=PS3A_STREAM_COUNT || !filename || !filename[0]) return qfalse;
     ps3a_stream_stop(slot);
-    d=ps3a_stream_open_decoder(filename,&rate,&width,&chans,offsetFrames);
+    memset(&prepared, 0, sizeof(prepared));
+    fromPrecache = ps3a_take_precache(slot, filename, &prepared);
+    if (fromPrecache) {
+        d = prepared.decoder;
+        rate = prepared.rate;
+        width = prepared.width;
+        chans = prepared.chans;
+    } else {
+        d=ps3a_stream_open_decoder(filename,&rate,&width,&chans,offsetFrames);
+    }
     if(!d) { PS3_BootTracef("PS3AUDIO: could not open stream slot=%d file=%s",slot,filename); return qfalse; }
     s=&g_streams[slot];
     ps3a_lock();
@@ -922,8 +1143,14 @@ qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
     s->maxDist=maxDist>=s->minDist?maxDist:12800.0f;
     s->startTime=++g_tick;
     if(origin) VectorCopy(origin,s->origin); else VectorClear(s->origin);
+    s->writeFrame=fromPrecache ? prepared.frames : 0;
     ps3a_unlock();
-    ps3a_stream_refill(slot);
+    if (!fromPrecache) {
+        ps3a_stream_refill(slot);
+    } else {
+        PS3_BootTracef("PS3AUDIO: stream started from mission precache file=%s initial_frames=%u",
+                       filename, prepared.frames);
+    }
     PS3_BootTracef("PS3AUDIO: stream PCM decoder=%s rate=%d width=%d channels=%d input_order=host-native ring=host-native",
                    filename, rate, width, chans);
     ps3a_lock();
@@ -1113,6 +1340,16 @@ extern "C" {
 void PS3_CompatMusicUpdate(void);
 void PS3_CompatAudioInit(void);
 
+void S_PS3AUDIO_PrecacheSound(int sfxHandle)
+{
+    ps3a_precache_sound_internal(sfxHandle);
+}
+
+void S_PS3AUDIO_ClearPrecache()
+{
+    ps3a_clear_precache_internal();
+}
+
 qboolean S_PS3AUDIO_Init()
 {
     FILE *f;
@@ -1126,6 +1363,10 @@ qboolean S_PS3AUDIO_Init()
             PS3_BootTracef("PS3AUDIO: disabled by USRDIR/sound.txt");
             return qfalse;
         }
+    }
+
+    if (!s_ps3_precache_streams) {
+        s_ps3_precache_streams = Cvar_Get("s_ps3_precache_streams", "3", CVAR_ARCHIVE);
     }
 
     if (!g_codecs_inited) {
@@ -1272,6 +1513,7 @@ void S_PS3AUDIO_Shutdown()
     int i;
     /* Keep libaudio alive over map changes, but release every decoded stream. */
     for (i = 0; i < PS3A_STREAM_COUNT; i++) ps3a_stream_stop(i);
+    S_PS3AUDIO_ClearPrecache();
     ps3a_lock();
     for (i = 0; i < PS3A_MAX_VOICES; i++) ps3a_free_voice(&g_voice[i]);
     ps3a_unlock();
