@@ -28,6 +28,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cg_archive.h"
 #include "cg_radar.h"
 #include "../sys/ps3_step.h"
+#include "../qcommon/alias.h"
 
 #ifdef _WIN32
 #    include <windows.h>
@@ -315,6 +316,44 @@ void CG_RegisterSounds(void)
     }
 
     cgi.FS_FreeFileList(fileList);
+
+#if defined(__PS3__)
+    /* Alias parsing stores the real filename but does not register the sound.
+     * Warm streamed dialogue/effects directly from the parsed alias table so
+     * the first script invocation does not need to open a cold decoder. */
+    {
+        AliasList_t *aliasList = cgi.Alias_GetGlobalList ? cgi.Alias_GetGlobalList() : NULL;
+        AliasListNode_t *node;
+        int candidates = 0;
+        int warmed = 0;
+        int alreadyWarm = 0;
+        if (aliasList && cgi.S_PrecacheStream) {
+            for (node = aliasList->data_list; node; node = node->next) {
+                int result;
+                if (!node->streamed || !node->real_name[0]) {
+                    continue;
+                }
+                if (candidates >= 256) {
+                    break;
+                }
+                candidates++;
+                result = cgi.S_PrecacheStream(node->real_name);
+                if (result < 0) {
+                    break; /* Disabled or bounded cache is full. */
+                }
+                if (result == 2) {
+                    warmed++;
+                } else if (result == 1) {
+                    alreadyWarm++;
+                }
+            }
+        }
+        PS3_TRACEF("CG_SOUND streamed aliases candidates=%d warmed=%d already=%d map=%s",
+                   candidates, warmed, alreadyWarm, cgs.mapname);
+        PS3_TRACEMEM("CG_SOUND after streamed alias precache");
+    }
+#endif
+
     PS3_TRACEF("CG_SOUND done map=%s", cgs.mapname);
     PS3_TRACEMEM("CG_SOUND done");
 }
