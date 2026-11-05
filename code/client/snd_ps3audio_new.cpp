@@ -90,6 +90,10 @@ static ps3a_voice_t g_voice[PS3A_MAX_VOICES];
 typedef struct {
     bool active, paused, eof, isLoopFx, seen, local, follow;
     snd_stream_t *decoder;
+    /* Non-NULL only while this stream references a level-cached speech clip. */
+    const short *speechPcm;
+    uint32_t speechFrames;
+    uint32_t speechReadFrame;
     char filename[MAX_QPATH];
     uint64_t writeFrame;
     double pos;
@@ -103,6 +107,43 @@ static ps3a_stream_t g_streams[PS3A_STREAM_COUNT];
 static short g_stream_ring[PS3A_STREAM_COUNT][PS3A_STREAM_RING_FRAMES * 2]
     __attribute__((aligned(128)));
 static bool g_codecs_inited = false;
+
+/* One bounded, level-scoped pool stores complete speech clips as native
+ * signed 16-bit PCM. Entries contain offsets, so shared aliases are deduped. */
+#define PS3A_SPEECH_CACHE_MAX_ENTRIES 512
+#define PS3A_SPEECH_CACHE_DEFAULT_MB 8
+#define PS3A_SPEECH_CACHE_MAX_MB 16
+#define PS3A_SPEECH_DECODE_CHUNK_FRAMES 2048
+
+typedef struct {
+    bool active;
+    bool reserved;
+    char filename[MAX_QPATH];
+    uint32_t offsetBytes;
+    uint32_t frames;
+    int rate;
+    int channels;
+} ps3a_speech_cache_entry_t;
+
+typedef struct {
+    short *pcm;
+    uint32_t capacityBytes;
+    uint32_t usedBytes;
+    int entryCount;
+    char level[MAX_QPATH];
+    bool building;
+} ps3a_speech_cache_t;
+
+typedef struct {
+    const short *pcm;
+    uint32_t frames;
+    int rate;
+    int channels;
+} ps3a_speech_cache_take_t;
+
+static ps3a_speech_cache_entry_t g_speech_entries[PS3A_SPEECH_CACHE_MAX_ENTRIES];
+static ps3a_speech_cache_t g_speech_cache;
+static cvar_t *s_ps3_speech_cache_mb;
 
 static sys_mutex_t  g_lock;
 static bool         g_lockMade   = false;
@@ -744,6 +785,248 @@ static snd_stream_t *ps3a_stream_open_decoder(const char *filename, int *rate, i
     return d;
 }
 
+static void ps3a_speech_cache_clear_internal(void)
+{
+    short *oldPool;
+    int i;
+
+    /* Stop any stream still pointing into the pool before releasing it. */
+    ps3a_lock();
+    for (i = 0; i < PS3A_STREAM_COUNT; i++) {
+        if (g_streams[i].speechPcm) {
+            g_streams[i].active = false;
+            g_streams[i].speechPcm = NULL;
+            g_streams[i].speechFrames = 0;
+            g_streams[i].speechReadFrame = 0;
+            g_streams[i].filename[0] = '\0';
+            g_streams[i].eof = true;
+        }
+    }
+    oldPool = g_speech_cache.pcm;
+    memset(&g_speech_cache, 0, sizeof(g_speech_cache));
+    memset(g_speech_entries, 0, sizeof(g_speech_entries));
+    ps3a_unlock();
+
+    if (oldPool) {
+        free(oldPool);
+    }
+}
+
+static void ps3a_speech_cache_begin_internal(const char *levelName)
+{
+    int limitMb;
+    uint32_t capacity;
+    short *pool;
+
+    ps3a_speech_cache_clear_internal();
+    if (!g_up) {
+        PS3_BootTracef("PS3AUDIO: speech cache disabled; audio driver is down level=%s",
+                       levelName ? levelName : "(unknown)");
+        return;
+    }
+
+    limitMb = s_ps3_speech_cache_mb ? s_ps3_speech_cache_mb->integer
+                                    : PS3A_SPEECH_CACHE_DEFAULT_MB;
+    if (limitMb < 0) limitMb = 0;
+    if (limitMb > PS3A_SPEECH_CACHE_MAX_MB) limitMb = PS3A_SPEECH_CACHE_MAX_MB;
+    if (!limitMb) {
+        PS3_BootTracef("PS3AUDIO: speech cache disabled by cvar level=%s",
+                       levelName ? levelName : "(unknown)");
+        return;
+    }
+
+    capacity = (uint32_t)limitMb * 1024u * 1024u;
+    pool = (short *)malloc(capacity);
+    if (!pool) {
+        PS3_BootTracef("PS3AUDIO: speech cache allocation failed level=%s bytes=%u",
+                       levelName ? levelName : "(unknown)", (unsigned)capacity);
+        return;
+    }
+
+    ps3a_lock();
+    g_speech_cache.pcm = pool;
+    g_speech_cache.capacityBytes = capacity;
+    g_speech_cache.building = true;
+    Q_strncpyz(g_speech_cache.level, levelName ? levelName : "(unknown)",
+               sizeof(g_speech_cache.level));
+    ps3a_unlock();
+
+    PS3_BootTracef("PS3AUDIO: speech cache begin level=%s budget=%dMB",
+                   levelName ? levelName : "(unknown)", limitMb);
+}
+
+static int ps3a_speech_cache_add_internal(const char *filename)
+{
+    snd_stream_t *decoder;
+    byte raw[PS3A_SPEECH_DECODE_CHUNK_FRAMES * 4];
+    int rate = 0, width = 0, channels = 0;
+    int frameBytes, slot = -1, i;
+    uint32_t startOffset, availableBytes, totalFrames = 0, writtenBytes = 0;
+    bool overflow = false;
+    short *pool;
+
+    if (!g_up || !filename || !filename[0]) return -1;
+    if (strlen(filename) >= MAX_QPATH) return 0;
+
+    ps3a_lock();
+    if (!g_speech_cache.building || !g_speech_cache.pcm) {
+        ps3a_unlock();
+        return -1;
+    }
+
+    for (i = 0; i < PS3A_SPEECH_CACHE_MAX_ENTRIES; i++) {
+        if ((g_speech_entries[i].active || g_speech_entries[i].reserved)
+            && !Q_stricmp(g_speech_entries[i].filename, filename)) {
+            ps3a_unlock();
+            return 1;
+        }
+        if (slot < 0 && !g_speech_entries[i].active && !g_speech_entries[i].reserved) {
+            slot = i;
+        }
+    }
+    if (slot < 0) {
+        ps3a_unlock();
+        return -1;
+    }
+
+    startOffset = g_speech_cache.usedBytes;
+    availableBytes = g_speech_cache.capacityBytes - startOffset;
+    pool = g_speech_cache.pcm;
+    g_speech_entries[slot].reserved = true;
+    Q_strncpyz(g_speech_entries[slot].filename, filename,
+               sizeof(g_speech_entries[slot].filename));
+    ps3a_unlock();
+
+    decoder = ps3a_stream_open_decoder(filename, &rate, &width, &channels, 0);
+    if (!decoder) {
+        ps3a_lock();
+        memset(&g_speech_entries[slot], 0, sizeof(g_speech_entries[slot]));
+        ps3a_unlock();
+        return 0;
+    }
+
+    frameBytes = width * channels;
+    while (frameBytes > 0) {
+        int got = S_CodecReadStream(decoder,
+            PS3A_SPEECH_DECODE_CHUNK_FRAMES * frameBytes, raw);
+        int frames, n;
+        uint32_t outFrameBytes = (uint32_t)channels * (uint32_t)sizeof(short);
+        short *dst;
+
+        if (got <= 0) break;
+        frames = got / frameBytes;
+        if (frames <= 0) break;
+        if ((uint64_t)writtenBytes + (uint64_t)frames * outFrameBytes > availableBytes) {
+            overflow = true;
+            break;
+        }
+
+        dst = (short *)((byte *)pool + startOffset + writtenBytes);
+        for (n = 0; n < frames; n++) {
+            int left, right;
+            if (width == 2) {
+                short sample;
+                const int inputOffset = n * frameBytes;
+                memcpy(&sample, raw + inputOffset, sizeof(sample));
+                left = (int)sample;
+                if (channels == 2) {
+                    memcpy(&sample, raw + inputOffset + 2, sizeof(sample));
+                    right = (int)sample;
+                } else {
+                    right = left;
+                }
+            } else {
+                const int inputOffset = n * channels;
+                left = ((int)raw[inputOffset] - 128) << 8;
+                right = channels == 2 ? (((int)raw[inputOffset + 1] - 128) << 8) : left;
+            }
+
+            dst[n * channels] = (short)left;
+            if (channels == 2) dst[n * 2 + 1] = (short)right;
+        }
+
+        totalFrames += (uint32_t)frames;
+        writtenBytes += (uint32_t)frames * outFrameBytes;
+    }
+
+    S_CodecCloseStream(decoder);
+
+    if (overflow || !totalFrames) {
+        ps3a_lock();
+        memset(&g_speech_entries[slot], 0, sizeof(g_speech_entries[slot]));
+        ps3a_unlock();
+        return 0; /* Partial clips are never exposed; normal streaming remains available. */
+    }
+
+    ps3a_lock();
+    if (g_speech_cache.building && g_speech_cache.pcm == pool
+        && g_speech_entries[slot].reserved
+        && !Q_stricmp(g_speech_entries[slot].filename, filename)
+        && g_speech_cache.usedBytes == startOffset) {
+        g_speech_entries[slot].offsetBytes = startOffset;
+        g_speech_entries[slot].frames = totalFrames;
+        g_speech_entries[slot].rate = rate;
+        g_speech_entries[slot].channels = channels;
+        g_speech_entries[slot].active = true;
+        g_speech_entries[slot].reserved = false;
+        g_speech_cache.usedBytes += writtenBytes;
+        g_speech_cache.entryCount++;
+        ps3a_unlock();
+
+        PS3_BootTracef("PS3AUDIO: speech cached level=%s file=%s frames=%u rate=%d ch=%d bytes=%u used=%u/%u",
+                       g_speech_cache.level, filename, (unsigned)totalFrames, rate, channels,
+                       (unsigned)writtenBytes, (unsigned)(startOffset + writtenBytes),
+                       (unsigned)g_speech_cache.capacityBytes);
+        return 2;
+    }
+
+    memset(&g_speech_entries[slot], 0, sizeof(g_speech_entries[slot]));
+    ps3a_unlock();
+    return 0;
+}
+
+static void ps3a_speech_cache_end_internal(void)
+{
+    char level[MAX_QPATH];
+    int entries;
+    uint32_t used, capacity;
+
+    ps3a_lock();
+    g_speech_cache.building = false;
+    Q_strncpyz(level, g_speech_cache.level, sizeof(level));
+    entries = g_speech_cache.entryCount;
+    used = g_speech_cache.usedBytes;
+    capacity = g_speech_cache.capacityBytes;
+    ps3a_unlock();
+
+    PS3_BootTracef("PS3AUDIO: speech cache ready level=%s clips=%d used=%u budget=%u",
+                   level[0] ? level : "(disabled)", entries,
+                   (unsigned)used, (unsigned)capacity);
+}
+
+static bool ps3a_speech_cache_take(const char *filename, ps3a_speech_cache_take_t *taken)
+{
+    int i;
+    bool found = false;
+
+    if (!filename || !filename[0] || !taken) return false;
+    memset(taken, 0, sizeof(*taken));
+
+    ps3a_lock();
+    for (i = 0; i < PS3A_SPEECH_CACHE_MAX_ENTRIES; i++) {
+        const ps3a_speech_cache_entry_t *entry = &g_speech_entries[i];
+        if (!entry->active || Q_stricmp(entry->filename, filename)) continue;
+        taken->pcm = (const short *)((const byte *)g_speech_cache.pcm + entry->offsetBytes);
+        taken->frames = entry->frames;
+        taken->rate = entry->rate;
+        taken->channels = entry->channels;
+        found = true;
+        break;
+    }
+    ps3a_unlock();
+    return found;
+}
+
 static void ps3a_stream_stop(int slot)
 {
     snd_stream_t *d;
@@ -751,6 +1034,9 @@ static void ps3a_stream_stop(int slot)
     ps3a_lock();
     d = g_streams[slot].decoder;
     g_streams[slot].decoder = NULL;
+    g_streams[slot].speechPcm = NULL;
+    g_streams[slot].speechFrames = 0;
+    g_streams[slot].speechReadFrame = 0;
     g_streams[slot].active = false;
     g_streams[slot].paused = false;
     g_streams[slot].eof = true;
@@ -772,19 +1058,63 @@ static void ps3a_stream_refill(int slot)
 
     while (attempts++ < 6) {
         snd_stream_t *d;
-        uint64_t readFrame, available, capacity;
+        const short *speechPcm;
+        uint64_t readFrame, available, capacity, speechReadFrame, speechFrames;
         int width, chans, request, got, frames, i;
         ps3a_lock();
         d = s->decoder;
-        if (!d || s->paused || s->eof) { ps3a_unlock(); return; }
+        speechPcm = s->speechPcm;
+        if ((!d && !speechPcm) || s->paused || s->eof) { ps3a_unlock(); return; }
         readFrame = (uint64_t)s->pos;
         available = s->writeFrame > readFrame ? s->writeFrame - readFrame : 0;
         capacity = PS3A_STREAM_RING_FRAMES - available - 1;
         width = s->width;
         chans = s->chans;
+        speechReadFrame = s->speechReadFrame;
+        speechFrames = s->speechFrames;
         ps3a_unlock();
         if (available >= PS3A_STREAM_RING_FRAMES / 2 || !capacity) return;
         if (capacity > PS3A_STREAM_CHUNK_FRAMES) capacity = PS3A_STREAM_CHUNK_FRAMES;
+
+        if (speechPcm) {
+            if (speechReadFrame >= speechFrames) {
+                bool again;
+                ps3a_lock();
+                if (s->speechPcm != speechPcm || s->eof) {
+                    ps3a_unlock();
+                    return;
+                }
+                s->loopsCompleted++;
+                again = (s->loopCount == 0 || s->loopsCompleted < s->loopCount);
+                if (again) s->speechReadFrame = 0;
+                else s->eof = true;
+                ps3a_unlock();
+                if (!again) return;
+                continue;
+            }
+
+            frames = (int)(speechFrames - speechReadFrame);
+            if ((uint64_t)frames > capacity) frames = (int)capacity;
+            ps3a_lock();
+            if (s->speechPcm != speechPcm || s->eof) {
+                ps3a_unlock();
+                return;
+            }
+            for (i = 0; i < frames; i++) {
+                const uint64_t sourceFrame = speechReadFrame + (uint64_t)i;
+                const uint32_t dstFrame =
+                    (uint32_t)((s->writeFrame + (uint64_t)i) % PS3A_STREAM_RING_FRAMES);
+                const short left = speechPcm[sourceFrame * (uint64_t)chans];
+                const short right = chans == 2 ? speechPcm[sourceFrame * 2u + 1u] : left;
+                g_stream_ring[slot][dstFrame * 2u] = left;
+                g_stream_ring[slot][dstFrame * 2u + 1u] = right;
+            }
+            s->speechReadFrame += (uint32_t)frames;
+            s->writeFrame += (uint64_t)frames;
+            ps3a_unlock();
+            continue;
+        }
+
         request = (int)(capacity * (uint64_t)width * (uint64_t)chans);
         got = S_CodecReadStream(d, request, raw);
         if (got <= 0) {
@@ -900,16 +1230,34 @@ qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
     const vec3_t origin,int entnum,int entchannel,float minDist,float maxDist)
 {
     ps3a_stream_t *s;
-    snd_stream_t *d;
+    snd_stream_t *d = NULL;
+    ps3a_speech_cache_take_t speech;
+    bool fromSpeechCache = false;
     int rate=0,width=0,chans=0;
     if(!g_up || slot<0 || slot>=PS3A_STREAM_COUNT || !filename || !filename[0]) return qfalse;
     ps3a_stream_stop(slot);
-    d=ps3a_stream_open_decoder(filename,&rate,&width,&chans,offsetFrames);
-    if(!d) { PS3_BootTracef("PS3AUDIO: could not open stream slot=%d file=%s",slot,filename); return qfalse; }
+    memset(&speech, 0, sizeof(speech));
+    if (offsetFrames == 0) {
+        fromSpeechCache = ps3a_speech_cache_take(filename, &speech);
+    }
+    if (fromSpeechCache) {
+        rate = speech.rate;
+        width = 2;
+        chans = speech.channels;
+    } else {
+        d=ps3a_stream_open_decoder(filename,&rate,&width,&chans,offsetFrames);
+    }
+    if(!d && !fromSpeechCache) {
+        PS3_BootTracef("PS3AUDIO: could not open stream slot=%d file=%s",slot,filename);
+        return qfalse;
+    }
     s=&g_streams[slot];
     ps3a_lock();
     memset(s,0,sizeof(*s));
     s->decoder=d;
+    s->speechPcm = fromSpeechCache ? speech.pcm : NULL;
+    s->speechFrames = fromSpeechCache ? speech.frames : 0;
+    s->speechReadFrame = 0;
     Q_strncpyz(s->filename,filename,sizeof(s->filename));
     s->rate=rate; s->width=width; s->chans=chans;
     s->loopCount=loopCount;
@@ -924,8 +1272,13 @@ qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
     if(origin) VectorCopy(origin,s->origin); else VectorClear(s->origin);
     ps3a_unlock();
     ps3a_stream_refill(slot);
-    PS3_BootTracef("PS3AUDIO: stream PCM decoder=%s rate=%d width=%d channels=%d input_order=host-native ring=host-native",
-                   filename, rate, width, chans);
+    if (fromSpeechCache) {
+        PS3_BootTracef("PS3AUDIO: speech stream cache hit file=%s frames=%u rate=%d channels=%d",
+                       filename, (unsigned)speech.frames, rate, chans);
+    } else {
+        PS3_BootTracef("PS3AUDIO: stream PCM decoder=%s rate=%d width=%d channels=%d input_order=host-native ring=host-native",
+                       filename, rate, width, chans);
+    }
     ps3a_lock();
     s->active=s->writeFrame>0;
     ps3a_unlock();
@@ -1113,6 +1466,26 @@ extern "C" {
 void PS3_CompatMusicUpdate(void);
 void PS3_CompatAudioInit(void);
 
+void S_PS3AUDIO_BeginSpeechCache(const char *levelName)
+{
+    ps3a_speech_cache_begin_internal(levelName);
+}
+
+int S_PS3AUDIO_PrecacheSpeech(const char *filename)
+{
+    return ps3a_speech_cache_add_internal(filename);
+}
+
+void S_PS3AUDIO_EndSpeechCache(void)
+{
+    ps3a_speech_cache_end_internal();
+}
+
+void S_PS3AUDIO_ClearSpeechCache(void)
+{
+    ps3a_speech_cache_clear_internal();
+}
+
 qboolean S_PS3AUDIO_Init()
 {
     FILE *f;
@@ -1126,6 +1499,10 @@ qboolean S_PS3AUDIO_Init()
             PS3_BootTracef("PS3AUDIO: disabled by USRDIR/sound.txt");
             return qfalse;
         }
+    }
+
+    if (!s_ps3_speech_cache_mb) {
+        s_ps3_speech_cache_mb = Cvar_Get("s_ps3_speech_cache_mb", "8", CVAR_ARCHIVE);
     }
 
     if (!g_codecs_inited) {
@@ -1272,6 +1649,7 @@ void S_PS3AUDIO_Shutdown()
     int i;
     /* Keep libaudio alive over map changes, but release every decoded stream. */
     for (i = 0; i < PS3A_STREAM_COUNT; i++) ps3a_stream_stop(i);
+    S_PS3AUDIO_ClearSpeechCache();
     ps3a_lock();
     for (i = 0; i < PS3A_MAX_VOICES; i++) ps3a_free_voice(&g_voice[i]);
     ps3a_unlock();
@@ -1641,9 +2019,13 @@ void S_PS3AUDIO_Update()
         snd_stream_t *finished = NULL;
         ps3a_stream_refill(i);
         ps3a_lock();
-        if (!g_streams[i].active && g_streams[i].decoder) {
+        if (!g_streams[i].active
+            && (g_streams[i].decoder || g_streams[i].speechPcm)) {
             finished = g_streams[i].decoder;
             g_streams[i].decoder = NULL;
+            g_streams[i].speechPcm = NULL;
+            g_streams[i].speechFrames = 0;
+            g_streams[i].speechReadFrame = 0;
             g_streams[i].filename[0] = '\0';
             g_streams[i].eof = true;
         }
