@@ -2355,7 +2355,16 @@ static	void R_LoadPlanes(gamelump_t* l) {
     if (l->length % sizeof(*in))
         ri.Error(ERR_DROP, "LoadMap: funny lump size in %s", s_worldData.name);
     count = l->length / sizeof(*in);
+#if defined(__PS3__)
+    /*
+     * The PS3 renderer addresses planes using the original BSP plane indices.
+     * No renderer path indexes the unused second half of this array, so avoid
+     * reserving that duplicate space on the memory-constrained console build.
+     */
+    out = ri.Hunk_Alloc(count * sizeof(*out), h_dontcare);
+#else
     out = ri.Hunk_Alloc(count * 2 * sizeof(*out), h_dontcare);
+#endif
 
     s_worldData.planes = out;
     s_worldData.numplanes = count;

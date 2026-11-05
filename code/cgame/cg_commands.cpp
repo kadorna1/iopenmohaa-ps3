@@ -6446,12 +6446,22 @@ void emitterthing_t::ArchiveToMemory(MemArchiver& archiver)
 
 void cg_common_data::ArchiveToMemory(MemArchiver& archiver)
 {
-    /*
-     * This runs for every temp-model slot during a CGame save (the manager
-     * archives MAX_TEMPMODELS entries, including unused slots). Do not put
-     * PS3_TRACEF here: it fsyncs the trace for each line and stalls gameplay.
-     * Add coarse PS3_STEPF timings around the containing archive stages instead.
-     */
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        /*
+         * Keep the entry marker independent of member reads. The previous
+         * marker evaluated 'tiki' while formatting the line, so a bad object
+         * address could fault before the trace identified method entry.
+         */
+        PS3_STEPF("SAVE CG common-data enter this=%p size=%lu",
+            (void *)this, (unsigned long)sizeof(cg_common_data));
+        {
+            dtiki_t *archiveTiki = tiki;
+            PS3_STEPF("SAVE CG common-data tiki field read complete field=%p value=%p",
+                (void *)&tiki, (void *)archiveTiki);
+        }
+    }
+#endif
     archiver.ArchiveInteger(&life);
     archiver.ArchiveTime(&createTime);
     archiver.ArchiveVector(&origin);
@@ -6476,12 +6486,30 @@ void cg_common_data::ArchiveToMemory(MemArchiver& archiver)
     archiver.ArchiveFloat(&bouncefactor);
     archiver.ArchiveInteger(&bouncecount);
     archiver.ArchiveInteger(&maxbouncecount);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) PS3_STEPF("SAVE CG common-data bouncesound begin ptr=%p", (void *)&bouncesound);
+#endif
     archiver.ArchiveString(&bouncesound);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) PS3_STEPF("SAVE CG common-data bouncesound complete bytes=%lu", (unsigned long)archiver.BufferSize());
+#endif
     archiver.ArchiveInteger(&bouncesound_delay);
     archiver.ArchiveInteger(&flags);
     archiver.ArchiveInteger(&flags2);
 
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_STEPF("SAVE CG common-data tiki begin field=%p tiki=%p",
+            (void *)&tiki, (void *)tiki);
+    }
+#endif
     CG_ArchiveTikiPointer(archiver, &tiki);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_STEPF("SAVE CG common-data tiki complete tiki=%p bytes=%lu",
+            (void *)tiki, (unsigned long)archiver.BufferSize());
+    }
+#endif
 
     archiver.ArchiveInteger(&swarmfreq);
     archiver.ArchiveFloat(&swarmmaxspeed);
@@ -6500,15 +6528,39 @@ void cg_common_data::ArchiveToMemory(MemArchiver& archiver)
     archiver.ArchiveInteger(&physicsRate);
     archiver.ArchiveFloat(&scale);
     archiver.ArchiveFloat(&scale2);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) PS3_STEPF("SAVE CG common-data swipe_shader begin ptr=%p", (void *)&swipe_shader);
+#endif
     archiver.ArchiveString(&swipe_shader);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) PS3_STEPF("SAVE CG common-data swipe_shader complete bytes=%lu", (unsigned long)archiver.BufferSize());
+    if (archiver.IsWriting()) PS3_STEPF("SAVE CG common-data swipe_tag_start begin ptr=%p", (void *)&swipe_tag_start);
+#endif
     archiver.ArchiveString(&swipe_tag_start);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) PS3_STEPF("SAVE CG common-data swipe_tag_start complete bytes=%lu", (unsigned long)archiver.BufferSize());
+    if (archiver.IsWriting()) PS3_STEPF("SAVE CG common-data swipe_tag_end begin ptr=%p", (void *)&swipe_tag_end);
+#endif
     archiver.ArchiveString(&swipe_tag_end);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) PS3_STEPF("SAVE CG common-data swipe_tag_end complete bytes=%lu", (unsigned long)archiver.BufferSize());
+    if (archiver.IsWriting()) PS3_STEPF("SAVE CG common-data shadername begin ptr=%p", (void *)&shadername);
+#endif
     archiver.ArchiveString(&shadername);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) PS3_STEPF("SAVE CG common-data shadername complete bytes=%lu", (unsigned long)archiver.BufferSize());
+#endif
     archiver.ArchiveFloat(&swipe_life);
     archiver.ArchiveFloat(&friction);
     archiver.ArchiveFloat(&spin_rotation);
     archiver.ArchiveFloat(&decal_orientation);
     archiver.ArchiveFloat(&decal_radius);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_STEPF("SAVE CG common-data complete ptr=%p bytes=%lu",
+            (void *)this, (unsigned long)archiver.BufferSize());
+    }
+#endif
 }
 
 void spawnthing_t::ArchiveToMemory(MemArchiver& archiver)
@@ -6541,7 +6593,8 @@ void spawnthing_t::ArchiveToMemory(MemArchiver& archiver)
     if (archiver.IsWriting()) {
         PS3_STEPF("SAVE CG spawnthing tag-list complete ptr=%p bytes=%lu",
             (void *)this, (unsigned long)archiver.BufferSize());
-        PS3_STEPF("SAVE CG spawnthing common-data begin ptr=%p", (void *)this);
+        PS3_STEPF("SAVE CG spawnthing common-data begin this=%p cgd=%p cgd-size=%lu",
+            (void *)this, (void *)&cgd, (unsigned long)sizeof(cgd));
     }
 #endif
 
