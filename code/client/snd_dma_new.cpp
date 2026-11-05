@@ -291,6 +291,11 @@ void S_BeginRegistration()
 
     Com_Printf("------- Sound Begin Registration -------\n");
 
+#if defined(__PS3__)
+    /* Do not carry unused decoder state from the previous map. */
+    S_PS3AUDIO_ClearPrecache();
+#endif
+
     S_StopAllSounds(true);
 
     s_registrationSequence++;
@@ -412,6 +417,14 @@ sfxHandle_t S_RegisterSound(const char *name, int streamed, qboolean force_load)
             }
         }
     }
+
+#if defined(__PS3__)
+    /* Only warm streamed assets registered as part of this map's loading pass.
+     * Regular WAV samples are already resident after S_LoadSound. */
+    if (s_inRegistration && (sfx->iFlags & (SFX_FLAG_STREAMED | SFX_FLAG_MP3))) {
+        S_PS3AUDIO_PrecacheSound((int)(sfx - s_knownSfx));
+    }
+#endif
 
     return sfx - s_knownSfx;
 }
