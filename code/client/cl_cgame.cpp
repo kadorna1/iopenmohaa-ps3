@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "cl_ui.h"
+#include "snd_local_new.h"
 #include "cl_uiradar.h"
 #include "../corepp/tiki.h"
 #include "../qcommon/localization.h"
@@ -712,6 +713,15 @@ void CL_InitCGameDLL( clientGameImport_t *cgi, clientGameExport_t **cge ) {
 	cgi->S_SetReverb					= S_SetReverb;
 	cgi->S_SetGlobalAmbientVolumeLevel	= S_SetGlobalAmbientVolumeLevel;
 	cgi->S_RegisterSound				= CL_RegisterSound;
+#if defined(__PS3__)
+	cgi->S_BeginSpeechCache				= S_PS3AUDIO_BeginSpeechCache;
+	cgi->S_PrecacheSpeech				= S_PS3AUDIO_PrecacheSpeech;
+	cgi->S_EndSpeechCache				= S_PS3AUDIO_EndSpeechCache;
+#else
+	cgi->S_BeginSpeechCache				= NULL;
+	cgi->S_PrecacheSpeech				= NULL;
+	cgi->S_EndSpeechCache				= NULL;
+#endif
 	cgi->S_GetSoundTime					= S_GetSoundTime;
 	cgi->S_ChannelNameToNum				= S_ChannelNameToNum;
 	cgi->S_ChannelNumToName				= S_ChannelNumToName;
