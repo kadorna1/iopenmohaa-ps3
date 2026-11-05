@@ -227,6 +227,7 @@ void          S_PS3AUDIO_Respatialize(int, const vec3_t, const vec3_t[3]);
 void          S_PS3AUDIO_SetReverb(int, float);
 void          S_PS3AUDIO_Update();
 void          S_PS3AUDIO_PrecacheSound(int sfxHandle);
+int           S_PS3AUDIO_PrecacheFile(const char *filename);
 void          S_PS3AUDIO_ClearPrecache();
 /* PS3 decoded stream channels: background music, triggered music, movie audio,
  * and streamed dialogue/effects. Offsets are decoded sample frames. */
