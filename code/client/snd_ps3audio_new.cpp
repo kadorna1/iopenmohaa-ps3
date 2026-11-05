@@ -141,7 +141,7 @@ static vec3_t g_laxis[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
 #ifdef OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO
 static spukit_worker *g_spu_mix_worker;
 static uint8_t *g_spu_mix_stage;
-static ps3a_spu_voice_t g_spu_mix_voices[PS3A_MAX_VOICES] __attribute__((aligned(128)));
+static ps3a_spu_voice_t g_spu_mix_voices[PS3A_SPU_MAX_VOICES] __attribute__((aligned(128)));
 static int g_spu_mix_warned;
 #endif
 
@@ -596,12 +596,86 @@ static bool ps3a_mix_block_spu(float *out)
         dst->active = 1u;
     }
 
+    /* Include decoded stream PCM in the SPU job. The stream ring is a native-
+     * endian short array on PPU; normalize it to little-endian PCM while staging. */
+    for (uint32_t i = 0; i < PS3A_STREAM_COUNT; i++) {
+        ps3a_stream_t *stream = &g_streams[i];
+        ps3a_spu_voice_t *dst = &g_spu_mix_voices[PS3A_MAX_VOICES + i];
+        if (!stream->active || stream->paused) continue;
+        if (stream->pos < 0.0 || stream->step <= 0.0f || stream->step > 4.0f)
+            goto ppu_fallback;
+
+        const uint64_t start_frame = (uint64_t)stream->pos;
+        const uint32_t frac_q16 = (uint32_t)((stream->pos - (double)start_frame) * 65536.0);
+        const uint64_t step_q16 = (uint64_t)((double)stream->step * 65536.0 + 0.5);
+        if (!step_q16 || stream->writeFrame <= start_frame) {
+            if (stream->eof) {
+                stream->active = false;
+                continue;
+            }
+            goto ppu_fallback;
+        }
+
+        uint64_t required64 = (((uint64_t)frac_q16 +
+            (uint64_t)(PS3A_BLOCK - 1) * step_q16) >> 16) + 2u;
+        uint64_t available64 = stream->writeFrame - start_frame;
+        if (required64 > available64) {
+            if (!stream->eof) goto ppu_fallback;
+            required64 = available64;
+        }
+        if (!required64) {
+            stream->active = false;
+            continue;
+        }
+        if (required64 > PS3A_SPU_STAGE_PER_VOICE / 4u)
+            goto ppu_fallback;
+
+        const uint32_t frames = (uint32_t)required64;
+        const uint32_t base = (PS3A_MAX_VOICES + i) * PS3A_SPU_STAGE_PER_VOICE;
+        for (uint32_t f = 0; f < frames; f++) {
+            const uint32_t ring_frame = (uint32_t)((start_frame + f) % PS3A_STREAM_RING_FRAMES);
+            const short left = g_stream_ring[i][ring_frame * 2u];
+            const short right = g_stream_ring[i][ring_frame * 2u + 1u];
+            ps3a_store_s16_le(g_spu_mix_stage + base + f * 4u, left);
+            ps3a_store_s16_le(g_spu_mix_stage + base + f * 4u + 2u, right);
+        }
+
+        ps3a_voice_t positional;
+        float target_l, target_r;
+        memset(&positional, 0, sizeof(positional));
+        positional.local = stream->local;
+        positional.volume = stream->volume;
+        positional.minDist = stream->minDist;
+        positional.maxDist = stream->maxDist;
+        VectorCopy(stream->origin, positional.origin);
+        ps3a_target_gains(&positional,
+            (s_volume ? s_volume->value : 0.9f) * PS3A_MIX_HEADROOM,
+            &target_l, &target_r);
+
+        dst->first_off = base;
+        dst->second_off = base;
+        dst->first_start = 0;
+        dst->first_frames = frames;
+        dst->second_frames = 0;
+        dst->frames = frames;
+        dst->pos_q16 = frac_q16;
+        dst->step_q16 = step_q16;
+        dst->gain_l = target_l;
+        dst->gain_r = target_r;
+        dst->target_l = target_l;
+        dst->target_r = target_r;
+        dst->width = 2u;
+        dst->chans = 2u;
+        dst->loop = 0u;
+        dst->active = 1u;
+    }
+
     {
         ps3a_spu_mix_job_t job;
         job.voices_ea = (uint64_t)(uintptr_t)g_spu_mix_voices;
         job.stage_ea = (uint64_t)(uintptr_t)g_spu_mix_stage;
         job.output_ea = (uint64_t)(uintptr_t)out;
-        job.voice_count = PS3A_MAX_VOICES;
+        job.voice_count = PS3A_SPU_MAX_VOICES;
         job.output_frames = PS3A_BLOCK;
         uint32_t seq = spukit_post(g_spu_mix_worker, PS3A_SPU_JOB_MIX, &job, sizeof(job));
         const spukit_result *res = spukit_wait(g_spu_mix_worker, seq);
@@ -620,6 +694,15 @@ static bool ps3a_mix_block_spu(float *out)
             src->gR = dst->target_r;
             src->gainsValid = true;
         }
+    }
+    for (uint32_t i = 0; i < PS3A_STREAM_COUNT; i++) {
+        ps3a_stream_t *stream = &g_streams[i];
+        ps3a_spu_voice_t *dst = &g_spu_mix_voices[PS3A_MAX_VOICES + i];
+        if (!stream->active || stream->paused || !dst->frames) continue;
+        stream->pos = (double)(uint64_t)stream->pos
+                    + (double)dst->pos_q16 / 65536.0;
+        if (!dst->active && stream->eof)
+            stream->active = false;
     }
     ps3a_unlock();
     return true;
@@ -931,15 +1014,16 @@ static void ps3a_mix_block(float *out)
         } else {
             g_mix_blocks_fallback++;
             ps3a_mix_block_ppu(out);
+            ps3a_mix_streams(out);
             g_mix_blocks_total++;
             g_mix_blocks_ppu++;
         }
 #else
         ps3a_mix_block_ppu(out);
+        ps3a_mix_streams(out);
         g_mix_blocks_total++;
         g_mix_blocks_ppu++;
 #endif
-        ps3a_mix_streams(out);
     }
 
     /* Measure the actual float samples written into libaudio's ring. */
@@ -1147,7 +1231,7 @@ qboolean S_PS3AUDIO_Init()
 
 #ifdef OPENMOHAA_PS3_EXPERIMENTAL_SPU_AUDIO
     if (!g_spu_mix_stage) {
-        g_spu_mix_stage = (uint8_t *)memalign(128, PS3A_MAX_VOICES * PS3A_SPU_STAGE_PER_VOICE);
+        g_spu_mix_stage = (uint8_t *)memalign(128, PS3A_SPU_MAX_VOICES * PS3A_SPU_STAGE_PER_VOICE);
     }
     if (g_spu_mix_stage) {
         (void)spukit_init(1);

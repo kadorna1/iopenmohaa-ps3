@@ -21,7 +21,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include "tr_local.h"
 
-backEndData_t	*backEndData;
+#if defined(__PS3__)
+__thread backEndData_t *backEndData;
+#else
+backEndData_t *backEndData;
+#endif
+backEndData_t *backEndDataSmpBuffers[2];
 backEndState_t	backEnd;
 
 
@@ -71,7 +76,7 @@ void GL_Bind( image_t *image ) {
 
 	if ( glState.currenttextures[glState.currenttmu] != texnum ) {
 		if (image) {
-			image->frameUsed = tr.frameCount;
+			image->frameUsed = backEnd.viewParms.frameCount;
 		}
 		glState.currenttextures[glState.currenttmu] = texnum;
 		qglBindTexture (GL_TEXTURE_2D, texnum);
@@ -124,13 +129,13 @@ void GL_BindMultitexture( image_t *image0, GLuint env0, image_t *image1, GLuint 
 
 	if ( glState.currenttextures[1] != texnum1 ) {
 		GL_SelectTexture( 1 );
-		image1->frameUsed = tr.frameCount;
+		image1->frameUsed = backEnd.viewParms.frameCount;
 		glState.currenttextures[1] = texnum1;
 		qglBindTexture( GL_TEXTURE_2D, texnum1 );
 	}
 	if ( glState.currenttextures[0] != texnum0 ) {
 		GL_SelectTexture( 0 );
-		image0->frameUsed = tr.frameCount;
+		image0->frameUsed = backEnd.viewParms.frameCount;
 		glState.currenttextures[0] = texnum0;
 		qglBindTexture( GL_TEXTURE_2D, texnum0 );
 	}
@@ -890,7 +895,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			}
 			else if (shader->needsLSpherical)
 			{
-				if (tr.refdef.rdflags & RDF_HUD)
+				if (backEnd.refdef.rdflags & RDF_HUD)
 				{
 					backEnd.currentSphere = &backEnd.hudSphere;
 					backEnd.hudSphere.TessFunction = 0;
@@ -1579,6 +1584,23 @@ This function will be called synchronously if running without
 smp extensions, or asynchronously by another thread.
 ====================
 */
+/* Render worker: restore its frame's TLS owner before executing the command batch. */
+void RB_RenderThread( void )
+{
+	for ( ;; )
+	{
+		void *data = GLimp_RendererSleep();
+		renderCommandList_t *cmdList;
+		if ( !data )
+			return;
+		cmdList = (renderCommandList_t *)data; /* cmds is the first member */
+		if ( cmdList->owner )
+			backEndData = (backEndData_t *)cmdList->owner;
+		RB_ExecuteRenderCommands( data );
+	}
+}
+
+
 void RB_ExecuteRenderCommands( const void *data ) {
 	int		t1, t2;
 

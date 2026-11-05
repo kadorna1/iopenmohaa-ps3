@@ -1086,7 +1086,12 @@ void GLimp_Init(qboolean fixedFunction)
     glConfig.deviceSupportsGamma = qfalse;
     glConfig.maxTextureSize     = 2048;
     glConfig.numTextureUnits    = PS3GL_MAX_TMUS;
-    glConfig.textureCompression = TC_NONE;
+    {
+        cvar_t *allowExtensions = ri.Cvar_Get("r_allowExtensions", "1", CVAR_ARCHIVE | CVAR_LATCH);
+        cvar_t *compressedTextures = ri.Cvar_Get("r_ext_compressed_textures", "1", CVAR_ARCHIVE | CVAR_LATCH);
+        glConfig.textureCompression = (allowExtensions->integer && compressedTextures->integer)
+            ? TC_S3TC_ARB : TC_NONE;
+    }
     glConfig.textureEnvAddAvailable = qtrue;
 
     textureFilterAnisotropic = qfalse;
@@ -1097,7 +1102,8 @@ void GLimp_Init(qboolean fixedFunction)
     Q_strncpyz(glConfig.renderer_string, "RSX (ps3gl)", sizeof(glConfig.renderer_string));
     Q_strncpyz(glConfig.version_string, "1.1 ps3gl", sizeof(glConfig.version_string));
     Q_strncpyz(glConfig.extensions_string,
-               "GL_ARB_multitexture GL_EXT_compiled_vertex_array GL_EXT_texture_env_add",
+               "GL_ARB_multitexture GL_EXT_compiled_vertex_array GL_EXT_texture_env_add "
+               "GL_ARB_texture_compression GL_EXT_texture_compression_s3tc",
                sizeof(glConfig.extensions_string));
 
     ri.Cvar_Get("r_availableModes", "", CVAR_ROM);

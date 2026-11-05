@@ -88,6 +88,8 @@ cvar_t	*r_showcluster;
 cvar_t	*r_nocurves;
 
 cvar_t	*r_allowExtensions;
+cvar_t	*r_smp;
+
 
 cvar_t	*r_ext_compressed_textures;
 cvar_t	*r_ext_gamma_control;
@@ -1322,7 +1324,13 @@ void R_Register( void )
 	//
 	r_glDriver = ri.Cvar_Get( "r_glDriver", OPENGL_DRIVER_NAME, CVAR_ARCHIVE | CVAR_LATCH );
 	r_allowExtensions = ri.Cvar_Get( "r_allowExtensions", "1", CVAR_ARCHIVE | CVAR_LATCH );
+#if defined(__PS3__)
+	r_smp = ri.Cvar_Get( "r_smp", "1", CVAR_ARCHIVE | CVAR_LATCH );
+	r_ext_compressed_textures = ri.Cvar_Get( "r_ext_compressed_textures", "1", CVAR_ARCHIVE | CVAR_LATCH );
+#else
+	r_smp = ri.Cvar_Get( "r_smp", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_ext_compressed_textures = ri.Cvar_Get( "r_ext_compressed_textures", "0", CVAR_ARCHIVE | CVAR_LATCH );
+#endif
 	r_ext_gamma_control = ri.Cvar_Get( "r_ext_gamma_control", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_ext_multitexture = ri.Cvar_Get( "r_ext_multitexture", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_ext_compiled_vertex_array = ri.Cvar_Get( "r_ext_compiled_vertex_array", "1", CVAR_ARCHIVE | CVAR_LATCH);
@@ -1727,6 +1735,7 @@ void R_Init( void ) {
 	backEndData->terMarks = (srfMarkFragment_t*)((char*)ptr + sizeof(*backEndData) + sizeof(srfPoly_t) * max_polys + sizeof(polyVert_t) * max_polyverts);
 	backEndData->staticModels = NULL;
 	backEndData->staticModelData = NULL;
+	R_InitCommandBuffers();
 	R_InitNextFrame();
 
 	PS3_RENDER_TRACE("RENDERER: before InitOpenGL");
@@ -1756,6 +1765,19 @@ void R_Init( void ) {
 
 	PS3_RENDER_TRACE("RENDERER: R_Init complete");
 	ri.Printf( PRINT_ALL, "----- finished R_Init -----\n" );
+#if defined(__PS3__)
+	if ( r_smp && r_smp->integer && backEndDataSmpBuffers[1] ) {
+		glConfig.smpActive = GLimp_SpawnRenderThread( RB_RenderThread );
+		if ( !glConfig.smpActive ) {
+			ri.Cvar_Set( "r_smp", "0" );
+			PS3_RENDER_TRACE("RENDERER: SMP worker unavailable; synchronous backend retained");
+		} else {
+			PS3_RENDER_TRACE("RENDERER: SMP enabled with separate front/back frame storage");
+		}
+	}
+#endif
+
+
 }
 
 /*
@@ -1785,6 +1807,7 @@ void RE_Shutdown( qboolean destroyWindow ) {
 
 	// shut down platform specific OpenGL stuff
 	if ( destroyWindow ) {
+		R_ShutdownCommandBuffers();
 		GLimp_Shutdown();
 
 		Com_Memset( &glConfig, 0, sizeof( glConfig ) );
@@ -1878,6 +1901,9 @@ RE_SetRenderTime
 =============
 */
 void RE_SetRenderTime(int t) {
+#if defined(__PS3__)
+	R_SyncRenderThread();
+#endif
 	backEnd.refdef.floatTime = (long double)t / 1000.0;
 	R_UpdateGhostTextures();
 }

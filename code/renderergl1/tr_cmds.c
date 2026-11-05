@@ -22,6 +22,70 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_local.h"
 
 static backEndCounters_t pc_save;
+volatile qboolean renderThreadActive = qfalse;
+
+void R_InitCommandBuffers( void )
+{
+	backEndData_t *second;
+	byte *ptr;
+
+	backEndDataSmpBuffers[0] = backEndData;
+	backEndDataSmpBuffers[1] = NULL;
+	backEndData->commands.owner = backEndData;
+
+#if defined(__PS3__)
+	if ( !r_smp || !r_smp->integer )
+		return;
+
+	ptr = (byte *)ri.Malloc( sizeof(*second)
+		+ sizeof(srfPoly_t) * max_polys
+		+ sizeof(polyVert_t) * max_polyverts
+		+ sizeof(srfMarkFragment_t) * max_termarks );
+	if ( !ptr )
+	{
+		ri.Printf( PRINT_WARNING, "[smp] second frame buffer allocation failed; SMP disabled\n" );
+		return;
+	}
+
+	second = (backEndData_t *)ptr;
+	second->polys = (srfPoly_t *)(ptr + sizeof(*second));
+	second->polyVerts = (polyVert_t *)(ptr + sizeof(*second)
+		+ sizeof(srfPoly_t) * max_polys);
+	second->terMarks = (srfMarkFragment_t *)(ptr + sizeof(*second)
+		+ sizeof(srfPoly_t) * max_polys
+		+ sizeof(polyVert_t) * max_polyverts);
+	second->staticModels = NULL;
+	second->staticModelData = NULL;
+	second->commands.used = 0;
+	second->commands.owner = second;
+	backEndDataSmpBuffers[1] = second;
+#endif
+}
+
+void R_SyncRenderThread( void )
+{
+#if defined(__PS3__)
+	if ( glConfig.smpActive && renderThreadActive )
+	{
+		GLimp_FrontEndSleep();
+		renderThreadActive = qfalse;
+	}
+#endif
+}
+
+void R_ShutdownCommandBuffers( void )
+{
+	R_SyncRenderThread();
+#if defined(__PS3__)
+	if ( glConfig.smpActive )
+		GLimp_ShutdownRenderThread();
+#endif
+	glConfig.smpActive = qfalse;
+	renderThreadActive = qfalse;
+	backEndDataSmpBuffers[1] = NULL;
+}
+
+
 
 /*
 =====================
@@ -101,6 +165,13 @@ void R_IssueRenderCommands( qboolean runPerformanceCounters ) {
 
 	cmdList = &backEndData->commands;
 	assert(cmdList);
+	cmdList->owner = backEndData;
+
+	/* Previous backend work is allowed to overlap scene generation; wait only
+	 * when the next command batch is submitted. */
+	if ( glConfig.smpActive )
+		R_SyncRenderThread();
+
 	// add an end-of-list command
 	*(int *)(cmdList->cmds + cmdList->used) = RC_END_OF_LIST;
 
@@ -113,8 +184,12 @@ void R_IssueRenderCommands( qboolean runPerformanceCounters ) {
 
 	// actually start the commands going
 	if ( !r_skipBackEnd->integer ) {
-		// let it start on the new batch
-		RB_ExecuteRenderCommands( cmdList->cmds );
+		if ( glConfig.smpActive ) {
+			renderThreadActive = qtrue;
+			GLimp_WakeRenderer( cmdList->cmds );
+		} else {
+			RB_ExecuteRenderCommands( cmdList->cmds );
+		}
 	}
 }
 
@@ -131,6 +206,7 @@ void R_IssuePendingRenderCommands( void ) {
 		return;
 	}
 	R_IssueRenderCommands( qfalse );
+	R_SyncRenderThread();
 }
 
 /*
@@ -526,9 +602,12 @@ void RE_EndFrame( int *frontEndMsec, int *backEndMsec ) {
 	}
 	tr.frontEndMsec = 0;
 	if ( backEndMsec ) {
-		*backEndMsec = backEnd.pc.msec;
+		/* In SMP mode this frame is still executing on the render worker.
+		 * Report zero rather than racing its backEnd counters. */
+		*backEndMsec = glConfig.smpActive ? 0 : backEnd.pc.msec;
 	}
-	backEnd.pc.msec = 0;
+	if ( !glConfig.smpActive )
+		backEnd.pc.msec = 0;
 }
 
 /*

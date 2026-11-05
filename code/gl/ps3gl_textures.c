@@ -25,17 +25,31 @@ void ps3gl_textures_init(void)
 }
 
 static uint32_t mip_total_size(uint32_t pitch, uint32_t w0, uint32_t h0);
+static uint32_t compressed_mip_total_size(uint32_t pitch, uint32_t w0, uint32_t h0, uint8_t format);
+static uint32_t compressed_mip_level_offset(uint32_t pitch, uint32_t h0, int level, uint8_t format);
+static uint32_t texture_block_bytes(uint8_t format)
+{
+    return format == GCM_TEXTURE_FORMAT_DXT1 ? 8u : 16u;
+}
+
 
 static uint32_t texture_pitch(const ps3gl_texture_t *t)
 {
-    uint32_t row_bytes = (uint32_t)t->width * t->bpp;
+    uint32_t row_bytes;
+    if (t->compressed)
+        row_bytes = (((uint32_t)t->width + 3u) / 4u) * texture_block_bytes(t->gcm_format);
+    else
+        row_bytes = (uint32_t)t->width * t->bpp;
     return (row_bytes + 63u) & ~63u;
 }
 
 /* RSX memory held by textures, for the log (ps3_prof.c) */
 static void tex_free_data(ps3gl_texture_t *t)
 {
-    uint32_t size = mip_total_size(texture_pitch(t), t->width, t->height);
+    uint32_t pitch = texture_pitch(t);
+    uint32_t size = t->compressed
+        ? compressed_mip_total_size(pitch, t->width, t->height, t->gcm_format)
+        : mip_total_size(pitch, t->width, t->height);
 
     ps3gl_tex_bytes = ps3gl_tex_bytes > size ? ps3gl_tex_bytes - size : 0;
     rsxFree(t->data);
@@ -300,6 +314,35 @@ static uint32_t mip_total_size(uint32_t pitch, uint32_t w0, uint32_t h0)
     return mip_level_offset(pitch, h0, mip_num_levels(w0, h0));
 }
 
+static uint32_t compressed_mip_level_offset(uint32_t pitch, uint32_t h0,
+                                            int level, uint8_t format)
+{
+    uint32_t off = 0;
+    for (int i = 0; i < level; i++) {
+        uint32_t h = mip_level_dim(h0, i);
+        uint32_t rows = (h + 3u) / 4u;
+        if (!rows) rows = 1;
+        off += pitch * rows;
+    }
+    (void)format;
+    return off;
+}
+
+static uint32_t compressed_mip_total_size(uint32_t pitch, uint32_t w0,
+                                          uint32_t h0, uint8_t format)
+{
+    uint32_t total = 0;
+    int levels = mip_num_levels(w0, h0);
+    for (int i = 0; i < levels; i++) {
+        uint32_t h = mip_level_dim(h0, i);
+        uint32_t rows = (h + 3u) / 4u;
+        if (!rows) rows = 1;
+        total += pitch * rows;
+    }
+    (void)format;
+    return total;
+}
+
 /* Build gcmTexture descriptor */
 static void build_gcm_texture(ps3gl_texture_t *t)
 {
@@ -354,7 +397,7 @@ void ps3gl_TexImage2D(GLenum target, GLint level, GLint internalformat,
         gl_storage_format(internalformat, &new_bpp, &new_gcm_format);
 
         /* A redefinition may change precision even when dimensions stay fixed. */
-        if (t->data && (t->width != (uint16_t)width || t->height != (uint16_t)height ||
+        if (t->data && (t->compressed || t->width != (uint16_t)width || t->height != (uint16_t)height ||
                         t->bpp != new_bpp || t->gcm_format != new_gcm_format)) {
             tex_free_data(t);
         }
@@ -363,6 +406,7 @@ void ps3gl_TexImage2D(GLenum target, GLint level, GLint internalformat,
         t->height     = (uint16_t)height;
         t->bpp        = new_bpp;
         t->gcm_format = new_gcm_format;
+        t->compressed = 0;
         t->num_levels = 0;
 
         if (!t->data) {
@@ -451,6 +495,143 @@ void ps3gl_TexSubImage2D(GLenum target, GLint level, GLint xoff, GLint yoff,
 }
 
 /* Texture parameters */
+/* Upload native S3TC blocks directly into RSX memory. The RSX samples the
+ * compressed blocks without a PPU-side RGBA expansion. */
+static int compressed_format_to_gcm(GLenum format, uint8_t *gcm_format)
+{
+    switch (format) {
+    case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
+    case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+        *gcm_format = GCM_TEXTURE_FORMAT_DXT1;
+        return 1;
+    case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+        *gcm_format = GCM_TEXTURE_FORMAT_DXT23;
+        return 1;
+    case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+        *gcm_format = GCM_TEXTURE_FORMAT_DXT45;
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+void ps3gl_CompressedTexImage2D(GLenum target, GLint level, GLenum internalformat,
+                                GLsizei width, GLsizei height, GLint border,
+                                GLsizei imageSize, const void *data)
+{
+    PS3GL_FRONT_CHECK();
+    if (target != GL_TEXTURE_2D || level < 0 || border != 0 ||
+        width <= 0 || height <= 0 || width > 4096 || height > 4096 ||
+        imageSize < 0)
+        return;
+
+    ps3gl_texture_t *t = ps3gl.tmu[ps3gl.active_tmu].bound;
+    if (!t) return;
+
+    uint8_t gcm_format;
+    if (!compressed_format_to_gcm(internalformat, &gcm_format)) return;
+
+    if (level == 0) {
+        if (t->data && (!t->compressed || t->width != (uint16_t)width ||
+                        t->height != (uint16_t)height || t->gcm_format != gcm_format))
+            tex_free_data(t);
+
+        t->width = (uint16_t)width;
+        t->height = (uint16_t)height;
+        t->bpp = 0;
+        t->gcm_format = gcm_format;
+        t->compressed = 1;
+        t->num_levels = 0;
+
+        if (!t->data) {
+            uint32_t pitch = texture_pitch(t);
+            uint32_t size = compressed_mip_total_size(pitch, t->width, t->height, t->gcm_format);
+            t->data = (uint8_t *)rsxMemalign(PS3GL_TEXTURE_ALIGN, size);
+            if (!t->data) {
+                if (ps3gl_tex_failed++ < 16)
+                    PS3_BootTracef("ps3gl: DXT texture allocation failed (%dx%d, %u bytes)",
+                                   width, height, (unsigned)size);
+                return;
+            }
+            memset(t->data, 0, size);
+            ps3gl_tex_bytes += size;
+            if (rsxAddressToOffset(t->data, &t->offset) != 0) {
+                tex_free_data(t);
+                return;
+            }
+        }
+    } else if (!t->data || !t->compressed ||
+               level >= mip_num_levels(t->width, t->height) ||
+               width != (GLsizei)mip_level_dim(t->width, level) ||
+               height != (GLsizei)mip_level_dim(t->height, level) ||
+               level > t->num_levels) {
+        return;
+    }
+
+    if (!t->data) return;
+
+    const uint32_t block_bytes = texture_block_bytes(t->gcm_format);
+    const uint32_t blocks_x = ((uint32_t)width + 3u) / 4u;
+    const uint32_t blocks_y = ((uint32_t)height + 3u) / 4u;
+    const uint32_t source_pitch = blocks_x * block_bytes;
+    const uint32_t required = source_pitch * blocks_y;
+    if (!data || (uint32_t)imageSize < required) return;
+
+    const uint32_t pitch = texture_pitch(t);
+    const uint32_t level_off = compressed_mip_level_offset(pitch, t->height, level, t->gcm_format);
+    uint8_t *dst = t->data + level_off;
+    memset(dst, 0, pitch * blocks_y);
+    for (uint32_t row = 0; row < blocks_y; row++)
+        memcpy(dst + row * pitch, (const uint8_t *)data + row * source_pitch, source_pitch);
+
+    if ((uint8_t)(level + 1) > t->num_levels)
+        t->num_levels = (uint8_t)(level + 1);
+    build_gcm_texture(t);
+    t->dirty = 1;
+}
+
+void ps3gl_CompressedTexSubImage2D(GLenum target, GLint level, GLint xoff, GLint yoff,
+                                   GLsizei width, GLsizei height, GLenum format,
+                                   GLsizei imageSize, const void *data)
+{
+    PS3GL_FRONT_CHECK();
+    if (target != GL_TEXTURE_2D || level < 0 || xoff < 0 || yoff < 0 ||
+        width <= 0 || height <= 0 || imageSize < 0 || !data)
+        return;
+
+    ps3gl_texture_t *t = ps3gl.tmu[ps3gl.active_tmu].bound;
+    uint8_t gcm_format;
+    if (!t || !t->data || !t->compressed ||
+        !compressed_format_to_gcm(format, &gcm_format) || gcm_format != t->gcm_format ||
+        level >= t->num_levels)
+        return;
+
+    const uint32_t level_w = mip_level_dim(t->width, level);
+    const uint32_t level_h = mip_level_dim(t->height, level);
+    if ((uint32_t)xoff + (uint32_t)width > level_w ||
+        (uint32_t)yoff + (uint32_t)height > level_h)
+        return;
+    if ((xoff & 3) || (yoff & 3) ||
+        ((width & 3) && (uint32_t)(xoff + width) != level_w) ||
+        ((height & 3) && (uint32_t)(yoff + height) != level_h))
+        return;
+
+    const uint32_t block_bytes = texture_block_bytes(t->gcm_format);
+    const uint32_t blocks_x = ((uint32_t)width + 3u) / 4u;
+    const uint32_t blocks_y = ((uint32_t)height + 3u) / 4u;
+    const uint32_t source_pitch = blocks_x * block_bytes;
+    if ((uint32_t)imageSize < source_pitch * blocks_y) return;
+
+    const uint32_t pitch = texture_pitch(t);
+    uint8_t *dst = t->data + compressed_mip_level_offset(pitch, t->height, level, t->gcm_format)
+                 + ((uint32_t)yoff / 4u) * pitch
+                 + ((uint32_t)xoff / 4u) * block_bytes;
+    for (uint32_t row = 0; row < blocks_y; row++)
+        memcpy(dst + row * pitch, (const uint8_t *)data + row * source_pitch, source_pitch);
+    t->dirty = 1;
+}
+
+
 
 static uint8_t gl_to_gcm_wrap(GLint param)
 {

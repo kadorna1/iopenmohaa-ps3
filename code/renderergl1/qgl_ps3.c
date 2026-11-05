@@ -95,6 +95,8 @@ void QGL_Init(void)
     qglDeleteTextures   = (DeleteTexturesproc *)ps3gl_DeleteTextures;
     qglTexImage2D       = (TexImage2Dproc *)ps3gl_TexImage2D;
     qglTexSubImage2D    = (TexSubImage2Dproc *)ps3gl_TexSubImage2D;
+    qglCompressedTexImage2D = (CompressedTexImage2Dproc *)ps3gl_CompressedTexImage2D;
+    qglCompressedTexSubImage2D = (CompressedTexSubImage2Dproc *)ps3gl_CompressedTexSubImage2D;
     qglTexParameterf    = (TexParameterfproc *)ps3gl_TexParameterf;
     qglTexParameteri    = (TexParameteriproc *)ps3gl_TexParameteri;
     qglTexEnvf          = (TexEnvfproc *)ps3gl_TexEnvf;
