@@ -577,62 +577,136 @@ jobs:
 
       - name: Publish GitHub release v0.2.0.0a
         if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish v0.2.0.0a]')
-        shell: bash
+        uses: actions/github-script@v7
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
+          RELEASE_NOTES: |
+            ## Changes since v0.1.0.0c
 
-          expected_files=(
-            iOpenMOHAA-PS3-OMOHAA020.pkg
-            iOpenMOHAA-PS3-OMOHAA020.gnpdrm.pkg
-            iOpenMOHAA-PS3-OMOHAB020.pkg
-            iOpenMOHAA-PS3-OMOHAB020.gnpdrm.pkg
-            iOpenMOHAA-PS3-OMOHAS020.pkg
-            iOpenMOHAA-PS3-OMOHAS020.gnpdrm.pkg
-          )
+            This release contains the 118 commits added to `main` after v0.1.0.0c, including the following feature work and its follow-up fixes/tests.
 
-          for name in "${expected_files[@]}"; do
-            if [[ ! -s "dist/$name" ]]; then
-              echo "::error::Missing or empty release package: $name"
-              exit 1
-            fi
-          done
+            - **Training dialogue and scripted audio:** restore `sounddone` callbacks for PCM and streamed sound-effect voices, assign stable callback channels, and make script sound-state queries check the active mixer voice/stream. Failed sound starts report a non-playing channel so dialogue scripts do not wait indefinitely.
+            - **Aim-assist controls:** move the physical toggle to edge-triggered R1, show ON/OFF feedback through the normal center-print UI, and remove the separate CGame overlay.
+            - **Renderer SMP and frame-state isolation:** add separate front-end/back-end frame storage, double-buffer scene data, snapshot per-view and frame identifiers, isolate view-dependent backend state, and dispatch command batches to the PS3 render worker. `r_smp` defaults to enabled on PS3; failed worker startup retains the synchronous fallback.
+            - **Texture and material handling:** add native RSX S3TC DXT1, DXT3 and DXT5 uploads, support the GL1 `GL_BLEND` texture-environment mode, and render additive multitexture stages in two depth-coherent passes. Dynamic-light scratch data is separated by frame.
+            - **Omaha Beach profiling and renderer memory:** add FPS/backend timing, direct-XDR versus copied-vertex counters, command/surface-builder, swap and `qglFinish` timings, and game-frame phase timings for events/scripts, actor pre-animation, navigation, bots, entities/AI/physics and post-entity work. The vertex ring is 8 MiB in cacheable IO-mapped main memory (two 4 MiB frame segments), separate from the 4 MiB RSX command buffer. TIKI skeletal skinning caches per-mesh global-to-local bone indices.
+            - **DualShock 3 analog response:** use a radial right-stick deadzone and rescale remaining travel while preserving diagonal direction. The archived `ps3_right_stick_deadzone` setting defaults to 12 and is clamped to 0–64; regression tests cover continuity, monotonicity, polarity, diagonals and saturation.
+            - **Save-archive streaming and safer replacement:** stream PS3 saves through a 64 KiB staging buffer, preserve random-access backpatches with flush/seek, and write to `.ps3tmp` before flushing, closing and renaming a complete save into place. This removes the former large contiguous archive-buffer allocation while preserving archive ordering/version and reader compatibility. Typed-field mismatch logs include byte offset and object classname where available.
+            - **CGame teardown and checkpoint diagnostics:** release retained special-effect command events before resetting the event allocator, and add checkpoint snapshot/emitter-list diagnostics to help investigate remaining state/lifetime faults.
+            - **Build and regression coverage:** expand checks for sound callback routing, R1/center-print behavior, SMP frame isolation, blend/additive material paths, right-stick math, archive behavior, multi-title staging and renderer memory. CI builds and links Allied Assault, Breakthrough and Spearhead and verifies standard plus GNPDRM packages for all three.
 
-          mapfile -t actual_files < <(find dist -maxdepth 1 -type f -name '*.pkg' -printf '%f\n' | sort)
-          if [[ "${#actual_files[@]}" -ne 6 ]]; then
-            echo "::error::Expected exactly six PKG assets; found ${#actual_files[@]}: ${actual_files[*]}"
-            exit 1
-          fi
+            The SPUKit streamed-audio mixer is included as an opt-in experimental build path and is not enabled in the standard release configuration. Renderer SMP is PPU-side worker threading, not SPE renderer offload.
 
-          cat > "$RUNNER_TEMP/v0.2.0.0a-release-notes.md" <<'RELEASE_NOTES'
-          ## Changes since v0.1.0.0c
+            ## Validation
 
-          This release contains the 118 commits added to `main` after v0.1.0.0c, including the following feature work and its follow-up fixes/tests.
+            The release job publishes only after the three-title PS3 build, regression tests, staging checks and six non-empty package outputs have succeeded. Physical-console testing is still required for long-session performance, checkpoint/save/reload behavior and the experimental SPU audio path.
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { owner, repo } = context.repo;
+            const tag = 'v0.2.0.0a';
+            const releaseName = 'iOpenMOHAA PS3 v0.2.0.0a';
+            const packageDir = path.join(process.env.GITHUB_WORKSPACE || process.cwd(), 'dist');
+            const expectedFiles = [
+              'iOpenMOHAA-PS3-OMOHAA020.pkg',
+              'iOpenMOHAA-PS3-OMOHAA020.gnpdrm.pkg',
+              'iOpenMOHAA-PS3-OMOHAB020.pkg',
+              'iOpenMOHAA-PS3-OMOHAB020.gnpdrm.pkg',
+              'iOpenMOHAA-PS3-OMOHAS020.pkg',
+              'iOpenMOHAA-PS3-OMOHAS020.gnpdrm.pkg'
+            ];
 
-          - **Training dialogue and scripted audio:** restore `sounddone` callbacks for PCM and streamed sound-effect voices, assign stable callback channels, and make script sound-state queries check the active mixer voice/stream. Failed sound starts report a non-playing channel so dialogue scripts do not wait indefinitely.
-          - **Aim-assist controls:** move the physical toggle to edge-triggered R1, show ON/OFF feedback through the normal center-print UI, and remove the separate CGame overlay.
-          - **Renderer SMP and frame-state isolation:** add separate front-end/back-end frame storage, double-buffer scene data, snapshot per-view and frame identifiers, isolate view-dependent backend state, and dispatch command batches to the PS3 render worker. `r_smp` defaults to enabled on PS3; failed worker startup retains the synchronous fallback.
-          - **Texture and material handling:** add native RSX S3TC DXT1, DXT3 and DXT5 uploads, support the GL1 `GL_BLEND` texture-environment mode, and render additive multitexture stages in two depth-coherent passes. Dynamic-light scratch data is separated by frame.
-          - **Omaha Beach profiling and renderer memory:** add FPS/backend timing, direct-XDR versus copied-vertex counters, command/surface-builder, swap and `qglFinish` timings, and game-frame phase timings for events/scripts, actor pre-animation, navigation, bots, entities/AI/physics and post-entity work. The vertex ring is 8 MiB in cacheable IO-mapped main memory (two 4 MiB frame segments), separate from the 4 MiB RSX command buffer. TIKI skeletal skinning caches per-mesh global-to-local bone indices.
-          - **DualShock 3 analog response:** use a radial right-stick deadzone and rescale remaining travel while preserving diagonal direction. The archived `ps3_right_stick_deadzone` setting defaults to 12 and is clamped to 0–64; regression tests cover continuity, monotonicity, polarity, diagonals and saturation.
-          - **Save-archive streaming and safer replacement:** stream PS3 saves through a 64 KiB staging buffer, preserve random-access backpatches with flush/seek, and write to `.ps3tmp` before flushing, closing and renaming a complete save into place. This removes the former large contiguous archive-buffer allocation while preserving archive ordering/version and reader compatibility. Typed-field mismatch logs include byte offset and object classname where available.
-          - **CGame teardown and checkpoint diagnostics:** release retained special-effect command events before resetting the event allocator, and add checkpoint snapshot/emitter-list diagnostics to help investigate remaining state/lifetime faults.
-          - **Build and regression coverage:** expand checks for sound callback routing, R1/center-print behavior, SMP frame isolation, blend/additive material paths, right-stick math, archive behavior, multi-title staging and renderer memory. CI builds and links Allied Assault, Breakthrough and Spearhead and verifies standard plus GNPDRM packages for all three.
+            const packageFiles = fs.readdirSync(packageDir)
+              .filter(name => name.endsWith('.pkg'))
+              .sort();
+            const missingFiles = expectedFiles.filter(name => !packageFiles.includes(name));
+            if (packageFiles.length !== expectedFiles.length || missingFiles.length) {
+              throw new Error(
+                'Expected exactly six title PKG/GNPDRM files; found ' +
+                packageFiles.length + ': ' + packageFiles.join(', ') +
+                '. Missing: ' + missingFiles.join(', ')
+              );
+            }
+            for (const name of expectedFiles) {
+              const filePath = path.join(packageDir, name);
+              if (!fs.statSync(filePath).isFile() || fs.statSync(filePath).size === 0) {
+                throw new Error('Missing or empty release package: ' + name);
+              }
+            }
 
-          The SPUKit streamed-audio mixer is included as an opt-in experimental build path and is not enabled in the standard release configuration. Renderer SMP is PPU-side worker threading, not SPE renderer offload.
+            let release;
+            try {
+              const existing = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              release = existing.data;
+              if (!release.draft) {
+                throw new Error('Release ' + tag + ' is already published; refusing to overwrite it.');
+              }
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              const created = await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                target_commitish: context.sha,
+                name: releaseName,
+                body: process.env.RELEASE_NOTES,
+                draft: true,
+                prerelease: false
+              });
+              release = created.data;
+            }
 
-          ## Validation
+            // Make retries deterministic: replace any previously uploaded draft assets.
+            const oldAssets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner, repo, release_id: release.id, per_page: 100
+            });
+            for (const asset of oldAssets) {
+              await github.rest.repos.deleteReleaseAsset({
+                owner, repo, asset_id: asset.id
+              });
+            }
 
-          The release job publishes only after the three-title PS3 build, regression tests, staging checks and six non-empty package outputs have succeeded. Physical-console testing is still required for long-session performance, checkpoint/save/reload behavior and the experimental SPU audio path.
-          RELEASE_NOTES
+            for (const name of expectedFiles) {
+              const filePath = path.join(packageDir, name);
+              const data = fs.readFileSync(filePath);
+              await github.rest.repos.uploadReleaseAsset({
+                owner,
+                repo,
+                release_id: release.id,
+                name,
+                data,
+                headers: {
+                  'content-type': 'application/octet-stream',
+                  'content-length': data.length
+                }
+              });
+              core.info('Uploaded ' + name + ' (' + data.length + ' bytes)');
+            }
 
-          if gh release view v0.2.0.0a >/dev/null 2>&1; then
-            echo "::error::Release v0.2.0.0a already exists; refusing to overwrite it."
-            exit 1
-          fi
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner, repo, release_id: release.id, per_page: 100
+            });
+            const missingAssets = expectedFiles.filter(name => {
+              const expectedSize = fs.statSync(path.join(packageDir, name)).size;
+              return !assets.some(asset => asset.name === name &&
+                asset.state === 'uploaded' && asset.size === expectedSize);
+            });
+            if (assets.length !== expectedFiles.length || missingAssets.length) {
+              throw new Error(
+                'Release asset verification failed. Found ' + assets.length +
+                ' assets; missing/invalid: ' + missingAssets.join(', ')
+              );
+            }
 
-          gh release create v0.2.0.0a dist/*.pkg \
-            --target "$GITHUB_SHA" \
-            --title "iOpenMoHAA PS3 v0.2.0.0a" \
-            --notes-file "$RUNNER_TEMP/v0.2.0.0a-release-notes.md"
+            const published = await github.rest.repos.updateRelease({
+              owner,
+              repo,
+              release_id: release.id,
+              name: releaseName,
+              body: process.env.RELEASE_NOTES,
+              draft: false,
+              prerelease: false
+            });
+            core.notice('Published ' + tag + ' with six verified PS3 packages: ' +
+              published.data.html_url);
