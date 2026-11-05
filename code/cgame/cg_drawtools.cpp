@@ -34,12 +34,8 @@ Adjusted for resolution and screen aspect ratio
 */
 void CG_AdjustFrom640(float *x, float *y, float *w, float *h)
 {
-#if 0
-	// adjust for wide screens
-	if ( cgs.glconfig.vidWidth * 480 > cgs.glconfig.vidHeight * 640 ) {
-		*x += 0.5 * ( cgs.glconfig.vidWidth - ( cgs.glconfig.vidHeight * 640 / 480 ) );
-	}
-#endif
+    // Map the virtual 640x480 canvas to the complete output surface.
+    // Independent axes intentionally avoid a centered 4:3 safe-area inset.
     // scale for screen sizes
     *x *= cgs.screenXScale;
     *y *= cgs.screenYScale;
