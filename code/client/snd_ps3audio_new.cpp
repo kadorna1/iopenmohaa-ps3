@@ -1355,6 +1355,11 @@ extern "C" {
 void PS3_CompatMusicUpdate(void);
 void PS3_CompatAudioInit(void);
 
+int S_PS3AUDIO_PrecacheFile(const char *filename)
+{
+    return ps3a_precache_file_internal(filename);
+}
+
 void S_PS3AUDIO_PrecacheSound(int sfxHandle)
 {
     ps3a_precache_sound_internal(sfxHandle);
