@@ -891,6 +891,10 @@ static int ps3a_speech_cache_add_internal(const char *filename)
 
     startOffset = g_speech_cache.usedBytes;
     availableBytes = g_speech_cache.capacityBytes - startOffset;
+    if (availableBytes < sizeof(short)) {
+        ps3a_unlock();
+        return -1; /* Stop scanning once the bounded pool is full. */
+    }
     pool = g_speech_cache.pcm;
     g_speech_entries[slot].reserved = true;
     Q_strncpyz(g_speech_entries[slot].filename, filename,
@@ -899,6 +903,17 @@ static int ps3a_speech_cache_add_internal(const char *filename)
 
     decoder = ps3a_stream_open_decoder(filename, &rate, &width, &channels, 0);
     if (!decoder) {
+        ps3a_lock();
+        memset(&g_speech_entries[slot], 0, sizeof(g_speech_entries[slot]));
+        ps3a_unlock();
+        return 0;
+    }
+
+    /* All current stream codecs report decoded samples per channel. Reject
+     * clips that cannot fit before spending time decoding their first chunk. */
+    if (decoder->info.samples > 0
+        && (uint64_t)decoder->info.samples * (uint64_t)channels * sizeof(short) > availableBytes) {
+        S_CodecCloseStream(decoder);
         ps3a_lock();
         memset(&g_speech_entries[slot], 0, sizeof(g_speech_entries[slot]));
         ps3a_unlock();
