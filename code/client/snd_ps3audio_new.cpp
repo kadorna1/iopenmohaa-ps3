@@ -1117,7 +1117,8 @@ qboolean S_PS3AUDIO_StartStream(int slot,const char *filename,int loopCount,
     if(!g_up || slot<0 || slot>=PS3A_STREAM_COUNT || !filename || !filename[0]) return qfalse;
     ps3a_stream_stop(slot);
     memset(&prepared, 0, sizeof(prepared));
-    fromPrecache = ps3a_take_precache(slot, filename, &prepared);
+    /* Offset streams (music/movie resume) must retain their requested seek. */
+    fromPrecache = (offsetFrames == 0) && ps3a_take_precache(slot, filename, &prepared);
     if (fromPrecache) {
         d = prepared.decoder;
         rate = prepared.rate;
