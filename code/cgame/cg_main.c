@@ -28,6 +28,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cg_archive.h"
 #include "cg_radar.h"
 #include "../sys/ps3_step.h"
+#include "../qcommon/alias.h"
 
 #ifdef _WIN32
 #    include <windows.h>
@@ -318,6 +319,64 @@ void CG_RegisterSounds(void)
     PS3_TRACEF("CG_SOUND done map=%s", cgs.mapname);
     PS3_TRACEMEM("CG_SOUND done");
 }
+
+#if defined(__PS3__)
+static void CG_BuildLevelSpeechCache(void)
+{
+    AliasList_t *aliasList;
+    AliasListNode_t *node;
+    const int voiceChannel = cgi.S_ChannelNameToNum
+        ? cgi.S_ChannelNameToNum("voice") : -1;
+    const int dialogChannel = cgi.S_ChannelNameToNum
+        ? cgi.S_ChannelNameToNum("dialog") : -1;
+    const int secondaryDialogChannel = cgi.S_ChannelNameToNum
+        ? cgi.S_ChannelNameToNum("dialog_secondary") : -1;
+    int scanned = 0;
+    int cached = 0;
+    int duplicates = 0;
+    int skipped = 0;
+
+    if (!cgi.S_BeginSpeechCache || !cgi.S_PrecacheSpeech || !cgi.S_EndSpeechCache) {
+        PS3_TRACEF("CG_SPEECH cache API unavailable map=%s", cgs.mapname);
+        return;
+    }
+
+    cgi.S_BeginSpeechCache(cgs.mapname);
+    aliasList = cgi.Alias_GetGlobalList ? cgi.Alias_GetGlobalList() : NULL;
+    if (aliasList) {
+        for (node = aliasList->data_list; node; node = node->next) {
+            const qboolean channelIsSpeech =
+                (voiceChannel >= 0 && node->channel == voiceChannel) ||
+                (dialogChannel >= 0 && node->channel == dialogChannel) ||
+                (secondaryDialogChannel >= 0 && node->channel == secondaryDialogChannel);
+            const qboolean subtitleIsSpeech =
+                node->forcesubtitle || (node->subtitle && node->subtitle[0]);
+            int result;
+
+            if (!node->streamed || !node->real_name[0]
+                || (!channelIsSpeech && !subtitleIsSpeech)) {
+                continue;
+            }
+            if (scanned >= 2048) break;
+
+            scanned++;
+            result = cgi.S_PrecacheSpeech(node->real_name);
+            if (result == 2) cached++;
+            else if (result == 1) duplicates++;
+            else {
+                skipped++;
+                /* -1 means the bounded cache is disabled, unavailable or full. */
+                if (result < 0) break;
+            }
+        }
+    }
+    cgi.S_EndSpeechCache();
+
+    PS3_TRACEF("CG_SPEECH cache build map=%s aliases=%d cached=%d duplicate=%d skipped=%d",
+               cgs.mapname, scanned, cached, duplicates, skipped);
+    PS3_TRACEMEM("CG_SPEECH cache ready");
+}
+#endif
 
 /*
 ================
@@ -707,6 +766,11 @@ void CG_GameStateReceived(void)
     CG_PrepRefresh();
     PS3_TRACEF("CG_LOAD after CG_PrepRefresh map=%s", cgs.mapname);
     PS3_TRACEMEM("CG_LOAD after CG_PrepRefresh");
+
+#if defined(__PS3__)
+    /* Decode the current level's voice/dialog aliases before entering gameplay. */
+    CG_BuildLevelSpeechCache();
+#endif
 
     PS3_TRACEF("CG_LOAD before special effects map=%s", cgs.mapname);
     CG_InitializeSpecialEffectsManager();
