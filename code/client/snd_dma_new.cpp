@@ -292,6 +292,10 @@ void S_BeginRegistration()
     Com_Printf("------- Sound Begin Registration -------\n");
 
     S_StopAllSounds(true);
+#if defined(__PS3__)
+    /* All active streams have been stopped; now release the previous level pool. */
+    S_PS3AUDIO_ClearSpeechCache();
+#endif
 
     s_registrationSequence++;
     s_inRegistration                    = true;
