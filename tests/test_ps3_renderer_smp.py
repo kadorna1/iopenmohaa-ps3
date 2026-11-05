@@ -8,10 +8,12 @@ class PS3RendererPerformanceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tr_cmds = (ROOT / "code/renderergl1/tr_cmds.c").read_text()
+        cls.tr_init = (ROOT / "code/renderergl1/tr_init.c").read_text()
         cls.tr_backend = (ROOT / "code/renderergl1/tr_backend.c").read_text()
         cls.tr_shade = (ROOT / "code/renderergl1/tr_shade.c").read_text()
         cls.tr_shade_calc = (ROOT / "code/renderergl1/tr_shade_calc.c").read_text()
         cls.tr_sun_flare = (ROOT / "code/renderergl1/tr_sun_flare.cpp").read_text()
+        cls.ps3_glimp = (ROOT / "code/sys/ps3_glimp.c").read_text()
         cls.ps3gl_draw = (ROOT / "code/gl/ps3gl_draw.c").read_text()
         cls.ps3gl_textures = (ROOT / "code/gl/ps3gl_textures.c").read_text()
         cls.ps3gl_shaders = (ROOT / "code/gl/ps3gl_shaders.c").read_text()
@@ -19,13 +21,19 @@ class PS3RendererPerformanceTests(unittest.TestCase):
         cls.ps3_platform = (ROOT / "code/sys/ps3_platform.h").read_text()
         cls.workflow = (ROOT / ".github/workflows/ps3-build.yml").read_text()
 
-    def test_renderer_stays_synchronous_until_shared_scratch_is_isolated(self):
-        # Terrain tessellation, TIKI bones/morphs, static-model descriptors and
-        # swipe surfaces still use shared transient storage. Do not dispatch
-        # the back end asynchronously until those allocations are per-frame.
-        self.assertIn("RB_ExecuteRenderCommands( cmdList->cmds );", self.tr_cmds)
-        self.assertNotIn("GLimp_SpawnRenderThread", self.tr_cmds)
-        self.assertNotIn("GLimp_WakeRenderer", self.tr_cmds)
+    def test_renderer_smp_dispatch_has_a_synchronous_fallback(self):
+        # SMP is an optional renderer worker. Dispatch only when startup
+        # successfully created it; otherwise execute the same batch inline.
+        dispatch = self.tr_cmds.split("void R_IssueRenderCommands", 1)[1]
+        dispatch = dispatch.split("void R_IssuePendingRenderCommands", 1)[0]
+        self.assertIn("if ( glConfig.smpActive )", dispatch)
+        self.assertIn("GLimp_WakeRenderer( cmdList->cmds );", dispatch)
+        self.assertIn("else {\n\t\t\tRB_ExecuteRenderCommands( cmdList->cmds );", dispatch)
+        self.assertIn("R_SyncRenderThread();", dispatch)
+        self.assertIn("GLimp_SpawnRenderThread( RB_RenderThread )", self.tr_init)
+        self.assertIn("backEndDataSmpBuffers[1]", self.tr_cmds)
+        self.assertIn("GLimp_FrontEndSleep();", self.ps3_glimp)
+        self.assertIn("GLimp_ShutdownRenderThread();", self.tr_cmds)
 
     def test_backend_view_reads_use_the_command_snapshot(self):
         self.assertIn("backEnd.refdef.vieworg", self.tr_shade_calc)
@@ -50,18 +58,22 @@ class PS3RendererPerformanceTests(unittest.TestCase):
 
     def test_vertex_copy_fallback_and_direct_xdr_binding_are_counted(self):
         self.assertIn("ps3gl_stats.direct_draws++", self.ps3gl_draw)
-        self.assertIn("ps3gl_stats.copy_draws++", self.ps3gl_draw)
-        self.assertIn("ps3gl_stats.copy_verts", self.ps3gl_draw)
-        self.assertIn("ps3gl_stats.copy_bytes", self.ps3gl_draw)
+        self.assertIn("ps3gl_stats.copied_draws++", self.ps3gl_draw)
+        self.assertIn("ps3gl_stats.copied_verts", self.ps3gl_draw)
         self.assertIn("PS3_PROF_GLCOPY", self.ps3gl_draw)
+        self.assertIn("stats.copied_draws", self.ps3_prof)
+        self.assertIn("stats.copied_verts", self.ps3_prof)
 
-    def test_renderer_profiler_reports_fps_and_backend_phases(self):
-        self.assertIn('"[fps] avg=%.1f', self.ps3_prof)
+    def test_renderer_profiler_reports_backend_phases(self):
+        self.assertIn('"[ps3perf] n=%u', self.ps3_prof)
         for field in ("PS3_PROF_BACKEND", "PS3_PROF_GLCOPY", "PS3_PROF_SHADE",
                       "PS3_PROF_SURF", "PS3_PROF_ANIM", "PS3_PROF_TCOORDS"):
             self.assertIn(field, self.ps3_prof)
-        self.assertIn("void PS3_ProfReportFrame(void);", self.ps3_platform)
-        self.assertIn("PS3_ProfReportFrame();", self.tr_cmds)
+        self.assertIn("void PS3_ProfBackendBegin(void);", self.ps3_platform)
+        self.assertIn("void PS3_ProfBackendEnd(void);", self.ps3_platform)
+        self.assertIn("PS3_ProfBackendBegin();", self.ps3_glimp)
+        self.assertIn("PS3_ProfBackendEnd();", self.ps3_glimp)
+        self.assertNotIn("PS3_ProfReportFrame", self.ps3_prof)
 
     def test_three_ps3_variants_keep_incremental_ninja_build_trees(self):
         # All three build directories are restored separately; CMake/Ninja

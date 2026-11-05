@@ -185,9 +185,9 @@ void R_IssueRenderCommands( qboolean runPerformanceCounters ) {
 		R_PerformanceCounters();
 	}
 
-	// The PS3 backend remains synchronous until terrain, skeletal, static
-	// model and swipe scratch data have independent frame storage. Measure the
-	// complete backend here so real mission traces identify the limiting phase.
+	// Use the PS3 render worker only after startup has successfully enabled
+	// SMP and allocated its alternate frame buffer. Preserve the synchronous
+	// path as the fallback when SMP is disabled or worker creation fails.
 	if ( !r_skipBackEnd->integer ) {
 		if ( glConfig.smpActive ) {
 			renderThreadActive = qtrue;
