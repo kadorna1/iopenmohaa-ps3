@@ -171,6 +171,21 @@ class PS3RendererMemoryTests(unittest.TestCase):
         self.assertIn("ri.Hunk_Alloc(count * sizeof(*out), h_dontcare)", loader)
         self.assertIn("ri.Hunk_Alloc(count * 2 * sizeof(*out), h_dontcare)", loader)
 
+    def test_checkpoint_common_data_entry_marker_does_not_read_tiki(self):
+        start = self.cg_commands.index("void cg_common_data::ArchiveToMemory")
+        end = self.cg_commands.index("void spawnthing_t::ArchiveToMemory", start)
+        common_data = self.cg_commands[start:end]
+
+        entry = common_data.index("SAVE CG common-data enter this=%p size=%lu")
+        tiki_read = common_data.index("dtiki_t *archiveTiki = tiki;")
+        tiki_log = common_data.index("SAVE CG common-data tiki field read complete")
+
+        self.assertLess(entry, tiki_read)
+        self.assertLess(tiki_read, tiki_log)
+
+        spawnthing = self.cg_commands[end:]
+        self.assertIn("SAVE CG spawnthing common-data begin this=%p cgd=%p", spawnthing)
+
     def test_checkpoint_archive_traces_common_data_strings_and_tiki_dereference(self):
         for marker in (
             "SAVE CG common-data bouncesound begin",
