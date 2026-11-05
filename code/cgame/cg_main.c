@@ -317,7 +317,15 @@ void CG_RegisterSounds(void)
 
     cgi.FS_FreeFileList(fileList);
 
+
+
+    PS3_TRACEF("CG_SOUND done map=%s", cgs.mapname);
+    PS3_TRACEMEM("CG_SOUND done");
+}
+
 #if defined(__PS3__)
+static void CG_PrecacheStreamedAliases(void)
+{
     /* Alias parsing stores the real filename but does not register the sound.
      * Warm streamed dialogue/effects directly from the parsed alias table so
      * the first script invocation does not need to open a cold decoder. */
@@ -352,11 +360,8 @@ void CG_RegisterSounds(void)
                    candidates, warmed, alreadyWarm, cgs.mapname);
         PS3_TRACEMEM("CG_SOUND after streamed alias precache");
     }
-#endif
-
-    PS3_TRACEF("CG_SOUND done map=%s", cgs.mapname);
-    PS3_TRACEMEM("CG_SOUND done");
 }
+#endif
 
 /*
 ================
@@ -746,6 +751,12 @@ void CG_GameStateReceived(void)
     CG_PrepRefresh();
     PS3_TRACEF("CG_LOAD after CG_PrepRefresh map=%s", cgs.mapname);
     PS3_TRACEMEM("CG_LOAD after CG_PrepRefresh");
+
+#if defined(__PS3__)
+    /* CS_SOUNDS have been registered by CG_PrepRefresh; fill only remaining
+     * warm-cache slots from streamed ubersound dialogue/effect aliases. */
+    CG_PrecacheStreamedAliases();
+#endif
 
     PS3_TRACEF("CG_LOAD before special effects map=%s", cgs.mapname);
     CG_InitializeSpecialEffectsManager();
