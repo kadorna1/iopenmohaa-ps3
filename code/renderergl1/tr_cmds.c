@@ -20,6 +20,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 #include "tr_local.h"
+#if defined(__PS3__)
+#include "../sys/ps3_platform.h"
+#endif
 
 static backEndCounters_t pc_save;
 volatile qboolean renderThreadActive = qfalse;
@@ -182,7 +185,9 @@ void R_IssueRenderCommands( qboolean runPerformanceCounters ) {
 		R_PerformanceCounters();
 	}
 
-	// actually start the commands going
+	// The PS3 backend remains synchronous until terrain, skeletal, static
+	// model and swipe scratch data have independent frame storage. Measure the
+	// complete backend here so real mission traces identify the limiting phase.
 	if ( !r_skipBackEnd->integer ) {
 		if ( glConfig.smpActive ) {
 			renderThreadActive = qtrue;

@@ -703,6 +703,7 @@ void ps3gl_TexEnvf(GLenum target, GLenum pname, GLfloat param)
     case GL_REPLACE:        mode = PS3GL_TENV_REPLACE; break;
     case GL_DECAL:          mode = PS3GL_TENV_DECAL; break;
     case GL_ADD:            mode = PS3GL_TENV_ADD; break;
+    case GL_BLEND:          mode = PS3GL_TENV_BLEND; break;
     default:                mode = PS3GL_TENV_MODULATE; break;
     }
     if (ps3gl.tmu[ps3gl.active_tmu].texenv != mode)
