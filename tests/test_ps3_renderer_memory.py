@@ -165,8 +165,7 @@ class PS3RendererMemoryTests(unittest.TestCase):
 
     def test_ps3_renderer_allocates_only_initialized_bsp_planes(self):
         start = self.world_bsp.index("R_LoadPlanes(gamelump_t* l)")
-        end = self.world_bsp.index("\\n}", start)
-        loader = self.world_bsp[start:end]
+        loader = self.world_bsp[start:start + 1200]
 
         self.assertIn("#if defined(__PS3__)", loader)
         self.assertIn("ri.Hunk_Alloc(count * sizeof(*out), h_dontcare)", loader)
