@@ -17,6 +17,10 @@ class PS3RendererMemoryTests(unittest.TestCase):
         cls.texture_header = (ROOT / "code/gl/ps3gl.h").read_text(encoding="utf-8")
         cls.world_bsp = (ROOT / "code/renderergl1/tr_bsp.c").read_text(encoding="utf-8")
         cls.cgame = (ROOT / "code/client/cl_cgame.cpp").read_text(encoding="utf-8")
+        cls.client_screen = (ROOT / "code/client/cl_scrn.cpp").read_text(encoding="utf-8")
+        cls.cg_drawtools = (ROOT / "code/cgame/cg_drawtools.cpp").read_text(encoding="utf-8")
+        cls.cg_main = (ROOT / "code/cgame/cg_main.c").read_text(encoding="utf-8")
+        cls.cg_view = (ROOT / "code/cgame/cg_view.c").read_text(encoding="utf-8")
         cls.ps3_step = (ROOT / "code/sys/ps3_step.h").read_text(encoding="utf-8")
         cls.memory = (ROOT / "code/qcommon/memory.c").read_text(encoding="utf-8")
         cls.workflow = (ROOT / ".github/workflows/ps3-build.yml").read_text(encoding="utf-8")
@@ -77,6 +81,38 @@ class PS3RendererMemoryTests(unittest.TestCase):
         duplicate_copy = self.world_bsp.index("ri.Hunk_Alloc(l->length", fast_path)
         self.assertLess(fast_path, duplicate_copy)
         self.assertIn("s_worldData.lighting = NULL;", self.world_bsp)
+
+    def test_ps3_canvas_and_game_view_default_to_full_screen_at_every_resolution(self):
+        # The 2D canvas maps each virtual axis to the actual output dimensions.
+        client_start = self.client_screen.index("void SCR_AdjustFrom640")
+        client_end = self.client_screen.index("/*", client_start + 10)
+        client_adjust = self.client_screen[client_start:client_end]
+        self.assertIn("cls.glconfig.vidWidth / 640.0", client_adjust)
+        self.assertIn("cls.glconfig.vidHeight / 480.0", client_adjust)
+        self.assertNotIn("vidHeight * 640 / 480", client_adjust)
+
+        cgame_start = self.cg_drawtools.index("void CG_AdjustFrom640")
+        cgame_end = self.cg_drawtools.index("/*", cgame_start + 10)
+        cgame_adjust = self.cg_drawtools[cgame_start:cgame_end]
+        self.assertIn("*x *= cgs.screenXScale;", cgame_adjust)
+        self.assertIn("*y *= cgs.screenYScale;", cgame_adjust)
+        self.assertNotIn("vidHeight * 640 / 480", cgame_adjust)
+        self.assertIn("cgs.screenXScale = cgs.glconfig.vidWidth / 640.0;", self.cg_main)
+        self.assertIn("cgs.screenYScale = cgs.glconfig.vidHeight / 480.0;", self.cg_main)
+
+        # Keep the 3D view at 100% of the output by default on all three PS3 titles.
+        self.assertIn('cgi.Cvar_Get("viewsize", "100", CVAR_ARCHIVE)', self.cg_main)
+        self.assertIn('seta viewsize "100"', self.autoexec)
+        for name, config in self.expansion_autoexecs.items():
+            with self.subTest(expansion=name):
+                self.assertIn('seta viewsize "100"', config)
+
+        view_start = self.cg_view.index("static void CG_CalcVrect")
+        view_end = self.cg_view.index("//==============================================================================", view_start)
+        view_rect = self.cg_view[view_start:view_end]
+        self.assertIn("size = cg_viewsize->integer;", view_rect)
+        self.assertIn("cg.refdef.width = cgs.glconfig.vidWidth * size / 100;", view_rect)
+        self.assertIn("cg.refdef.height = cgs.glconfig.vidHeight * size / 100;", view_rect)
 
     def test_archived_renderer_overrides_are_forced_by_ps3_autoexec(self):
         self.assertIn('seta r_texturebits "16"', self.autoexec)
