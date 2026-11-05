@@ -6122,7 +6122,20 @@ void ClientGameCommandManager::ArchiveToMemory(MemArchiver& archiver)
     int           num;
     int           i;
 
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_TRACEF("SAVE CG local emitter archive begin bytes=%lu capacity=%lu",
+            (unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
+        PS3_TRACEMEM("SAVE CG before local emitter archive");
+    }
+#endif
     m_localemitter.ArchiveToMemory(archiver);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_TRACEF("SAVE CG local emitter archive complete bytes=%lu capacity=%lu",
+            (unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
+    }
+#endif
 
     if (archiver.IsReading()) {
         archiver.ArchiveInteger(&num);
@@ -6134,13 +6147,45 @@ void ClientGameCommandManager::ArchiveToMemory(MemArchiver& archiver)
             m_emitters.AddObjectAt(i + 1, sp);
         }
     } else {
+#if defined(__PS3__)
+        if (archiver.IsWriting()) {
+            PS3_TRACEF("SAVE CG global emitter count begin bytes=%lu capacity=%lu",
+                (unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
+        }
+#endif
         num = m_emitters.NumObjects();
+#if defined(__PS3__)
+        if (archiver.IsWriting()) {
+            PS3_TRACEF("SAVE CG global emitters begin count=%d bytes=%lu capacity=%lu",
+                num, (unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
+        }
+#endif
         archiver.ArchiveInteger(&num);
 
         for (i = 0; i < num; i++) {
             sp = m_emitters[i];
+#if defined(__PS3__)
+            if (archiver.IsWriting()) {
+                PS3_STEPF("SAVE CG global emitter begin index=%d count=%d ptr=%p bytes=%lu capacity=%lu",
+                    i, num, (void *)sp, (unsigned long)archiver.BufferSize(),
+                    (unsigned long)archiver.Capacity());
+            }
+#endif
             sp->ArchiveToMemory(archiver);
+#if defined(__PS3__)
+            if (archiver.IsWriting()) {
+                PS3_STEPF("SAVE CG global emitter complete index=%d count=%d bytes=%lu capacity=%lu",
+                    i, num, (unsigned long)archiver.BufferSize(),
+                    (unsigned long)archiver.Capacity());
+            }
+#endif
         }
+#if defined(__PS3__)
+        if (archiver.IsWriting()) {
+            PS3_TRACEF("SAVE CG global emitters complete count=%d bytes=%lu capacity=%lu",
+                num, (unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
+        }
+#endif
     }
 #if defined(__PS3__)
     if (archiver.IsWriting()) {
@@ -6152,12 +6197,21 @@ void ClientGameCommandManager::ArchiveToMemory(MemArchiver& archiver)
     ArchiveTempModelPointerToMemory(archiver, &m_active_tempmodels.next);
     ArchiveTempModelPointerToMemory(archiver, &m_free_tempmodels);
 
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_TRACEF("SAVE CG tempmodel archive begin count=%d bytes=%lu capacity=%lu",
+            MAX_TEMPMODELS, (unsigned long)archiver.BufferSize(),
+            (unsigned long)archiver.Capacity());
+    }
+#endif
     for (i = 0; i < MAX_TEMPMODELS; i++) {
         m_tempmodels[i].ArchiveToMemory(archiver);
     }
 #if defined(__PS3__)
     if (archiver.IsWriting()) {
-        PS3_TRACEF("SAVE CG tempmodel archive complete count=%d", MAX_TEMPMODELS);
+        PS3_TRACEF("SAVE CG tempmodel archive complete count=%d bytes=%lu capacity=%lu",
+            MAX_TEMPMODELS, (unsigned long)archiver.BufferSize(),
+            (unsigned long)archiver.Capacity());
     }
 #endif
 
@@ -6334,7 +6388,21 @@ void emitterthing_t::ArchiveToMemory(MemArchiver& archiver)
     int num;
     int i;
 
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_STEPF("SAVE CG emitterthing begin ptr=%p bytes=%lu capacity=%lu",
+            (void *)this, (unsigned long)archiver.BufferSize(),
+            (unsigned long)archiver.Capacity());
+        PS3_STEPF("SAVE CG emitterthing entity-tracker begin ptr=%p", (void *)this);
+    }
+#endif
     enttracker_t::ArchiveToMemory(archiver);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_STEPF("SAVE CG emitterthing entity-tracker complete ptr=%p bytes=%lu",
+            (void *)this, (unsigned long)archiver.BufferSize());
+    }
+#endif
 
     if (archiver.IsReading()) {
         emittertime_t et;
@@ -6345,7 +6413,19 @@ void emitterthing_t::ArchiveToMemory(MemArchiver& archiver)
             m_emittertimes.AddObject(et);
         }
     } else {
+#if defined(__PS3__)
+        if (archiver.IsWriting()) {
+            PS3_STEPF("SAVE CG emitterthing count begin ptr=%p", (void *)this);
+        }
+#endif
         num = m_emittertimes.NumObjects();
+#if defined(__PS3__)
+        if (archiver.IsWriting()) {
+            PS3_STEPF("SAVE CG emitterthing count result ptr=%p entries=%d bytes=%lu capacity=%lu",
+                (void *)this, num, (unsigned long)archiver.BufferSize(),
+                (unsigned long)archiver.Capacity());
+        }
+#endif
         archiver.ArchiveInteger(&num);
 
         for (i = 0; i < num; i++) {
@@ -6355,6 +6435,13 @@ void emitterthing_t::ArchiveToMemory(MemArchiver& archiver)
     }
 
     archiver.ArchiveBoolean(&startoff);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_STEPF("SAVE CG emitterthing complete ptr=%p bytes=%lu capacity=%lu",
+            (void *)this, (unsigned long)archiver.BufferSize(),
+            (unsigned long)archiver.Capacity());
+    }
+#endif
 }
 
 void cg_common_data::ArchiveToMemory(MemArchiver& archiver)
@@ -6426,12 +6513,45 @@ void cg_common_data::ArchiveToMemory(MemArchiver& archiver)
 
 void spawnthing_t::ArchiveToMemory(MemArchiver& archiver)
 {
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_STEPF("SAVE CG spawnthing begin ptr=%p bytes=%lu capacity=%lu",
+            (void *)this, (unsigned long)archiver.BufferSize(),
+            (unsigned long)archiver.Capacity());
+    }
+#endif
     emitterthing_t::ArchiveToMemory(archiver);
-
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_STEPF("SAVE CG spawnthing after emittertimes ptr=%p bytes=%lu",
+            (void *)this, (unsigned long)archiver.BufferSize());
+        PS3_STEPF("SAVE CG spawnthing model-list begin ptr=%p", (void *)this);
+    }
+#endif
     CG_ArchiveStringContainer(archiver, &m_modellist);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_STEPF("SAVE CG spawnthing model-list complete ptr=%p bytes=%lu",
+            (void *)this, (unsigned long)archiver.BufferSize());
+        PS3_STEPF("SAVE CG spawnthing tag-list begin ptr=%p", (void *)this);
+    }
+#endif
     CG_ArchiveStringContainer(archiver, &m_taglist);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_STEPF("SAVE CG spawnthing tag-list complete ptr=%p bytes=%lu",
+            (void *)this, (unsigned long)archiver.BufferSize());
+        PS3_STEPF("SAVE CG spawnthing common-data begin ptr=%p", (void *)this);
+    }
+#endif
 
     cgd.ArchiveToMemory(archiver);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_STEPF("SAVE CG spawnthing common-data complete ptr=%p bytes=%lu",
+            (void *)this, (unsigned long)archiver.BufferSize());
+    }
+#endif
 
     archiver.ArchiveInteger(&entnum);
     archiver.ArchiveVector(&origin_offset_base);
@@ -6485,6 +6605,13 @@ void spawnthing_t::ArchiveToMemory(MemArchiver& archiver)
     archiver.ArchiveFloat(&spreadx);
     archiver.ArchiveFloat(&spready);
     archiver.ArchiveBoolean(&use_last_trace_end);
+#if defined(__PS3__)
+    if (archiver.IsWriting()) {
+        PS3_STEPF("SAVE CG spawnthing complete ptr=%p bytes=%lu capacity=%lu",
+            (void *)this, (unsigned long)archiver.BufferSize(),
+            (unsigned long)archiver.Capacity());
+    }
+#endif
 }
 
 void commandtime_t::ArchiveToMemory(MemArchiver& archiver)

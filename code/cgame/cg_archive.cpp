@@ -32,18 +32,31 @@ void CG_ArchiveStuff(MemArchiver& archiver, int svsTime)
 	archiver.SetBaseTime(svsTime);
 #if defined(__PS3__)
 	if (archiver.IsWriting()) {
-		PS3_TRACEF("SAVE CG archive begin");
+		PS3_TRACEF("SAVE CG archive begin bytes=%lu capacity=%lu",
+			(unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
+		PS3_TRACEMEM("SAVE CG archive entry");
 	}
 #endif
 	commandManager.ArchiveToMemory(archiver);
 #if defined(__PS3__)
 	if (archiver.IsWriting()) {
-		PS3_TRACEF("SAVE CG command-manager archive complete");
+		PS3_TRACEF("SAVE CG command-manager archive complete bytes=%lu capacity=%lu",
+			(unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
+		PS3_TRACEMEM("SAVE CG after command manager archive");
+	}
+#endif
+#if defined(__PS3__)
+	if (archiver.IsWriting()) {
+		PS3_TRACEF("SAVE CG VSS globals begin bytes=%lu capacity=%lu",
+			(unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
 	}
 #endif
 	CG_ArchiveVSSGlobals(archiver);
 #if defined(__PS3__)
 	if (archiver.IsWriting()) {
+		PS3_TRACEF("SAVE CG VSS globals complete bytes=%lu capacity=%lu",
+			(unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
+		PS3_TRACEMEM("SAVE CG after VSS globals");
 		PS3_TRACEF("SAVE CG archive complete");
 	}
 #endif
@@ -64,6 +77,11 @@ size_t CG_SaveStateToBuffer(void** out, int svsTime)
 	archiver.SetupForWriting(0x400000);
 #else
 	archiver.SetupForWriting(0x200000);
+#endif
+#if defined(__PS3__)
+	PS3_TRACEF("SAVE CG snapshot buffer initialized bytes=%lu capacity=%lu",
+		(unsigned long)archiver.BufferSize(), (unsigned long)archiver.Capacity());
+	PS3_TRACEMEM("SAVE CG snapshot buffer initialized");
 #endif
 	if (archiver.Failed()) {
 #if defined(__PS3__)
@@ -107,25 +125,49 @@ void CG_ArchiveStringContainer(MemArchiver& archiver, Container<str>* container)
     int num;
     int i;
 
-	if (archiver.IsReading()) {
-		str tmp;
+    if (archiver.IsReading()) {
+        str tmp;
 
-		archiver.ArchiveInteger(&num);
-		container->ClearObjectList();
+        archiver.ArchiveInteger(&num);
+        container->ClearObjectList();
 
-		for (i = 0; i < num; i++) {
-			archiver.ArchiveString(&tmp);
-			container->AddObject(tmp);
-		}
-	} else {
+        for (i = 0; i < num; i++) {
+            archiver.ArchiveString(&tmp);
+            container->AddObject(tmp);
+        }
+    } else {
+#if defined(__PS3__)
+        if (archiver.IsWriting()) {
+            PS3_STEPF("SAVE CG string-container count begin ptr=%p bytes=%lu",
+                (void *)container, (unsigned long)archiver.BufferSize());
+        }
+#endif
         num = container->NumObjects();
+#if defined(__PS3__)
+        if (archiver.IsWriting()) {
+            PS3_STEPF("SAVE CG string-container count result ptr=%p entries=%d bytes=%lu",
+                (void *)container, num, (unsigned long)archiver.BufferSize());
+        }
+#endif
         archiver.ArchiveInteger(&num);
 
         for (i = 0; i < num; i++) {
-			str& tmp = container->ObjectAt(i + 1);
-			archiver.ArchiveString(&tmp);
-		}
-	}
+#if defined(__PS3__)
+            if (archiver.IsWriting() && ((i & 31) == 0 || i == num - 1)) {
+                PS3_STEPF("SAVE CG string-container item begin ptr=%p index=%d count=%d",
+                    (void *)container, i, num);
+            }
+#endif
+            str& tmp = container->ObjectAt(i + 1);
+            archiver.ArchiveString(&tmp);
+        }
+#if defined(__PS3__)
+        if (archiver.IsWriting()) {
+            PS3_STEPF("SAVE CG string-container complete ptr=%p entries=%d bytes=%lu",
+                (void *)container, num, (unsigned long)archiver.BufferSize());
+        }
+#endif
+    }
 }
 
 void CG_ArchiveTikiPointer(MemArchiver& archiver, dtiki_t** pTiki)

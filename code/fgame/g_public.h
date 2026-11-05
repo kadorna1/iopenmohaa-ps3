@@ -267,6 +267,7 @@ typedef struct gameImport_s {
     int (*FS_Tell)(fileHandle_t fileHandle);
     int (*FS_Seek)(fileHandle_t fileHandle, long int offset, int origin);
     void (*FS_Flush)(fileHandle_t fileHandle);
+    qboolean (*FS_RenameHomeData)(const char *from, const char *to, qboolean safe);
     int (*FS_FileNewer)(const char *source, const char *destination);
     void (*FS_CanonicalFilename)(char *fileName);
     char **(*FS_ListFiles)(const char *qpath, const char *extension, qboolean wantSubs, int *numFiles);

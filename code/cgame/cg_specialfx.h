@@ -156,6 +156,7 @@ public:
 
 public:
     specialeffectcommand_t();
+    ~specialeffectcommand_t();
 };
 
 class specialeffect_t : public Class

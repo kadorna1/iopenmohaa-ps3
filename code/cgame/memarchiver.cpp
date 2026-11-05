@@ -95,6 +95,11 @@ size_t MemArchiver::BufferSize() const
     return bufferSize;
 }
 
+size_t MemArchiver::Capacity() const
+{
+    return allocatedSize;
+}
+
 byte *MemArchiver::ConfiscateBuffer()
 {
     byte *confiscatedBuffer;
@@ -299,17 +304,24 @@ void MemArchiver::ArchiveWriteRaw(const void *buffer, size_t size)
             return;
         }
 
+#if defined(__PS3__)
+        PS3_STEPF("SAVE MEMARCH grow begin used=%lu add=%lu oldCapacity=%lu requested=%lu",
+            (unsigned long)this->bufferSize, (unsigned long)size,
+            (unsigned long)this->allocatedSize, (unsigned long)newCapacity);
+#endif
         newBuffer = (byte *)cgi.Malloc((int)newCapacity);
 #if defined(__PS3__)
-        PS3_STEPF("SAVE MEMARCH allocation result=%p used=%lu add=%lu capacity=%lu",
-            (void *)newBuffer, (unsigned long)this->bufferSize,
-            (unsigned long)size, (unsigned long)newCapacity);
+        PS3_STEPF("SAVE MEMARCH grow result=%p used=%lu add=%lu oldCapacity=%lu requested=%lu",
+            (void *)newBuffer, (unsigned long)this->bufferSize, (unsigned long)size,
+            (unsigned long)this->allocatedSize, (unsigned long)newCapacity);
 #endif
         if (!newBuffer) {
             failed = true;
 #if defined(__PS3__)
-            PS3_TRACEF("SAVE MEMARCH allocation failed used=%lu add=%lu capacity=%lu",
-                (unsigned long)this->bufferSize, (unsigned long)size, (unsigned long)newCapacity);
+            PS3_TRACEF("SAVE MEMARCH allocation failed used=%lu add=%lu oldCapacity=%lu requested=%lu",
+                (unsigned long)this->bufferSize, (unsigned long)size,
+                (unsigned long)this->allocatedSize, (unsigned long)newCapacity);
+            PS3_TRACEMEM("SAVE MEMARCH growth allocation failed");
 #else
             cgi.DPrintf("MemArchiver: unable to grow save buffer to %lu bytes\n",
                 (unsigned long)newCapacity);
