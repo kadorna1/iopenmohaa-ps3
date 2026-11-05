@@ -64,7 +64,9 @@ PS3GL_FORCE_RSX_VRING=1
 
 Skeletal skinning also caches each mesh's global-to-local Tiki bone-index mapping for reuse across vertex weights. Meshes outside the established bone-count bound retain the original lookup path.
 
-These changes target measured renderer and game-module hotspots while preserving surface order, shader behavior, water/HUD rendering and command submission. They are not a claim that Omaha Beach performance is solved: frame rate remains under hardware investigation. This profiling pass does not enable SMP or SPU offload.
+These changes target measured renderer and game-module hotspots while preserving surface order, shader behavior, water/HUD rendering and command submission. They are not a claim that Omaha Beach performance is solved: frame rate remains under hardware investigation.
+
+The PS3 renderer now supports a PPU worker-thread backend. Front-end scene construction and back-end drawing use separate, double-buffered frame data; draw commands carry view/frame snapshots so the worker does not read mutable front-end state. `r_smp` defaults to `1` on PS3. If the alternate frame buffer or worker cannot be created, the renderer switches back to the synchronous path. This is PPU renderer concurrency, not renderer work offloaded to an SPE.
 
 The default PS3 renderer configuration uses:
 
@@ -88,11 +90,16 @@ These include:
 - Zone allocator diagnostics, including allocation tags and caller information.
 - Memory-release reporting when allocator tags are freed.
 - Improved renderer image-cache cleanup.
-- PS3 save archives are written without the extra LZ77 compression-output buffer; this avoids holding a second archive-sized allocation during save finalization.
+- PS3 save archives are written without the extra LZ77 compression-output buffer; the reader continues to support older compressed saves.
+- The PS3 game archive writer now streams through a 64 KiB staging buffer instead of growing a multi-megabyte contiguous allocation in the game zone.
+- Archive backpatches retain their random-access semantics: the writer flushes the staging buffer and seeks to update class-pointer counts and object-size fields.
+- New saves are written to a `.ps3tmp` file, flushed and closed, then renamed into place only after successful serialization. An incomplete or failed write does not replace the previous valid save.
+- The archive field ordering, type tags, version and raw PS3 save format remain unchanged; the existing reader remains compatible.
 - Save-archive typed-field mismatch diagnostics report the archive byte offset and current object classname when available. This is diagnostic context only; it does not repair an incompatible or misaligned save.
-- Additional memory diagnostics around CGame initialization and map transitions.
+- CGame checkpoint diagnostics now capture snapshot and emitter-list state. Retained special-effect command events are released before the CGame event allocator is reset, reducing stale event references across teardown/reset boundaries.
+- Additional memory diagnostics cover CGame initialization and map transitions.
 
-**Current save-memory limitation:** the PS3 game archive writer on `main` still builds a growable in-memory buffer, starting at 4 MiB and doubling when it runs out of space. A large manual save can therefore request an 8 MiB replacement allocation and fail when the game zone does not have a sufficiently large free block. A bounded streaming writer is being developed separately and is not yet part of `main`.
+The streaming writer removes the previously identified large contiguous-allocation requirement. Its interaction with automatic checkpoints, failed writes and save restoration still requires extended physical-console verification.
 
 The BSP streaming implementation specifically targets peak PPU memory consumption during level loading.
 
@@ -149,7 +156,7 @@ seta ps3_aim_assist_strength "1.0"
 
 **Controls**
 
-Tap R1 during active gameplay to toggle aim assist. A short notification appears in the upper-left corner for three seconds:
+Tap R1 during active gameplay to toggle aim assist. A short center-print notification appears for three seconds:
 
 - `AIM ASSIST ON`
 - `AIM ASSIST OFF`
@@ -192,6 +199,8 @@ Implemented functionality includes:
 - Soundtrack music playback.
 - Triggered music support.
 - RoQ cinematic companion audio.
+
+An optional SPUKit mixer build can also process decoded streamed PCM alongside regular sound voices. It is experimental, disabled in the standard build, and still requires physical-console testing for timing, stutter and channel behavior.
 
 **MP3 playback**
 
@@ -317,7 +326,8 @@ Implemented CI features include:
 - Separate executable linking for all three titles.
 - Automated expansion-path and package-staging tests.
 - Aim-assist and right-stick radial-response mathematical regression tests.
-- Renderer memory regression tests.
+- Renderer memory and SMP/material-path regression tests.
+- Right-stick radial-response and save/archive regression checks.
 - Shader-cache validation.
 - PKG existence and integrity checks.
 
@@ -386,6 +396,24 @@ iopenmohaa-ps3/
 ├── make_ps3_pkg.sh
 └── CMakeLists.txt
 ```
+
+---
+
+## Changes since v0.1.0.0c
+
+This release candidate consolidates the 118 commits added to `main` after the previous release. The functional updates are grouped below; follow-up commits also add synchronization fixes, regression coverage and CI corrections for these features.
+
+- **Training dialogue and scripted audio:** restore `sounddone` callbacks for PCM and streamed sound-effect voices, assign stable callback channels, and make script sound-state queries check the active mixer voice/stream. Failed sound starts now report a non-playing channel so scripts waiting on dialogue completion can continue.
+- **Aim-assist controls:** move the physical toggle to edge-triggered R1, route ON/OFF feedback through the normal center-print UI, and remove the separate CGame overlay. The behavior and regression checks apply to the three title builds.
+- **Renderer SMP and frame-state isolation:** add separate front-end/back-end frame storage, double-buffer the scene data, snapshot per-view and frame identifiers for backend work, isolate view-dependent shader/sky/flare state, and dispatch command batches to the PS3 render worker. `r_smp` defaults to enabled on PS3; if worker startup is unavailable, rendering falls back to the synchronous backend.
+- **Texture and material handling:** add native RSX uploads for S3TC DXT1, DXT3 and DXT5 textures, support the GL1 `GL_BLEND` texture-environment mode, and render additive multitexture stages in two depth-coherent passes. Dynamic-light scratch data is also separated by frame.
+- **Omaha Beach profiling and renderer memory:** add FPS and backend timing reports, direct-XDR versus copied-vertex counters, command/surface-builder and swap/`qglFinish` timings, and per-stage game-frame timings for events/scripts, actor pre-animation, navigation, bots, entities/AI/physics and post-entity work. The vertex ring is 8 MiB in cacheable IO-mapped main memory (two 4 MiB frame segments), kept separate from the 4 MiB RSX command buffer. TIKI skeletal skinning caches each mesh's global-to-local bone-index mapping.
+- **DualShock 3 analog response:** replace the abrupt per-axis cutoff with a radial right-stick deadzone and rescale the remaining range while preserving diagonal direction. The archived `ps3_right_stick_deadzone` setting defaults to 12 and is clamped to 0–64; host tests cover continuity, monotonicity, polarity, diagonals and saturation.
+- **Save-archive streaming and safer replacement:** stream PS3 saves using a 64 KiB staging buffer, retain random-access archive backpatches with flush/seek, and write to `.ps3tmp` before flushing, closing and renaming a completed save into place. This removes the former large contiguous archive-buffer allocation while preserving archive ordering/version and reader compatibility. Typed-field mismatch logs now include byte offset and object classname where available.
+- **CGame teardown and checkpoint diagnostics:** release retained special-effect command events before resetting the event allocator, and add checkpoint snapshot/emitter-list diagnostics to help isolate remaining state or lifetime faults.
+- **Build and regression coverage:** expand checks for sound callback routing, R1/center-print behavior, SMP frame isolation, blend/additive material paths, right-stick math, archive behavior, multi-title staging and renderer memory. The PS3 build remains incremental across three independent CMake/Ninja trees and produces standard and GNPDRM packages for Allied Assault, Breakthrough and Spearhead.
+
+The SPUKit streamed-audio mixer is included as an **opt-in experimental build path**; it is not enabled in the standard release configuration. The renderer worker is PPU-side SMP, not SPE renderer offload.
 
 ---
 
@@ -494,7 +522,7 @@ Keep the base Allied Assault installation available when running either expansio
 
 GitHub Actions validates compilation, executable linking, automated regression tests, package staging and PKG generation.
 
-The integrated three-title build was validated by GitHub Actions workflow run **#549**.
+The current `main` head was validated by [GitHub Actions run #41950564738](https://github.com/kadorna1/iopenmohaa-ps3/actions/runs/41950564738), which completed successfully after the latest renderer/profiler integration fixes.
 
 However, a successful CI build does not guarantee complete gameplay stability on physical hardware.
 
@@ -502,7 +530,7 @@ The following areas remain under active investigation:
 
 - Overall frame rate and gameplay performance, particularly the renderer backend and the active-entity/AI/physics portion of the game frame. PS3 profiling now reports these separately, but the measured Omaha Beach frame rate remains low.
 - PPU and RSX memory consumption during extended gameplay.
-- Stability during manual saves and automatic checkpoint saves. Large manual saves can currently fail when the game zone cannot allocate the 8 MiB buffer required as the in-memory archive grows.
+- Stability during manual saves, automatic checkpoint writes and save restoration. The 64 KiB streaming writer removes the former 8 MiB contiguous-buffer growth path, but the latest checkpoint/save sequence still needs extended testing on physical hardware.
 - Save/archive restoration errors. Typed-field mismatches now include an archive offset and current object classname when available; this helps identify where a reader and writer diverge but is not itself a serialization fix.
 - Stability when transitioning between levels.
 - Expansion loading and rendering consistency.
