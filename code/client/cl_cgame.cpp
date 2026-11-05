@@ -712,6 +712,11 @@ void CL_InitCGameDLL( clientGameImport_t *cgi, clientGameExport_t **cge ) {
 	cgi->S_SetReverb					= S_SetReverb;
 	cgi->S_SetGlobalAmbientVolumeLevel	= S_SetGlobalAmbientVolumeLevel;
 	cgi->S_RegisterSound				= CL_RegisterSound;
+#if defined(__PS3__)
+	cgi->S_PrecacheStream				= S_PS3AUDIO_PrecacheFile;
+#else
+	cgi->S_PrecacheStream				= NULL;
+#endif
 	cgi->S_GetSoundTime					= S_GetSoundTime;
 	cgi->S_ChannelNameToNum				= S_ChannelNameToNum;
 	cgi->S_ChannelNumToName				= S_ChannelNumToName;
